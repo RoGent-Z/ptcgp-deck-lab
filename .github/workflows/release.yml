@@ -82,6 +82,8 @@ jobs:
               -alias "$ALIAS" -storepass "$STORE_PASS" -keypass "$KEY_PASS" \
               -dname "CN=Pocket Lab, O=RoGent-Z, C=TW"
           fi
+          echo "::add-mask::$STORE_PASS"
+          echo "::add-mask::$KEY_PASS"
           {
             echo "ANDROID_KEYSTORE_PATH=$KS_PATH"
             echo "ANDROID_KEYSTORE_PASS=$STORE_PASS"
