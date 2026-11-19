@@ -5,10 +5,14 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      sync_meta:
+        description: "Run Limitless meta snapshot sync (tools/meta/sync.mjs)"
+        required: false
+        default: "false"
       sync_cards:
         description: "Run CHT card catalog rebuild (tools/cards/sync.mjs)"
         required: false
-        default: "true"
+        default: "false"
   schedule:
     # Every 3 hours at :17 UTC for Limitless meta snapshot
     - cron: "17 */3 * * *"
@@ -47,6 +51,7 @@ jobs:
             pocket-lab-sources-
 
       - name: Sync Limitless tournament meta snapshot
+        if: github.event.schedule == '17 */3 * * *' || (github.event_name == 'workflow_dispatch' && inputs.sync_meta == 'true')
         run: node tools/meta/sync.mjs
 
       - name: Sync CHT card catalog (daily/weekly 02:30-03:00 CST schedule or manual trigger)
