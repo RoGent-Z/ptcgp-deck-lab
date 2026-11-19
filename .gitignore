@@ -15,3 +15,13 @@
 /data/card-sources/raw/
 /reports/*.local.*
 /public/dev/
+
+# Android / Capacitor build artifacts & generated public copy
+*.jks
+*.keystore
+/dist/
+/android/.gradle/
+/android/build/
+/android/local.properties
+/android/app/build/
+/android/app/src/main/assets/public/

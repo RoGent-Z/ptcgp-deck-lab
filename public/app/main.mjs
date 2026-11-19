@@ -370,13 +370,7 @@ async function handleAction(el) {
   }
 
   if (action === 'export-full-backup') {
-    const blob = new Blob([exportFullBackupJson()], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `pocket-lab-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    showNotice('已匯出全部牌組與收藏備份 JSON');
+    await exportJsonFile(`pocket-lab-backup-${new Date().toISOString().slice(0, 10)}.json`, exportFullBackupJson(), '已匯出全部牌組與收藏備份 JSON');
     return;
   }
 
@@ -474,13 +468,11 @@ async function handleAction(el) {
       ...(d.featuredPokemon?.length ? { featuredPokemon: d.featuredPokemon } : {}),
       ...(d.customOrder ? { customOrder: true } : {})
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `${d.name.replace(/[\\/:*?"<>|]/g, '_')}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
-    showNotice('已匯出牌組 JSON');
+    await exportJsonFile(
+      `${d.name.replace(/[\\/:*?"<>|]/g, '_')}.json`,
+      JSON.stringify(payload, null, 2),
+      '已匯出牌組 JSON'
+    );
     return;
   }
 
@@ -952,6 +944,23 @@ document.getElementById('refresh')?.addEventListener('click', async () => {
 });
 
 window.addEventListener('hashchange', () => renderRoute(true));
+
+async function exportJsonFile(filename, jsonText, noticeMessage) {
+  if (typeof window.PocketLabNative?.exportTextFile === 'function') {
+    const ok = window.PocketLabNative.exportTextFile(filename, jsonText, 'application/json');
+    if (ok) {
+      showNotice(noticeMessage);
+      return;
+    }
+  }
+  const blob = new Blob([jsonText], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  showNotice(noticeMessage);
+}
 
 async function boot() {
   bindCardImageFallback(document);

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Pocket Lab</string>
+    <string name="title_activity_main">Pocket Lab</string>
+    <string name="package_name">io.github.rogentz.pocketlab</string>
+    <string name="custom_url_scheme">io.github.rogentz.pocketlab</string>
+</resources>

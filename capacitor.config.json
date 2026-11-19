@@ -1,0 +1,12 @@
+{
+  "appId": "io.github.rogentz.pocketlab",
+  "appName": "Pocket Lab",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#f6f6f4",
+    "allowMixedContent": false
+  }
+}

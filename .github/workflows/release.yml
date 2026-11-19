@@ -1,0 +1,161 @@
+name: Build Android APK & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+    branches:
+      - main
+    paths:
+      - "android/**"
+      - "public/**"
+      - "capacitor.config.json"
+      - "package*.json"
+      - "tools/mobile/**"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run verification tests
+        run: npm test
+
+      - name: Ensure Android SDK 36 platform & build-tools
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          if [ -z "$SDK_ROOT" ] || [ ! -d "$SDK_ROOT" ]; then
+            SDK_ROOT="/usr/local/lib/android/sdk"
+          fi
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Sync web assets to Android project
+        run: |
+          npx cap sync android
+          test -f android/app/src/main/assets/public/index.html
+          test -f android/app/src/main/assets/public/data/cards.json
+          test -f android/app/src/main/assets/public/assets/mark.svg
+          test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+      - name: Prepare Android release signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SECRET_STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+          SECRET_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SECRET_KEY_PASS: ${{ secrets.ANDROID_KEY_PASS }}
+        run: |
+          KS_PATH="$RUNNER_TEMP/pocketlab-release.jks"
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS_PATH"
+            STORE_PASS="$SECRET_STORE_PASS"
+            ALIAS="$SECRET_KEY_ALIAS"
+            KEY_PASS="$SECRET_KEY_PASS"
+          else
+            STORE_PASS="pocketlab-${GITHUB_RUN_ID}"
+            ALIAS="pocketlab"
+            KEY_PASS="$STORE_PASS"
+            keytool -genkeypair -v -keystore "$KS_PATH" -storetype PKCS12 \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias "$ALIAS" -storepass "$STORE_PASS" -keypass "$KEY_PASS" \
+              -dname "CN=Pocket Lab, O=RoGent-Z, C=TW"
+          fi
+          {
+            echo "ANDROID_KEYSTORE_PATH=$KS_PATH"
+            echo "ANDROID_KEYSTORE_PASS=$STORE_PASS"
+            echo "ANDROID_KEY_ALIAS=$ALIAS"
+            echo "ANDROID_KEY_PASS=$KEY_PASS"
+          } >> "$GITHUB_ENV"
+
+      - name: Build signed release APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK signature, bundled web assets & launcher icon
+        run: |
+          RAW_APK="android/app/build/outputs/apk/release/app-release.apk"
+          test -f "$RAW_APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$RAW_APK"
+          unzip -l "$RAW_APK" | grep -q "assets/public/index.html"
+          unzip -l "$RAW_APK" | grep -q "assets/public/data/cards.json"
+          unzip -l "$RAW_APK" | grep -q "res/.*ic_launcher"
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VER="${GITHUB_REF_NAME}"
+          else
+            VER="v0.0.1-${GITHUB_SHA::7}"
+          fi
+          mkdir -p dist
+          OUT_APK="dist/PocketLab-${VER}-android.apk"
+          cp "$RAW_APK" "$OUT_APK"
+          (cd dist && sha256sum "$(basename "$OUT_APK")" > "$(basename "$OUT_APK").sha256")
+          echo "RELEASE_VERSION=$VER" >> "$GITHUB_ENV"
+          echo "RELEASE_APK=$OUT_APK" >> "$GITHUB_ENV"
+          ls -lh dist/
+
+      - name: Upload APK build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pocket-lab-android-apk
+          path: dist/
+
+      - name: Publish GitHub Release for version tags
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import os, textwrap
+          ver = os.environ["RELEASE_VERSION"]
+          notes = textwrap.dedent(f"""\
+          ## Pocket Lab {ver}
+
+          寶可夢卡牌 Pocket 牌組構築、賽事主流原型與實戰對局研究工具（網站線上版 + Android 原生 App 同步發布）。
+
+          ### 線上與安裝方式
+          - **線上網頁版**：https://rogent-z.github.io/ptcgp-deck-lab/
+          - **Android 安裝包**：下載下方 `PocketLab-{ver}-android.apk` 直接安裝（應用圖示同步採用 Pocket Lab 網站瑞士紅白方正精靈球標誌）。
+
+          ### 版本內容摘要
+          - **瑞士紅白灰高對比設計系統**：4,577 張繁體中文卡牌圖鑑（支援簡體搜尋、能量屬性篩選與訓練家細分篩選）、27 系列卡包總覽、全能量與 2D 寶可夢像素圖示、PTCGP 官方預設牌組排序。
+          - **組牌工作台與未持有／缺卡標記**：20 張 / 同名上限 2 張 / 基礎寶可夢校驗，支援「批次管理收藏」與全站組牌／賽事抄牌缺卡紅色角標提示。
+          - **賽事環境對戰研究**：61 場公開賽事（537 個全譯繁體中文主流原型），支援單牌組複製、JSON 匯入／匯出（Android 支援系統分享儲存）。
+          - **會員註冊與本機雙向備份**：支援信箱註冊登入帳號與選配 Supabase 雲端同步，同時保留本機 `IndexedDB` 離線儲存與完整 JSON 備份。
+          """)
+          path = os.path.join(os.environ["RUNNER_TEMP"], "release-notes.md")
+          with open(path, "w", encoding="utf-8") as f:
+              f.write(notes)
+          PY
+
+          if gh release view "${RELEASE_VERSION}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_VERSION}" dist/*.apk dist/*.sha256 --clobber
+            gh release edit "${RELEASE_VERSION}" --title "Pocket Lab ${RELEASE_VERSION}" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "${RELEASE_VERSION}" dist/*.apk dist/*.sha256 \
+              --title "Pocket Lab ${RELEASE_VERSION}" \
+              --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi

@@ -31,10 +31,12 @@ Project_15_宝可梦卡牌对战模拟站/
 
 ## 常用入口
 
+- **线上体验**：`https://rogent-z.github.io/ptcgp-deck-lab/`
+- **Android APK**：可至 GitHub Releases 下载 `PocketLab-v0.0.1-android.apk` 安装使用（基于 Capacitor 打包 `public/`，图标使用 `public/assets/mark.svg` 同款瑞士红白方块精灵球）。
 - **接手与架构文档**：[docs/00_接手指南.md](docs/00_接手指南.md)
 - **前端设计规范**：[docs/03_前端艺术设计规范.md](docs/03_前端艺术设计规范.md)
 - **本地预览**：运行 `node tmp/serve.mjs` 后浏览器打开 `http://127.0.0.1:4157/`（完整 4,577 张繁中卡牌与 61 场赛事环境已可正常交互；若要预览 M3 完成前的 500 格演示点阵可访问 `?fixture=1#battle`）。
-- **测试命令**：`node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs`
+- **测试命令**：`npm test`（或 `node --test tests/*.test.mjs`）
 
 ## 当前状态
 
