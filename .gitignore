@@ -1,0 +1,17 @@
+/tmp/
+/.playwright/
+**/node_modules/
+**/target/
+**/__pycache__/
+*.log
+.env
+.env.*
+*.pyc
+
+
+# Antigravity 2026-11-19 (R3): raw caches and snapshots stay out of git history
+/data/meta/cache-v1/
+/data/meta/snapshots/
+/data/card-sources/raw/
+/reports/*.local.*
+/public/dev/

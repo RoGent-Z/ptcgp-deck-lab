@@ -1,0 +1,265 @@
+{
+  "schemaVersion": 1,
+  "count": 4577,
+  "expectedTotal": 4577,
+  "asOf": "2026-11-19T09:19:13.658250Z",
+  "source": "52Poké 神奇寶貝百科 (CC BY-NC-SA 3.0) + pokemon-tcg-pocket-database (MIT)",
+  "sets": [
+    {
+      "id": "A1",
+      "name": "最強的基因",
+      "nameEn": "Genetic Apex",
+      "expected": 286,
+      "count": 286,
+      "wikiMatched": 286,
+      "missing": []
+    },
+    {
+      "id": "A1a",
+      "name": "幻遊島",
+      "nameEn": "Mythical Island",
+      "expected": 86,
+      "count": 86,
+      "wikiMatched": 86,
+      "missing": []
+    },
+    {
+      "id": "A2",
+      "name": "時空激鬥",
+      "nameEn": "Space-Time Smackdown",
+      "expected": 207,
+      "count": 207,
+      "wikiMatched": 207,
+      "missing": []
+    },
+    {
+      "id": "A2a",
+      "name": "超克之光",
+      "nameEn": "Triumphant Light",
+      "expected": 96,
+      "count": 96,
+      "wikiMatched": 96,
+      "missing": []
+    },
+    {
+      "id": "A2b",
+      "name": "嗨放異彩",
+      "nameEn": "Shining Revelry",
+      "expected": 111,
+      "count": 111,
+      "wikiMatched": 111,
+      "missing": []
+    },
+    {
+      "id": "A3",
+      "name": "雙天之守護者",
+      "nameEn": "Celestial Guardians",
+      "expected": 239,
+      "count": 239,
+      "wikiMatched": 239,
+      "missing": []
+    },
+    {
+      "id": "A3a",
+      "name": "異次元危機",
+      "nameEn": "Extradimensional Crisis",
+      "expected": 103,
+      "count": 103,
+      "wikiMatched": 103,
+      "missing": []
+    },
+    {
+      "id": "A3b",
+      "name": "伊布花園",
+      "nameEn": "Eevee Grove",
+      "expected": 107,
+      "count": 107,
+      "wikiMatched": 107,
+      "missing": []
+    },
+    {
+      "id": "A4",
+      "name": "天與海的指引",
+      "nameEn": "Wisdom of Sea and Sky",
+      "expected": 241,
+      "count": 241,
+      "wikiMatched": 241,
+      "missing": []
+    },
+    {
+      "id": "A4a",
+      "name": "未知水域",
+      "nameEn": "Secluded Springs",
+      "expected": 105,
+      "count": 105,
+      "wikiMatched": 105,
+      "missing": []
+    },
+    {
+      "id": "A4b",
+      "name": "高級擴充包ex",
+      "nameEn": "Deluxe Pack: ex",
+      "expected": 379,
+      "count": 379,
+      "wikiMatched": 379,
+      "missing": []
+    },
+    {
+      "id": "P-A",
+      "name": "A系列特典卡",
+      "nameEn": "Promo-A",
+      "expected": 117,
+      "count": 117,
+      "wikiMatched": 117,
+      "missing": []
+    },
+    {
+      "id": "B1",
+      "name": "超級崛起",
+      "nameEn": "Mega Rising",
+      "expected": 331,
+      "count": 331,
+      "wikiMatched": 331,
+      "missing": []
+    },
+    {
+      "id": "B1a",
+      "name": "紅蓮烈焰",
+      "nameEn": "Crimson Blaze",
+      "expected": 103,
+      "count": 103,
+      "wikiMatched": 103,
+      "missing": []
+    },
+    {
+      "id": "B2",
+      "name": "幻夢遊行",
+      "nameEn": "Fantastical Parade",
+      "expected": 234,
+      "count": 234,
+      "wikiMatched": 234,
+      "missing": []
+    },
+    {
+      "id": "B2a",
+      "name": "帕底亞驚奇",
+      "nameEn": "Paldean Wonders",
+      "expected": 131,
+      "count": 131,
+      "wikiMatched": 131,
+      "missing": []
+    },
+    {
+      "id": "B2b",
+      "name": "超級異彩",
+      "nameEn": "Mega Shine",
+      "expected": 117,
+      "count": 117,
+      "wikiMatched": 117,
+      "missing": []
+    },
+    {
+      "id": "B3",
+      "name": "波導奏動",
+      "nameEn": "Pulsing Aura",
+      "expected": 234,
+      "count": 234,
+      "wikiMatched": 234,
+      "missing": []
+    },
+    {
+      "id": "B3a",
+      "name": "進擊悖謬",
+      "nameEn": "Paradox Drive",
+      "expected": 109,
+      "count": 109,
+      "wikiMatched": 109,
+      "missing": []
+    },
+    {
+      "id": "B3b",
+      "name": "奇蹟日常",
+      "nameEn": "Everyday Wonders",
+      "expected": 106,
+      "count": 106,
+      "wikiMatched": 106,
+      "missing": []
+    },
+    {
+      "id": "B4",
+      "name": "天空主宰",
+      "nameEn": "Ruler of the Skies",
+      "expected": 233,
+      "count": 233,
+      "wikiMatched": 233,
+      "missing": []
+    },
+    {
+      "id": "B4a",
+      "name": "火箭隊的野心",
+      "nameEn": "Team Rocket’s Ambition",
+      "expected": 110,
+      "count": 110,
+      "wikiMatched": 110,
+      "missing": []
+    },
+    {
+      "id": "B4b",
+      "name": "高級補充包MEGA",
+      "nameEn": "Deluxe Pack: Mega",
+      "expected": 429,
+      "count": 429,
+      "wikiMatched": 429,
+      "missing": []
+    },
+    {
+      "id": "P-B",
+      "name": "B系列特典卡",
+      "nameEn": "Promo-B",
+      "expected": 103,
+      "count": 103,
+      "wikiMatched": 90,
+      "missing": [
+        "P-B-024 (Mega Latios ex)",
+        "P-B-029 (Mega Medicham ex)",
+        "P-B-051 (Zygarde)",
+        "P-B-052 (Zygarde)",
+        "P-B-053 (Zygarde ex)",
+        "P-B-055 (Zygarde ex)",
+        "P-B-056 (Mega Heracross ex)",
+        "P-B-066 (Ceruledge ex)",
+        "…等共 13 張待 52Poké 補錄"
+      ]
+    },
+    {
+      "id": "SP1",
+      "name": "最初的夥伴",
+      "nameEn": "Special Pack: First Partners",
+      "expected": 30,
+      "count": 30,
+      "wikiMatched": 30,
+      "missing": []
+    },
+    {
+      "id": "C1",
+      "name": "雙元融合",
+      "nameEn": "Dual Fusion",
+      "expected": 217,
+      "count": 217,
+      "wikiMatched": 217,
+      "missing": []
+    },
+    {
+      "id": "P-C",
+      "name": "C系列特典卡",
+      "nameEn": "Promo-C",
+      "expected": 13,
+      "count": 13,
+      "wikiMatched": 11,
+      "missing": [
+        "P-C-002 (Mega Mewtwo Y ex)",
+        "P-C-009 (Genome Converter Y)"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+name: Sync & Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      sync_cards:
+        description: "Run CHT card catalog rebuild (tools/cards/sync.mjs)"
+        required: false
+        default: "true"
+  schedule:
+    # Every 3 hours at :17 UTC for Limitless meta snapshot
+    - cron: "17 */3 * * *"
+    # Daily at 18:30 UTC (02:30 CST, inside 52Poké 02:00-07:59 CST window) for incremental card sync
+    - cron: "30 18 * * *"
+    # Weekly Sunday 19:00 UTC (03:00 CST) full archive refresh
+    - cron: "0 19 * * 0"
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Restore tournament & card source caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/meta/cache-v1
+            data/card-sources/raw
+          key: pocket-lab-sources-${{ github.run_id }}
+          restore-keys: |
+            pocket-lab-sources-
+
+      - name: Sync Limitless tournament meta snapshot
+        run: node tools/meta/sync.mjs
+
+      - name: Sync CHT card catalog (daily/weekly 02:30-03:00 CST schedule or manual trigger)
+        if: github.event.schedule == '30 18 * * *' || github.event.schedule == '0 19 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.sync_cards == 'true')
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 19 * * 0" ]; then
+            node tools/cards/sync.mjs --refresh-archive
+          else
+            node tools/cards/sync.mjs
+          fi
+
+      - name: Run verification tests before publish
+        run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs
+
+      - name: Upload Pages artifact (public/)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

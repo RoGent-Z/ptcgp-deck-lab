@@ -1,0 +1,49 @@
+# Antigravity 接手实时日志（Project_15）
+
+> 用途：GPT（Codex）额度暂停期间，由 Antigravity 接手修订计划与前端艺术设计。每一步按时间追加，方便 GPT 恢复后逐条核对。
+> 时间均为北京时间（UTC+8）。“状态”列：✅ 完成 / 🟡 部分 / ⛔ 阻塞 / 📝 仅文档。
+
+## 2026-11-19
+
+| 时间 | 动作 | 结果 / 证据 | 状态 |
+| --- | --- | --- | --- |
+| 15:53 | 读取用户提供的 `D:\OneDrive\Desktop\计划.txt` | 文件 0 字节（OneDrive 占位，创建于 15:49:45，无内容） | ⛔ |
+| 15:56 | 改为从本机 Codex 线程历史（`~/.codex/thread_history_1.sqlite`，只读副本）恢复 GPT 原计划 | 找到主线程 `01a1f2a9-599c…` 的 `[plan]` 条目（07:22:32Z）及 3 个子代理（卡库 / 赛事 / 引擎）的调研结论；原文已收录到 `docs/01_原计划_GPT.md` | ✅ |
+| 15:57 | 盘点项目现状 | 已有：`public/index.html`、`app/core.mjs`、`app/storage.mjs`、`app/site.css`、`data/meta.json`（C1 雙元融合，61 场 / 7,099 人 / 19,412 场对局 / 537 原型）、`tools/meta/*`、`engine/pocket_lab.rs`、4 个测试。缺失：`app/main.mjs`（index 引用但不存在）、`public/data/cards.json`、`catalog.json`、`public/battle/runtime.mjs` + `deckgym.wasm`、`tools/cards/*`、`tools/battle/*`、`.github/workflows/*`、`assets/tabletop.webp`、README。`.git` 已初始化、远程为 `RoGent-Z/ptcgp-deck-lab`，**尚无任何提交** | ✅ |
+| 15:58 | 找到 GPT 用 ImageGen 生成的封面原图 | `~/.codex/generated_images/01a1f2a9-…/exec-d1f16504-….png`（2.3 MB，墨绿牌桌 + 扇形卡背 + 琥珀骰子）；`site.css` 引用的 `assets/tabletop.webp` 尚未落地 | ✅ |
+| 15:58 | 发现 `data/meta/cache-v1` 已有 86 场赛事原始缓存，合计约 10 MB | `.gitignore` 未排除它，首次提交会把 10 MB 原始数据推上仓库，已写入修订计划 R3 | 📝 |
+| 15:59 | 写入 `docs/01_原计划_GPT.md` | GPT 原计划原文 + 三个子代理调研要点，未改动 | ✅ |
+| 16:00 | 写入 `docs/02_修订计划.md` | R1–R11 共 11 条修订（同步节奏、Pages 产物部署、.gitignore、拆分 meta、数据卡面、AI 诚实分阶段、覆盖率替补、续跑种子、简繁、卡号统一、里程碑），末尾留“决议”表给 GPT | 📝 |
+| 16:00 | 执行 R3：`.gitignore` 追加 `data/meta/cache-v1/`、`data/meta/snapshots/`、`data/card-sources/raw/`、`reports/*.local.*`、`public/dev/` | 原有 9 行规则未动，只追加 | ✅ |
+| 16:01 | 写入 `docs/03_前端艺术设计规范.md` | 设计判读、改深色理由、色彩 / 字体 / 形状令牌、CardFace 等 6 个组件、6 个页面蓝图、响应式、无障碍、禁止清单 | 📝 |
+| 16:20 | 验证原有单测 `tests/meta.test.mjs`、`tests/workbench.test.mjs`；检查本机 Rust 工具链 | 9/9 通过；本机未安装 `cargo` / `rustup`（M3 编译需在有 Rust 的环境或 CI 完成） | ✅ |
+| 16:20 | 将 GPT 封面原图转为 `public/assets/tabletop.webp`（1600×533） | Pillow 转换完成，体积从 2.3 MB 降至 99.8 KB | ✅ |
+| 16:21 | 执行 R4：改造 `tools/meta/sync.mjs` 输出精简首屏文件 `public/data/meta.top.json`，并从现存 `meta.json` 切分首份产物 | `meta.json` 376.0 KB → `meta.top.json` 36.7 KB（保留摘要 + 前 40 原型 + 最近 10 场赛事），hash 与 `meta.json` 一致 | ✅ |
+| 16:22 | 新建 `public/app/icons.mjs` 与 `public/app/cardface.mjs` | 实现统一 1.75px 线性图标集、能量球 `EnergyToken`、数据卡面 `CardFace`（63:88 比例、11 种属性渐变、双属性对角渐变、ex/高稀镭射斜光 `--mx/--my`、迷你卡槽 `MiniSlot`） | ✅ |
+| 16:23 | 新建 `public/app/fixture.mjs`、`public/app/data.mjs`、`public/app/battle.mjs` | 实现 `?fixture=1` 隔离样板卡库、IndexedDB 封装、OpenCC 简繁搜索预索引、数据新鲜度计算、50 格 `GameStrip` 点阵渲染、FNV1a 确定性种子与断点续跑调度、M3 `runtime.mjs` + `deckgym.wasm` 自动探测 | ✅ |
+| 16:24 | 重写 `public/index.html` 与 `public/app/views.mjs`、`public/app/main.mjs` | 落地 6 页面路由（`#home`/`#catalog`/`#decks`/`#meta`/`#battle`/`#sources`）、移动端底部固定导航与浮动草稿抽屉、弹窗详情（单卡异画/代表牌表/收录完备度/种子回放） | ✅ |
+| 16:26 | 重写 `public/app/site.css` 为「夜间牌桌」深色系统，新增 `tests/frontend.test.mjs` 并跑单测 | 全部 5 个前端模块 `node --check` 零报错；12/12 单测全部通过（含 XSS 转义校验、双属性镭射、样板组牌规则、meta.top 与 meta 哈希一致性） | ✅ |
+| 16:26 | 启动 `tmp/serve.mjs`（`127.0.0.1:4157`）并派发浏览器子代理做桌面 + 手机双视口实机验收 | 进行中，等待截图与控制台检查结果 | 🟡 |
+| 16:31 | 浏览器首轮实机验收完毕（桌面 1440×900 & 手机 390×844） | 0 console errors；`#home` / `#catalog` / `#battle` 500 格点阵 / 回放弹窗 / 移动端底栏均正常。肉眼审图发现 3 处可打磨细节：① 卡片内“组内×2”和 `+/−` 按钮绝对定位遮挡招式文字；② 390px 移动端 `#meta` 列表首行 `#1` 标题过长时与“使用率”发生重叠；③ 引擎未构建错误暴露了动态 import URL | 🟡 |
+| 16:32 | 修复以上 3 处前端细节（`cardface.mjs`、`site.css`、`battle.mjs`）并复跑 12 项单测 | 将卡底操作区改为独立流式 `.cf-bar` 不再覆盖招式；移动端 `#meta` 列表改 3 行严格网格 + 2×2 排序胶囊；优化引擎未构建文案。12/12 单测全部通过，已发起浏览器二次截图复验 | 🟡 |
+| 16:35 | 浏览器二次复验完成（桌面 `#catalog`/`#decks`/`#battle` + 手机 390px `#meta`） | 0 console errors；`#catalog` 卡面招式文字无遮挡、`#decks` 20 槽位正常、`#battle` 500 格点阵与 `49.4%` 统计清晰、390px `#meta` 行与 2×2 排序胶囊零重叠无横向溢出 | ✅ |
+| 16:36 | 停止临时预览服务 `task-172`（`tmp/serve.mjs`） | 已优雅释放 `127.0.0.1:4157` 端口，保留 `tmp/serve.mjs` 供后续接手随时启动 | ✅ |
+| 16:36 | 写入 `docs/00_接手指南.md` 与项目根 `README.md` | 写明 M0–M6 进度矩阵、前端完成度、M2/M3/M5 精确文件与接口契约及本地预览/测试命令 | ✅ |
+| 16:37 | 登记 `Project_15` 到全局 `00_全局控制台.md` 与 `01_全局工作日志.md`，并做最终测试验证 | 准备执行最终单测确认 | ✅ |
+| 17:14 | 搭建 M2 繁中卡库管线：`tools/cards/build.py`、`tools/cards/sync.mjs`、`tools/cards/README.md` 及 OpenCC `STCharacters`/`STPhrases`/`TWVariants` 字典 | 零第三方 pip 依赖；以 `flibustier/pokemon-tcg-pocket-database` (MIT) 4,577 条为全印刷骨架，优先读取 `52poke/mwarchiver` 离线归档 + 轻量增量拉取 `C1`/`B4b`/`P-B`/`P-C` 最新列表页，获取 `C1-042`、`C1-056` 双属性与 `B4b` 再录映射，并对降级同名比对 HP 防止张冠李戴 | ✅ |
+| 17:17 | 产出 `public/data/cards.json`（3.5 MB，4,577 张）与 `public/data/catalog.json`（27 系列），并修补 `cardface.mjs` 支持 `✦`/`AN` 镭射发光 | 全 4,577 张 100% 匹配繁中卡名（4,562 张直接命中 52Poké 词条并附修订号与 CC BY-NC-SA 3.0 出处，15 张未建词条的新特典卡按 MIT 骨架 + 繁中官译兜底并如实标注）；**14/14 全部单测通过**（含 `tests/cards.test.mjs`） | ✅ |
+| 17:18 | 新建 M4 GitHub Actions 工作流：`.github/workflows/test.yml` & `.github/workflows/deploy.yml` | 遵循 R1/R2：PR/Push 自动单测门禁；每 3 小时同步 Limitless 赛事，每日 02:30 CST 增量更新卡库、每周日 03:00 CST 全量刷新归档，使用 `actions/cache` 复用原始缓存，以 Pages Artifact 发布 `public/` 不污染 Git 历史 | ✅ |
+| 17:19 | 重启 `tmp/serve.mjs` 并派出浏览器子代理在正式生产模式（无 `?fixture=1`）验收真卡库与代表牌表联调 | 进行中，等待验收与截图 | 🟡 |
+| 17:22 | 浏览器正式生产模式实机验收通过，并揪出 `[hidden]` 被 `display: flex` 覆盖导致顶部预览横幅误现的 CSS 缺陷 | 搜索简体“阿罗拉椰蛋树”、拦截 `C1-005`+`C1-153` 跨异画 3 张报错、`C1-056` 双属性（超+鬥）、克隆赛事第 1 名 20/20 全繁中代表牌表均实测成功 | ✅ |
+| 17:24 | 修复 `public/app/site.css` 全局 `[hidden] { display: none !important; }` 并经浏览器二次核验 | 确认正常模式 `#home` 顶部 `#fixture-banner` 完全隐藏（`height: 0`），`header.mast` 干净贴顶 `y = 0` | ✅ |
+| 17:25 | 停止临时预览服务 `task-319`，同步更新 `docs/00_接手指南.md`、`README.md`、`00_全局控制台.md` 与 `01_全局工作日志.md`，完成全套终测 | M0 + M1 + M2 + M4 均已验收落地；全套 14 项单测终检准备完成 | ✅ |
+| 17:32 | 修复卡牌图片显示：重写 `cardface.mjs` / `site.css` / `views.mjs` / `main.mjs` 与 `tests/frontend.test.mjs` | 主源接入繁中图床 `game.pokemontcgpocket.app/zh-tw/tcgp/{SET}/{NUM}/low.webp`（高清弹窗 `/high.webp`），捕获阶段 `error` 监听自动切换 Limitless CDN `_EN.webp` 备用，双源失败平滑回退数据卡面；并在 `#decks` 卡槽与代表牌表弹窗添加迷你缩略图。同步修订 `02_修订计划.md` R5 与 `03_前端艺术设计规范.md` §4.1 | ✅ |
+| 17:39 | 浏览器实机验收真卡图（1440×900，正式无 `?fixture=1` 模式）并停止预览服务 `task-396` | A1 图鉴 30/30、C1-056 网格及高清大图弹窗 1/1、P-C 备用 CDN 自动回退 13/13、代表牌表弹窗 14/14、`#decks` 卡槽 14/14 全部加载成功（0 `is-img-failed`，0 console errors） | ✅ |
+| 17:48 | 新增自建卡组「完整陈列预览（5×4 牌桌展墙）」功能：修改 `data.mjs` / `cardface.mjs` / `views.mjs` / `main.mjs` / `site.css` / `tests/frontend.test.mjs` | 新增 `expandDeckCards` + `renderDeckShowcase`（按基础→1阶→2阶→物品→支援者等有序平铺 20 张实卡大图并补齐空卡位编号）、`#decks` 默认 `完整陈列 (5×4)` 与 `紧凑清单` 双视图、行内改名 `#deck-rename-input`、1040px `沉浸大屏预览`（`/high.webp` 高清卡图）、首页 `我的牌桌陈列`（10×2 置顶展条，`settings/featuredDeckId`）、图鉴草稿 `完整预览` 及赛事原型 `展开 20 张陈列预览`；预先实测两大图床均未下发 `Access-Control-Allow-Origin` 故放弃易污染 Canvas 的纯前端导出、改用零报错纯 DOM 沉浸陈列墙 | ✅ |
+| 17:55 | 全量语法/单测校验及浏览器桌面端（`1440×900`）+ 移动端（`390×844`）实机复测并停止预览服务 `task-461` | `node --check` 与 15/15 单元测试全过；实机验证 `#meta` 展开 20 张陈列、克隆后 `#decks` 默认 `5×4` 陈列墙 20/20 显图（0 失败，0 console errors）、行内改名实时刷新、沉浸大屏 20 张高清出图、首页 `10×2` 陈列条 20/20 缩略图、草稿 `完整预览`（2 张已加 + 18 编号空槽）及 `390×844` 移动端 2 列陈列零横向溢出；同步更新 `docs/03_前端艺术设计规范.md`、`docs/00_接手指南.md` 与全局工作日志 | ✅ |
+| 18:16 | 创建并运行 `tools/assets/sync_sprites.py`：爬取全部原版能量球图标与宝可梦 2D 像素画 | 从 52Poké 抓取 11 种官方球状能量标识 + Pokésprite 像素精灵球落盘至 `public/assets/energy/`（12 个，120 KB）；同步 Pokésprite Gen 8（959 个）与 Limitless R2 Gen 9 / Legends Z-A Mega（127 个）共 1,086 种宝可梦 2D 像素画至 `public/assets/pokemon/`（938 KB）并用 Pillow 裁除透明边距，生成映射清单 `public/data/sprites.json`，0 错误 | ✅ |
+| 18:23 | 重构瑞士红白切分灰阶 UI、纯图标能量展示与「卡组最多 3 只代表宝可梦像素画」交互：改写 `site.css` / `mark.svg` / `cardface.mjs` / `views.mjs` / `main.mjs` / `core.mjs` / `data.mjs` / `battle.mjs` / `index.html` / `tests/frontend.test.mjs` | ① 全局切换为信号红（`#d62828`）+ 3px 黑带切分微灰点阵白底（`#f6f6f4`），所有面板改用不透明纯白/浅灰阶与 `45°`/点阵灰纹，彻底清除所有 `backdrop-filter` 玻璃态与深绿霓虹；② 能量标识改用原版 `assets/energy/*.png`（无汉字）；③ 新增 `resolveFeaturedPokemon` 与交互式选择器，在 `#decks`、`#catalog` 草稿、`#home` 前十与陈列条、`#meta` 行及 `#battle` 对手列表名称旁展示最多 3 只代表宝可梦 2D 像素画（支持手动 1–3 只勾选及 JSON 导入导出保留） | ✅ |
+| 18:40 | 浏览器双端验收与移动端 `390×844` 溢出/重叠修复及停止预览服务 `task-661` | 桌面 `1440×900` 一次性通过（0 console errors，能量纯图、20 张陈列与 3 只代表切换全部正常）；捕获并修复移动端 `390×844` 两处问题：① 为 Hero / 牌组列表 / 详情面板补充 `minmax(0, 1fr)` 与 `min-width: 0`，消除窄屏横向溢出并取消小尺寸 `.poke-sprite` 的 `loading="lazy"`；② 修复 `#decks` `.deck-title-edit` `flex: 1` 在 `390px` 挤压视图切换条的问题。复测 `390×844`（#home / #decks / #meta / #catalog）及 `1440×900` 全部零溢出、零重叠、0 console errors；同步全面重写 `docs/03_前端艺术设计规范.md` 与更新 `tests/frontend.test.mjs`（预期 16/16） | ✅ |
+| 18:49 | 全站界面文案去技术黑话与 AI 腔精简并复测停止预览 `task-767` | 按用户反馈清理 `index.html`、`views.mjs`、`cardface.mjs`、`battle.mjs` 与 `main.mjs` 中的开发术语与生硬标语：页脚简化为 `Pocket Lab`、移除 `IndexedDB (ptcgp-deck-lab-v1)` / `OpenCC 折叠` / `里程碑 M2/M3` / `SWISS //` 英文装点词，首页 Hero 改为简洁自然的 `Pocket Lab`。浏览器复核 5 大路由均未检出 14 项冗余短语（`0` hits、`0` console errors） | ✅ |
+| 19:23 | 清除冗余验证条与啰嗦标签、新增图鉴训练家子类追加菜单（常驻预览 `task-791` 在线） | ① 恢复本地常驻预览服务 `task-791`（解决用户标签页断连导致图标自动隐藏的问题，`/assets/energy/*`、`/assets/pokemon/*` 全量 HTTP 200）；② 精简 `renderPokemonPicker` 为 `代表宝可梦 X/3`，并改为仅在卡组未合法/缺张时才展示 `.draft-validation` 提示条，移除已合法时的冗余绿色长条；③ 在 `#catalog` 新增 `#filter-subtype` 训练家级联菜单（`全部訓練家` / `物品` / `支援者` / `寶可夢道具` / `競技場（場地）` / `化石`），选定 `訓練家` 或点击精灵球筛选键即弹出并自动与宝可梦筛选互斥。`17/17` 单测通过，浏览器实测 `416` 张训练家卡（69+248+55+34+10）及场地卡 `30/30` 显图全部通过 | ✅ |
+| 20:48 | 完成代表宝可梦仅草稿编辑、草稿内自定义与 PTCGP 默认排序、537 比赛原型繁中翻译、全站台湾繁中化及 UI 对齐精修（`task-791` 在线） | ① 新增 `tools/meta/translate.mjs` 并在 `sync.mjs` 全量翻译 `537/537` 赛事原型为台湾繁中（保留 `nameEn` 与 `_search` 供检索），赛季同步翻为「雙元融合」；② 在 `cardface.mjs` 实现 `sortDeckEntriesPtcgpDefault`（属性轮 + `evolvesFrom` 同进化链相邻 + 訓練家依 `物品 → 化石 → 寶可夢道具 → 支援者 → 競技場` 排序），`expandDeckCards` 严格锁定保存顺序；`#decks` 彻底移除 `.rep-picker-box` 与排序控件，仅在 `#catalog` 草稿提供 `▲`/`▼`、拖曳与 `預設排序`；③ 全站 `<html lang="zh-Hant-TW">` 统一为台湾繁中并去除 `TOP 3` / `vs 50%` / `CI` 等多余英文；④ 依据用户截图反馈优化 `.energy-pick` 为 `34×34px` 方正瑞士选框、`.top10-name-row` 改为纵向网格避免第 2 队标题同排，并为 `#battle` / `#meta` 列表设置固定 `40px`/`78px` 槽位（移动端 `34px`/`64px`）消除多能量挤歪对齐问题与窄屏溢出。`18/18` 单测全过，桌面 `1440×900` 与手机 `390×844` 复验全过、0 console errors | ✅ |

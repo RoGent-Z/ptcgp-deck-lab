@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#d62828">
+  <meta name="description" content="查詢 Pokémon TCG Pocket 繁中卡牌、組建 20 張牌組，並對目前賽事使用率前十牌組進行 10×50 局對戰模擬。">
+  <title>Pocket Lab · 寶可夢卡牌對戰模擬實驗室</title>
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">跳至正文</a>
+
+  <div id="fixture-banner" class="fixture-banner" hidden>
+    <span>目前為 <strong>樣板預覽模式 (?fixture=1)</strong>，含前端樣板卡庫與展示資料，非正式全量結果。</span>
+    <a class="mini" href="?">結束預覽</a>
+  </div>
+
+  <header class="mast">
+    <div class="mast-inner">
+      <a class="brand" href="#home" aria-label="Pocket Lab 首頁">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>POCKET<span class="brand-light"> LAB</span></span>
+      </a>
+      <nav id="navigation" class="mast-nav" aria-label="主導覽">
+        <a href="#home">總覽</a>
+        <a href="#catalog">卡牌圖鑑</a>
+        <a href="#decks">我的牌組</a>
+        <a href="#meta">賽事環境</a>
+        <a href="#battle">對戰測試</a>
+      </nav>
+      <div class="mast-tools">
+        <span id="freshness" class="freshness" title="正在讀取資料時間…">
+          <i class="dot" aria-hidden="true"></i>
+          <span class="freshness-text">載入中</span>
+        </span>
+        <button class="refresh" id="refresh" type="button" title="從站內最新已發布快照檢查更新">
+          <span class="spin-glyph" aria-hidden="true">⟳</span>
+          <span>檢查更新</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div class="loading-shell" role="status" aria-label="正在載入">
+      <div class="skel skel-hero"></div>
+      <div class="skel-row">
+        <div class="skel skel-box"></div>
+        <div class="skel skel-box"></div>
+        <div class="skel skel-box"></div>
+        <div class="skel skel-box"></div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span class="wordmark">Pocket Lab</span>
+    <a href="#sources">資料來源與授權</a>
+    <a href="https://github.com/RoGent-Z/ptcgp-deck-lab" target="_blank" rel="noopener">原始碼儲存庫 ↗</a>
+  </footer>
+
+  <nav id="bottom-nav" class="bottom-nav" aria-label="行動版主導覽">
+    <a href="#home" data-route="home"></a>
+    <a href="#catalog" data-route="catalog"></a>
+    <a href="#decks" data-route="decks"></a>
+    <a href="#meta" data-route="meta"></a>
+    <a href="#battle" data-route="battle"></a>
+  </nav>
+
+  <button id="drawer-fab" class="drawer-fab" type="button" hidden aria-expanded="false" aria-controls="draft-drawer">
+    <span>草稿牌組</span>
+    <strong id="drawer-fab-count">0/20</strong>
+  </button>
+
+  <div id="draft-drawer" class="draft-drawer" hidden role="dialog" aria-label="草稿牌組"></div>
+
+  <dialog id="dialog" aria-labelledby="dialog-title">
+    <div class="dialog-bar">
+      <strong id="dialog-title"></strong>
+      <button id="dialog-close" class="icon-button" type="button" aria-label="關閉視窗">×</button>
+    </div>
+    <div id="dialog-body"></div>
+  </dialog>
+
+  <input type="file" accept="application/json,.json" id="import-file" hidden>
+  <div id="notice" role="status" aria-live="polite"></div>
+  <script type="module" src="app/main.mjs"></script>
+</body>
+</html>

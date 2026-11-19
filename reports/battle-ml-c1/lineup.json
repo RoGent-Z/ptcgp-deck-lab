@@ -1,0 +1,1906 @@
+{
+  "source": {
+    "season": "C1",
+    "asOf": "2026-11-19T07:28:52.724Z",
+    "hash": "4a9ea59f3c873b7caf103358b1af0807eaa1bccf9e3198c0b3bc3287370ec370",
+    "sha256": "c57085f378c0f103df3e02a650962db06dae442c6aaad853c131035d465f4c56"
+  },
+  "decks": [
+    {
+      "rank": 1,
+      "id": "mega-charizard-y-ex-b1a-entei-ex-a4a",
+      "name": "超級噴火龍Yex · 炎帝ex",
+      "cards": [
+        {
+          "id": "A3a-064",
+          "count": 1
+        },
+        {
+          "id": "A4a-010",
+          "count": 2
+        },
+        {
+          "id": "B1-217",
+          "count": 2
+        },
+        {
+          "id": "B1-223",
+          "count": 1
+        },
+        {
+          "id": "B1a-014",
+          "count": 1
+        },
+        {
+          "id": "B2b-007",
+          "count": 2
+        },
+        {
+          "id": "B2b-008",
+          "count": 2
+        },
+        {
+          "id": "B4-153",
+          "count": 1
+        },
+        {
+          "id": "B4-155",
+          "count": 1
+        },
+        {
+          "id": "C1-018",
+          "count": 1
+        },
+        {
+          "id": "C1-126",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Fire"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ae6b6910d00101b48bf3b1c/player/vinsgg/decklist"
+    },
+    {
+      "rank": 2,
+      "id": "suicune-ex-a4a-baxcalibur-b2a",
+      "name": "水君ex · 戟脊龍",
+      "cards": [
+        {
+          "id": "A2-155",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "A4a-020",
+          "count": 2
+        },
+        {
+          "id": "A4a-067",
+          "count": 1
+        },
+        {
+          "id": "B2a-034",
+          "count": 2
+        },
+        {
+          "id": "B2a-036",
+          "count": 2
+        },
+        {
+          "id": "B2a-037",
+          "count": 1
+        },
+        {
+          "id": "C1-123",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-006",
+          "count": 1
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Water"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af478d7dcbca32da6c4e3be/player/feherlac/decklist"
+    },
+    {
+      "rank": 3,
+      "id": "umbreon-c1-hydreigon-b1",
+      "name": "月亮伊布 · 三首惡龍",
+      "cards": [
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "B1-155",
+          "count": 2
+        },
+        {
+          "id": "B1-157",
+          "count": 2
+        },
+        {
+          "id": "B1-184",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B3b-041",
+          "count": 1
+        },
+        {
+          "id": "B4-148",
+          "count": 2
+        },
+        {
+          "id": "C1-084",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-002",
+          "count": 1
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Darkness"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ae3a03b22fd412b92a4f83e/player/joshuasutherland21/decklist"
+    },
+    {
+      "rank": 4,
+      "id": "hoopa-ex-b4-mega-absol-ex-b1",
+      "name": "胡帕ex · 超級阿勃梭魯ex",
+      "cards": [
+        {
+          "id": "A2-110",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 2
+        },
+        {
+          "id": "A2-155",
+          "count": 1
+        },
+        {
+          "id": "A2b-070",
+          "count": 1
+        },
+        {
+          "id": "A3a-064",
+          "count": 1
+        },
+        {
+          "id": "B1-151",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B2-145",
+          "count": 2
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B4-103",
+          "count": 2
+        },
+        {
+          "id": "B4-148",
+          "count": 2
+        },
+        {
+          "id": "P-A-002",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Darkness"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6afc9666ee43ef789147728a/player/sekensirazu/decklist"
+    },
+    {
+      "rank": 5,
+      "id": "mega-greninja-ex-c1-greninja-ex-b1",
+      "name": "超級甲賀忍蛙ex · 甲賀忍蛙ex",
+      "cards": [
+        {
+          "id": "A1-089",
+          "count": 2
+        },
+        {
+          "id": "A2-146",
+          "count": 1
+        },
+        {
+          "id": "A2-147",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 1
+        },
+        {
+          "id": "A4a-020",
+          "count": 2
+        },
+        {
+          "id": "B1-071",
+          "count": 2
+        },
+        {
+          "id": "B1-073",
+          "count": 1
+        },
+        {
+          "id": "B4-154",
+          "count": 1
+        },
+        {
+          "id": "C1-041",
+          "count": 2
+        },
+        {
+          "id": "C1-042",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Water"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6aea43600c463890f304aa2e/player/syr/decklist"
+    },
+    {
+      "rank": 6,
+      "id": "mega-altaria-ex-b1-greninja-a1",
+      "name": "超級七夕青鳥ex · 甲賀忍蛙",
+      "cards": [
+        {
+          "id": "A1-087",
+          "count": 2
+        },
+        {
+          "id": "A1-089",
+          "count": 2
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "B1-102",
+          "count": 1
+        },
+        {
+          "id": "B1-109",
+          "count": 2
+        },
+        {
+          "id": "B1-196",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B3-148",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Psychic"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6aeecf0ac931f53978d95555/player/joshuasutherland21/decklist"
+    },
+    {
+      "rank": 7,
+      "id": "mega-altaria-ex-b1-espeon-b3a",
+      "name": "超級七夕青鳥ex · 太陽伊布",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A4a-059",
+          "count": 1
+        },
+        {
+          "id": "B1-102",
+          "count": 1
+        },
+        {
+          "id": "B1-184",
+          "count": 2
+        },
+        {
+          "id": "B1-196",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B2-153",
+          "count": 1
+        },
+        {
+          "id": "B2b-040",
+          "count": 2
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B3a-020",
+          "count": 2
+        },
+        {
+          "id": "B3b-064",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Psychic"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6afbbb7bee43ef7891476e4f/player/iplaypokemans/decklist"
+    },
+    {
+      "rank": 8,
+      "id": "magnezone-b1a-miraidon-ex-b3a",
+      "name": "自爆磁怪 · 密勒頓ex",
+      "cards": [
+        {
+          "id": "A1-098",
+          "count": 2
+        },
+        {
+          "id": "A2-147",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-066",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B1-226",
+          "count": 1
+        },
+        {
+          "id": "B1a-024",
+          "count": 2
+        },
+        {
+          "id": "B1a-026",
+          "count": 2
+        },
+        {
+          "id": "B1a-068",
+          "count": 1
+        },
+        {
+          "id": "B3a-019",
+          "count": 1
+        },
+        {
+          "id": "B3a-073",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Lightning"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6aeb20970c463890f304b137/player/sho_sho/decklist"
+    },
+    {
+      "rank": 9,
+      "id": "giratina-ex-c1-dragonair-b4",
+      "name": "騎拉帝納ex · 哈克龍",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2b-070",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B4-117",
+          "count": 2
+        },
+        {
+          "id": "B4-124",
+          "count": 1
+        },
+        {
+          "id": "B4-155",
+          "count": 2
+        },
+        {
+          "id": "C1-098",
+          "count": 2
+        },
+        {
+          "id": "C1-101",
+          "count": 2
+        },
+        {
+          "id": "C1-123",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Grass",
+        "Psychic"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6aeb20970c463890f304b137/player/supreme13/decklist"
+    },
+    {
+      "rank": 10,
+      "id": "greninja-ex-b1-mega-greninja-ex-c1",
+      "name": "甲賀忍蛙ex · 超級甲賀忍蛙ex",
+      "cards": [
+        {
+          "id": "A1-089",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A2-155",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 1
+        },
+        {
+          "id": "A4a-020",
+          "count": 2
+        },
+        {
+          "id": "B1-073",
+          "count": 1
+        },
+        {
+          "id": "B1-223",
+          "count": 1
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B4-154",
+          "count": 1
+        },
+        {
+          "id": "C1-040",
+          "count": 2
+        },
+        {
+          "id": "C1-041",
+          "count": 2
+        },
+        {
+          "id": "C1-042",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Water"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af061fae99f3235a75e406a/player/iamcomplex/decklist"
+    },
+    {
+      "rank": 11,
+      "id": "mega-mewtwo-x-ex-mew-ex-c1",
+      "name": "超級超夢Xex · 夢幻ex",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A2-155",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B2-155",
+          "count": 2
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B3-149",
+          "count": 1
+        },
+        {
+          "id": "B3-154",
+          "count": 1
+        },
+        {
+          "id": "B3b-035",
+          "count": 1
+        },
+        {
+          "id": "C1-056",
+          "count": 2
+        },
+        {
+          "id": "C1-057",
+          "count": 2
+        },
+        {
+          "id": "C1-123",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Psychic"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ad2a63e8a8383117e3ed624/player/elliedark/decklist"
+    },
+    {
+      "rank": 12,
+      "id": "mega-lucario-ex-b3-lucario-a2",
+      "name": "超級路卡利歐ex · 路卡利歐",
+      "cards": [
+        {
+          "id": "A1-154",
+          "count": 1
+        },
+        {
+          "id": "A2-092",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B2-145",
+          "count": 1
+        },
+        {
+          "id": "B2-147",
+          "count": 1
+        },
+        {
+          "id": "B3-078",
+          "count": 1
+        },
+        {
+          "id": "B3-079",
+          "count": 2
+        },
+        {
+          "id": "B3-081",
+          "count": 2
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B3-149",
+          "count": 1
+        },
+        {
+          "id": "B3-154",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-002",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Fighting"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af08659e99f3235a75e418d/player/silveiracrf/decklist"
+    },
+    {
+      "rank": 13,
+      "id": "mega-manectric-ex-b2b-heliolisk-b4",
+      "name": "超級雷電獸ex · 光電傘蜥",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B1a-028",
+          "count": 2
+        },
+        {
+          "id": "B1a-066",
+          "count": 2
+        },
+        {
+          "id": "B1a-068",
+          "count": 2
+        },
+        {
+          "id": "B2-153",
+          "count": 1
+        },
+        {
+          "id": "B2b-027",
+          "count": 2
+        },
+        {
+          "id": "B3b-065",
+          "count": 1
+        },
+        {
+          "id": "B4-061",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        },
+        {
+          "id": "P-B-043",
+          "count": 1
+        }
+      ],
+      "energy": [
+        "Lightning"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6adf974322fd412b92a4d595/player/naoki/decklist"
+    },
+    {
+      "rank": 14,
+      "id": "vespiquen-ex-b4-shuckle-ex-a4",
+      "name": "蜂女王ex · 壺壺ex",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-147",
+          "count": 2
+        },
+        {
+          "id": "A4-021",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B2-017",
+          "count": 1
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B3-153",
+          "count": 2
+        },
+        {
+          "id": "B4-010",
+          "count": 2
+        },
+        {
+          "id": "B4-011",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-002",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Grass"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6afbbb7bee43ef7891476e4f/player/warpis/decklist"
+    },
+    {
+      "rank": 15,
+      "id": "mega-greninja-ex-c1-suicune-ex-a4a",
+      "name": "超級甲賀忍蛙ex · 水君ex",
+      "cards": [
+        {
+          "id": "A1-089",
+          "count": 2
+        },
+        {
+          "id": "A2-147",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 1
+        },
+        {
+          "id": "A4a-020",
+          "count": 2
+        },
+        {
+          "id": "A4a-067",
+          "count": 1
+        },
+        {
+          "id": "B1-223",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B4-154",
+          "count": 1
+        },
+        {
+          "id": "C1-040",
+          "count": 2
+        },
+        {
+          "id": "C1-041",
+          "count": 2
+        },
+        {
+          "id": "C1-042",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Water"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ae25e2222fd412b92a4ee06/player/renz0/decklist"
+    },
+    {
+      "rank": 16,
+      "id": "mega-sceptile-ex-b3-greninja-a1",
+      "name": "超級蜥蜴王ex · 甲賀忍蛙",
+      "cards": [
+        {
+          "id": "A1-087",
+          "count": 1
+        },
+        {
+          "id": "A1-089",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "A3a-007",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B3-005",
+          "count": 2
+        },
+        {
+          "id": "B3-006",
+          "count": 1
+        },
+        {
+          "id": "B3-008",
+          "count": 2
+        },
+        {
+          "id": "B3b-061",
+          "count": 1
+        },
+        {
+          "id": "B3b-064",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Grass"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af08f57e99f3235a75e41de/player/rema/decklist"
+    },
+    {
+      "rank": 17,
+      "id": "hydreigon-mega-absol-ex-b1",
+      "name": "三首惡龍 · 超級阿勃梭魯ex",
+      "cards": [
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "B1-151",
+          "count": 1
+        },
+        {
+          "id": "B1-155",
+          "count": 2
+        },
+        {
+          "id": "B1-157",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B2b-069",
+          "count": 1
+        },
+        {
+          "id": "B3-115",
+          "count": 1
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "B4-148",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 1
+        }
+      ],
+      "energy": [
+        "Darkness"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af97dbaee43ef7891475378/player/whiterabbit/decklist"
+    },
+    {
+      "rank": 18,
+      "id": "pikachu-ex-pawmot-c1",
+      "name": "皮卡丘ex · 巴布土撥",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B2a-086",
+          "count": 2
+        },
+        {
+          "id": "C1-043",
+          "count": 2
+        },
+        {
+          "id": "C1-048",
+          "count": 2
+        },
+        {
+          "id": "C1-050",
+          "count": 2
+        },
+        {
+          "id": "C1-124",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Lightning"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6afc9666ee43ef789147728a/player/crimson_ruby/decklist"
+    },
+    {
+      "rank": 19,
+      "id": "umbreon-c1-mega-absol-ex-b1",
+      "name": "月亮伊布 · 超級阿勃梭魯ex",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-146",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3a-064",
+          "count": 1
+        },
+        {
+          "id": "B1-151",
+          "count": 1
+        },
+        {
+          "id": "B1-184",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B4-148",
+          "count": 2
+        },
+        {
+          "id": "C1-084",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-002",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Darkness"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ad2a63e8a8383117e3ed624/player/dariuspopek/decklist"
+    },
+    {
+      "rank": 20,
+      "id": "lopunny-raboot-c1",
+      "name": "長耳兔 · 騰蹴小將",
+      "cards": [
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B1-226",
+          "count": 1
+        },
+        {
+          "id": "B2-150",
+          "count": 2
+        },
+        {
+          "id": "B3b-065",
+          "count": 1
+        },
+        {
+          "id": "C1-022",
+          "count": 2
+        },
+        {
+          "id": "C1-023",
+          "count": 2
+        },
+        {
+          "id": "C1-058",
+          "count": 1
+        },
+        {
+          "id": "C1-059",
+          "count": 1
+        },
+        {
+          "id": "C1-115",
+          "count": 2
+        },
+        {
+          "id": "C1-116",
+          "count": 2
+        },
+        {
+          "id": "P-A-002",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Psychic"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af70355b2fccaf0272d0d65/player/hanzee/decklist"
+    },
+    {
+      "rank": 21,
+      "id": "mega-mewtwo-x-ex-c1-mega-diancie-ex-b3b",
+      "name": "超級超夢Xex · 超級蒂安希ex",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A2b-070",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B2-145",
+          "count": 1
+        },
+        {
+          "id": "B2-155",
+          "count": 2
+        },
+        {
+          "id": "B3b-031",
+          "count": 2
+        },
+        {
+          "id": "B3b-032",
+          "count": 1
+        },
+        {
+          "id": "B3b-035",
+          "count": 1
+        },
+        {
+          "id": "C1-056",
+          "count": 1
+        },
+        {
+          "id": "C1-123",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Psychic"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6aeb20970c463890f304b137/player/seraru/decklist"
+    },
+    {
+      "rank": 22,
+      "id": "miraidon-ex-b3a-magnezone-b1a",
+      "name": "密勒頓ex · 自爆磁怪",
+      "cards": [
+        {
+          "id": "A1-098",
+          "count": 2
+        },
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-147",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3a-021",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "B1-226",
+          "count": 1
+        },
+        {
+          "id": "B1a-024",
+          "count": 2
+        },
+        {
+          "id": "B1a-026",
+          "count": 1
+        },
+        {
+          "id": "B1a-068",
+          "count": 1
+        },
+        {
+          "id": "B3a-019",
+          "count": 2
+        },
+        {
+          "id": "B3a-073",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Lightning"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ae25e2222fd412b92a4ee06/player/brendon68/decklist"
+    },
+    {
+      "rank": 23,
+      "id": "umbreon-c1-mega-sableye-ex-b3b",
+      "name": "月亮伊布 · 超級勾魂眼ex",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A2b-070",
+          "count": 2
+        },
+        {
+          "id": "B1-184",
+          "count": 2
+        },
+        {
+          "id": "B2-145",
+          "count": 2
+        },
+        {
+          "id": "B3b-041",
+          "count": 1
+        },
+        {
+          "id": "C1-084",
+          "count": 2
+        },
+        {
+          "id": "C1-120",
+          "count": 1
+        },
+        {
+          "id": "C1-123",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Darkness"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af0a90de99f3235a75e42f5/player/gunnmgirl/decklist"
+    },
+    {
+      "rank": 24,
+      "id": "chien-pao-ex-baxcalibur-b2a",
+      "name": "古劍豹ex · 戟脊龍",
+      "cards": [
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B2-145",
+          "count": 1
+        },
+        {
+          "id": "B2a-036",
+          "count": 2
+        },
+        {
+          "id": "B2a-037",
+          "count": 2
+        },
+        {
+          "id": "B2b-069",
+          "count": 2
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "C1-123",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-B-037",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Water"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6adfaf4022fd412b92a4d7e5/player/victorssito/decklist"
+    },
+    {
+      "rank": 25,
+      "id": "alolan-exeggutor-ex-ribombee-c1",
+      "name": "阿羅拉椰蛋樹ex · 蝶結萌虻",
+      "cards": [
+        {
+          "id": "A1a-001",
+          "count": 2
+        },
+        {
+          "id": "A3-147",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B1a-067",
+          "count": 2
+        },
+        {
+          "id": "B2-145",
+          "count": 2
+        },
+        {
+          "id": "B3-153",
+          "count": 2
+        },
+        {
+          "id": "C1-005",
+          "count": 2
+        },
+        {
+          "id": "C1-014",
+          "count": 2
+        },
+        {
+          "id": "C1-015",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Grass"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ae25e2222fd412b92a4ee06/player/ericko/decklist"
+    },
+    {
+      "rank": 26,
+      "id": "mega-skarmory-ex-c1-mantyke-a4a",
+      "name": "超級盔甲鳥ex · 小球飛魚",
+      "cards": [
+        {
+          "id": "A4-153",
+          "count": 1
+        },
+        {
+          "id": "A4-156",
+          "count": 2
+        },
+        {
+          "id": "A4a-023",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B1a-069",
+          "count": 1
+        },
+        {
+          "id": "B2-145",
+          "count": 2
+        },
+        {
+          "id": "B2-148",
+          "count": 2
+        },
+        {
+          "id": "B4-090",
+          "count": 1
+        },
+        {
+          "id": "B4-154",
+          "count": 1
+        },
+        {
+          "id": "C1-091",
+          "count": 1
+        },
+        {
+          "id": "P-A-002",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Metal"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af478d7dcbca32da6c4e3be/player/pryerlord/decklist"
+    },
+    {
+      "rank": 27,
+      "id": "dragonair-mega-rayquaza-ex-b4",
+      "name": "哈克龍 · 超級烈空坐ex",
+      "cards": [
+        {
+          "id": "A1-225",
+          "count": 1
+        },
+        {
+          "id": "A2b-070",
+          "count": 1
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B3a-054",
+          "count": 2
+        },
+        {
+          "id": "B3a-069",
+          "count": 1
+        },
+        {
+          "id": "B3a-072",
+          "count": 1
+        },
+        {
+          "id": "B3b-064",
+          "count": 1
+        },
+        {
+          "id": "B4-117",
+          "count": 2
+        },
+        {
+          "id": "B4-120",
+          "count": 1
+        },
+        {
+          "id": "B4-155",
+          "count": 2
+        },
+        {
+          "id": "C1-098",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Fire",
+        "Lightning"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6ae25e2222fd412b92a4ee06/player/gobztcg/decklist"
+    },
+    {
+      "rank": 28,
+      "id": "raikou-ex-a4a-pawmot-c1",
+      "name": "雷公ex · 巴布土撥",
+      "cards": [
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A2b-022",
+          "count": 1
+        },
+        {
+          "id": "A2b-070",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "A4a-025",
+          "count": 2
+        },
+        {
+          "id": "B2-154",
+          "count": 1
+        },
+        {
+          "id": "B3-147",
+          "count": 1
+        },
+        {
+          "id": "C1-048",
+          "count": 2
+        },
+        {
+          "id": "C1-050",
+          "count": 2
+        },
+        {
+          "id": "C1-123",
+          "count": 1
+        },
+        {
+          "id": "C1-124",
+          "count": 1
+        },
+        {
+          "id": "C1-127",
+          "count": 1
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Lightning"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af08f57e99f3235a75e41de/player/cloudypanda/decklist"
+    },
+    {
+      "rank": 29,
+      "id": "dedenne-ex-b3b-indeedee-ex-b1",
+      "name": "咚咚鼠ex · 愛管侍ex",
+      "cards": [
+        {
+          "id": "A2-147",
+          "count": 1
+        },
+        {
+          "id": "A2-150",
+          "count": 1
+        },
+        {
+          "id": "A3-066",
+          "count": 2
+        },
+        {
+          "id": "B1-121",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 2
+        },
+        {
+          "id": "B2-154",
+          "count": 1
+        },
+        {
+          "id": "B3b-024",
+          "count": 2
+        },
+        {
+          "id": "B3b-064",
+          "count": 2
+        },
+        {
+          "id": "B4-149",
+          "count": 1
+        },
+        {
+          "id": "C1-123",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 2
+        }
+      ],
+      "energy": [
+        "Lightning"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6afc9666ee43ef789147728a/player/sheedy/decklist"
+    },
+    {
+      "rank": 30,
+      "id": "pidgeot-umbreon-c1",
+      "name": "大比鳥 · 月亮伊布",
+      "cards": [
+        {
+          "id": "A2-110",
+          "count": 1
+        },
+        {
+          "id": "A2-148",
+          "count": 1
+        },
+        {
+          "id": "A3-144",
+          "count": 2
+        },
+        {
+          "id": "B1-184",
+          "count": 2
+        },
+        {
+          "id": "B1-225",
+          "count": 1
+        },
+        {
+          "id": "C1-084",
+          "count": 2
+        },
+        {
+          "id": "C1-102",
+          "count": 2
+        },
+        {
+          "id": "C1-104",
+          "count": 2
+        },
+        {
+          "id": "C1-126",
+          "count": 2
+        },
+        {
+          "id": "C1-127",
+          "count": 2
+        },
+        {
+          "id": "P-A-005",
+          "count": 2
+        },
+        {
+          "id": "P-A-007",
+          "count": 1
+        }
+      ],
+      "energy": [
+        "Darkness"
+      ],
+      "sourceUrl": "https://play.limitlesstcg.com/tournament/6af478d7dcbca32da6c4e3be/player/henrikfelix10/decklist"
+    }
+  ]
+}
