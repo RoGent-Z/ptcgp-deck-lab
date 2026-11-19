@@ -82,4 +82,61 @@ export function interval(w,n){
 export function deckFingerprint(deck) {
   return JSON.stringify([deck.cards.map(x=>[x.id,x.count]).sort((a,b)=>a[0].localeCompare(b[0])),[...deck.energy].map(titleCase).sort()]);
 }
+export function getCardOwnedCount(cardId, collection, cardsById = null, matchVariants = false) {
+  const map = collection || {};
+  const exact = Math.max(0, Number(map[cardId] || 0));
+  if (!matchVariants || !cardsById?.get) return exact;
+  const card = cardsById.get(cardId);
+  const key = card?.limitName || card?.nameEn || card?.name;
+  if (!key) return exact;
+  let total = 0;
+  for (const [id, rawCount] of Object.entries(map)) {
+    const cnt = Number(rawCount || 0);
+    if (cnt <= 0) continue;
+    const c = cardsById.get(id);
+    if (c && (c.limitName || c.nameEn || c.name) === key) total += cnt;
+  }
+  return Math.max(exact, total);
+}
+export function evaluateDeckOwnership(deck, collection, cardsById) {
+  const byNameOwned = new Map();
+  for (const [id, raw] of Object.entries(collection || {})) {
+    const cnt = Number(raw || 0);
+    if (cnt <= 0) continue;
+    const card = cardsById?.get ? cardsById.get(id) : null;
+    const key = card ? (card.limitName || card.nameEn || card.name) : id;
+    byNameOwned.set(key, (byNameOwned.get(key) || 0) + cnt);
+  }
+  const remainingPool = new Map(byNameOwned);
+  const entries = [];
+  let totalNeeded = 0, totalMissing = 0, unownedDistinct = 0;
+  for (const item of deck?.cards || []) {
+    if (!item?.id || item.count <= 0) continue;
+    const card = cardsById?.get ? cardsById.get(item.id) : null;
+    const key = card ? (card.limitName || card.nameEn || card.name) : item.id;
+    const exactOwned = Math.max(0, Number(collection?.[item.id] || 0));
+    const poolAvail = remainingPool.get(key) || 0;
+    const usedOwned = Math.min(item.count, poolAvail);
+    remainingPool.set(key, Math.max(0, poolAvail - usedOwned));
+    const missing = Math.max(0, item.count - usedOwned);
+    totalNeeded += item.count;
+    totalMissing += missing;
+    if (usedOwned === 0) unownedDistinct++;
+    entries.push({
+      id: item.id,
+      count: item.count,
+      exactOwned,
+      ownedForSlot: usedOwned,
+      totalOwnedByName: byNameOwned.get(key) || 0,
+      missing
+    });
+  }
+  return {
+    totalNeeded,
+    totalOwned: totalNeeded - totalMissing,
+    totalMissing,
+    unownedDistinct,
+    byEntryIndex: entries
+  };
+}
 

@@ -241,7 +241,7 @@ body:has(dialog[open]) { overflow: hidden; }
 .freshness[data-level="warn"] .dot { background: var(--gold); }
 .freshness[data-level="stale"] .dot { background: var(--loss); }
 
-.refresh {
+.refresh, .account-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -254,8 +254,21 @@ body:has(dialog[open]) { overflow: hidden; }
   font-weight: 700;
   white-space: nowrap;
 }
-.refresh:hover { background: var(--paper); box-shadow: var(--shadow-offset-sm); }
-.refresh:active { transform: translateY(1px); box-shadow: none; }
+.refresh:hover, .account-btn:hover { background: var(--paper); box-shadow: var(--shadow-offset-sm); }
+.refresh:active, .account-btn:active { transform: translateY(1px); box-shadow: none; }
+.account-btn { background: var(--paper); }
+.account-btn[data-state="online"] { border-color: var(--win); }
+.account-btn[data-state="error"] { border-color: var(--loss); }
+.acc-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.account-btn[data-state="online"] .acc-dot { background: var(--win); }
+.account-btn[data-state="syncing"] .acc-dot { background: var(--gold); }
+.account-btn[data-state="error"] .acc-dot { background: var(--loss); }
 
 /* 主容器 */
 main {
@@ -902,8 +915,72 @@ input::placeholder { color: var(--text-faint); }
   padding: 5px 8px;
   background: var(--grey-0);
   border-top: 1px solid var(--line);
+}
+.card-face:not(:has(.cf-own-row)) .cf-bar {
   border-radius: 0 0 calc(var(--r-card) - 2px) calc(var(--r-card) - 2px);
 }
+.cf-own-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--paper);
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 calc(var(--r-card) - 2px) calc(var(--r-card) - 2px);
+}
+.cf-own-label { font-size: 0.7rem; font-weight: 700; }
+.cf-own-label.is-owned { color: var(--win); }
+.cf-own-label.is-missing { color: var(--text-mute); }
+.cf-own-tag {
+  position: absolute;
+  top: 5px;
+  left: 5px;
+  z-index: 4;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+  pointer-events: none;
+}
+.cf-own-tag.is-missing {
+  background: rgba(20, 20, 20, 0.86);
+  color: #ffffff;
+  border: 1px solid var(--swiss-red);
+}
+.cf-own-tag.is-owned {
+  background: rgba(20, 122, 62, 0.92);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+.card-face.is-unowned .cf-img,
+.showcase-card.is-slot-missing .cf-img {
+  filter: saturate(0.68) contrast(0.96);
+}
+.showcase-card .showcase-media { position: relative; }
+.miss-pill, .slot-miss {
+  display: inline-block;
+  margin-left: 5px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  font-size: 0.66rem;
+  font-weight: 800;
+  vertical-align: middle;
+}
+.miss-pill.is-none, .slot-miss.is-none {
+  background: var(--swiss-red-tint);
+  color: var(--swiss-red);
+  border: 1px solid #e6a1a1;
+}
+.miss-pill.is-short, .slot-miss.is-short {
+  background: var(--gold-bg);
+  color: var(--gold);
+  border: 1px solid #d6ba7c;
+}
+.deck-slot.is-unowned { border-color: #e6a1a1; }
+.mini-pill.is-on { background: var(--swiss-red); color: var(--paper); border-color: var(--line-strong); }
 .cf-bar-hint { font-size: 0.72rem; color: var(--text-faint); font-weight: 600; }
 .cf-indeck, .cf-status {
   padding: 2px 6px;
@@ -933,6 +1010,7 @@ input::placeholder { color: var(--text-faint); }
   line-height: 1;
 }
 .cf-step.is-add { background: var(--swiss-red); color: var(--accent-ink); border-color: var(--line-strong); }
+.cf-step.is-own-add { background: var(--grey-1); color: var(--win); border-color: var(--win); }
 .cf-step:hover { transform: scale(1.06); }
 
 /* 右侧草稿牌组栏 */
@@ -1787,7 +1865,10 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.72); }
     background-position: 0 244px, 0 0;
   }
   .mast-inner, main, .site-footer { padding-left: 12px; padding-right: 12px; }
-  .mast-inner { height: 56px; gap: 12px; }
+  .mast-inner { height: 56px; gap: 8px; }
+  .brand { font-size: 1.35rem; gap: 7px; }
+  .brand-mark { width: 24px; height: 24px; }
+  .refresh, .account-btn { padding: 5px 9px; font-size: 0.78rem; gap: 4px; }
   .mast-nav, .freshness { display: none; }
   main { padding-top: 16px; padding-bottom: 132px; }
   .site-footer { padding-bottom: 92px; }
@@ -1909,6 +1990,32 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.72); }
   }
   .draft-drawer[hidden] { display: none; }
 }
+
+/* 帳號登入與收藏管理彈窗 */
+.modal-stack { display: grid; gap: 14px; }
+.auth-tabs { width: fit-content; }
+.auth-form { display: grid; gap: 10px; }
+.account-card {
+  padding: 14px;
+  border-radius: var(--r-ctrl);
+  border: 1.5px solid var(--line-strong);
+  background: var(--grey-0);
+  display: grid;
+  gap: 12px;
+}
+.account-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.account-stats { display: flex; gap: 20px; padding-top: 10px; border-top: 1px solid var(--line); }
+.account-stats > div { display: grid; gap: 2px; }
+.account-stats b { font-family: var(--font-num); font-size: 1.45rem; line-height: 1; color: var(--swiss-red); }
+.account-stats span { font-size: 0.78rem; color: var(--text-mute); font-weight: 600; }
+.cloud-setup-details {
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-ctrl);
+  background: var(--grey-0);
+}
+.cloud-setup-details summary { cursor: pointer; font-size: 0.82rem; font-weight: 700; color: var(--text-mute); }
+.cloud-setup-details[open] summary { margin-bottom: 10px; color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

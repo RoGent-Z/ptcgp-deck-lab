@@ -1,4 +1,5 @@
-import { deckFingerprint, interval, titleCase, validateDeck } from './core.mjs';
+import { deckFingerprint, evaluateDeckOwnership, interval, titleCase, validateDeck } from './core.mjs';
+import { getCloudConfig, isCloudConfigured } from './cloud.mjs';
 import {
   cardPrimaryTypes,
   esc,
@@ -64,10 +65,11 @@ const TRAINER_SUBTYPE_OPTIONS = [
 ];
 
 export const uiState = {
-  catalog: { q: '', set: '', type: '', kind: '', subtype: '', stage: '', rarity: '', page: 1, perPage: 30 },
+  catalog: { q: '', set: '', type: '', kind: '', subtype: '', stage: '', rarity: '', owned: '', page: 1, perPage: 30 },
   decks: { view: 'showcase' },
   meta: { sort: 'count', q: '', page: 1, perPage: 40 },
-  battle: { deckId: null, running: false, activeRunId: null, abortCtrl: null }
+  battle: { deckId: null, running: false, activeRunId: null, abortCtrl: null },
+  auth: { mode: 'login' }
 };
 
 function deckTotalCount(deck) {
@@ -280,12 +282,17 @@ export function renderDraftPanel() {
   const draftSprites = renderPokemonSprites(resolveFeaturedPokemon(draft, state.cardsById, state.spriteMap), 'sm');
 
   const draftCards = draft.cards || [];
+  const ownership = evaluateDeckOwnership(draft, state.collection, state.cardsById);
 
   let rowsHtml = '';
   for (let idx = 0; idx < draftCards.length; idx++) {
     const item = draftCards[idx];
     const card = state.cardsById.get(item.id);
     const color = card ? cardPrimaryTypes(card)[0].color : 'var(--text-faint)';
+    const ownInfo = ownership.byEntryIndex[idx];
+    const missHtml = state.showMissingBadges && ownInfo && ownInfo.missing > 0
+      ? `<span class="miss-pill ${ownInfo.ownedForSlot === 0 ? 'is-none' : 'is-short'}">${ownInfo.ownedForSlot === 0 ? '未持有' : `缺 ${ownInfo.missing}`}</span>`
+      : '';
     rowsHtml += `
       <li class="draft-row" draggable="true" data-id="${esc(item.id)}">
         <span class="draft-bar" style="background:${color}"></span>
@@ -295,7 +302,7 @@ export function renderDraftPanel() {
         </div>
         <button class="draft-card-btn" type="button" data-action="inspect-card" data-id="${esc(item.id)}">
           <span class="draft-card-name">${esc(card?.name || item.id)}</span>
-          <small class="draft-card-id">${esc(item.id)}</small>
+          <small class="draft-card-id">${esc(item.id)}${missHtml}</small>
         </button>
         <div class="draft-stepper">
           <button type="button" data-action="remove-card" data-id="${esc(item.id)}" aria-label="減少 ${esc(card?.name || item.id)}">−</button>
@@ -366,6 +373,12 @@ export function filterCatalogCards() {
         return false;
       }
     }
+    if (f.owned) {
+      const cnt = Number(state.collection?.[c.id] || 0);
+      if (f.owned === 'missing' && cnt !== 0) return false;
+      if (f.owned === 'short' && cnt >= 2) return false;
+      if (f.owned === 'owned' && cnt <= 0) return false;
+    }
     if (qFold && !c._search.includes(qFold)) return false;
     return true;
   });
@@ -404,10 +417,18 @@ export function renderCatalogGridHtml() {
   return `
     <div class="catalog-meta-bar">
       <span>符合 <b>${filtered.length}</b> 張卡牌（第 ${f.page} / ${totalPages} 頁）</span>
-      ${state.catalog ? `<button class="text-link" type="button" data-action="show-catalog-audit">查看系列收錄完備度 →</button>` : ''}
+      <div class="actions">
+        <button class="text-link" type="button" data-action="open-collection-tools">批次管理收藏</button>
+        ${state.catalog ? `<button class="text-link" type="button" data-action="show-catalog-audit">查看系列收錄完備度 →</button>` : ''}
+      </div>
     </div>
     <div class="card-grid">
-      ${slice.map((c) => renderCardFace(c, { showDeckAction: true, inDeckCount: inDeckMap.get(c.id) || 0 })).join('')}
+      ${slice.map((c) => renderCardFace(c, {
+        showDeckAction: true,
+        inDeckCount: inDeckMap.get(c.id) || 0,
+        ownedCount: state.collection?.[c.id] || 0,
+        showMissing: state.showMissingBadges
+      })).join('')}
     </div>
     <div class="pager">
       <button class="btn btn-outline" type="button" data-action="catalog-page" data-page="${f.page - 1}" ${f.page <= 1 ? 'disabled' : ''}>上一頁</button>
@@ -471,6 +492,12 @@ export function renderCatalog() {
             <select id="filter-rarity" aria-label="依稀有度篩選">
               <option value="">全部稀有度</option>
               ${rarities.map((r) => `<option value="${esc(r)}" ${f.rarity === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
+            </select>
+            <select id="filter-owned" aria-label="依持有狀態篩選">
+              <option value="">全部持有狀態</option>
+              <option value="missing" ${f.owned === 'missing' ? 'selected' : ''}>遊戲內未持有 (0 張)</option>
+              <option value="short" ${f.owned === 'short' ? 'selected' : ''}>未滿編 (&lt; 2 張)</option>
+              <option value="owned" ${f.owned === 'owned' ? 'selected' : ''}>已持有 (≥ 1 張)</option>
             </select>
           </div>
         </div>
@@ -537,11 +564,25 @@ export function renderDecks() {
 
     const featuredList = resolveFeaturedPokemon(selected, state.cardsById, state.spriteMap);
     const detailSprites = renderPokemonSprites(featuredList, 'lg');
+    const ownership = evaluateDeckOwnership(selected, state.collection, state.cardsById);
+    const ownSummaryText = state.showMissingBadges && slotsCount > 0
+      ? (ownership.totalMissing > 0 ? ` · 缺 ${ownership.totalMissing} 張未持有` : ' · 已集齊')
+      : '';
 
     const viewBody = isShowcase
-      ? renderDeckShowcase(selected, state.cardsById, { valid: isValid, spriteMap: state.spriteMap, featuredPokemon: featuredList })
+      ? renderDeckShowcase(selected, state.cardsById, {
+          valid: isValid,
+          spriteMap: state.spriteMap,
+          featuredPokemon: featuredList,
+          collection: state.collection,
+          showMissing: state.showMissingBadges
+        })
       : `<div class="slot-grid">
-          ${expanded.map((e) => renderDeckMiniSlot(e.card, e.count, e.id)).join('')}
+          ${expanded.map((e, i) => renderDeckMiniSlot(e.card, e.count, e.id, {
+            showMissing: state.showMissingBadges,
+            missingCount: ownership.byEntryIndex[i]?.missing || 0,
+            ownedForSlot: ownership.byEntryIndex[i]?.ownedForSlot || 0
+          })).join('')}
           ${Array.from({ length: emptySlots }, () => '<div class="deck-slot is-empty"><span>空位</span></div>').join('')}
         </div>`;
 
@@ -552,9 +593,10 @@ export function renderDecks() {
             ${detailSprites}
             <input id="deck-rename-input" class="deck-name-input" type="text" maxlength="150" value="${esc(selected.name)}" data-deck-id="${esc(selected.id)}" aria-label="牌組名稱">
           </div>
-          <p class="sub">共 ${slotsCount} 張（寶可夢 ${pkCount} · 訓練家 ${trCount}） · 更新於 ${formatDate(selected.updatedAt)}</p>
+          <p class="sub">共 ${slotsCount} 張（寶可夢 ${pkCount} · 訓練家 ${trCount}${ownSummaryText}） · 更新於 ${formatDate(selected.updatedAt)}</p>
         </div>
         <div class="deck-head-right">
+          <button class="mini-pill ${state.showMissingBadges ? 'is-on' : ''}" type="button" data-action="toggle-missing-badges" title="切換顯示或隱藏未持有卡牌標記">${state.showMissingBadges ? '缺卡標記：開' : '缺卡標記：關'}</button>
           <div class="seg-group" role="group" aria-label="牌組檢視方式">
             <button class="seg-btn ${isShowcase ? 'is-active' : ''}" type="button" data-action="set-decks-view" data-view="showcase">完整陳列 (5×4)</button>
             <button class="seg-btn ${!isShowcase ? 'is-active' : ''}" type="button" data-action="set-decks-view" data-view="compact">精簡清單</button>
@@ -845,14 +887,19 @@ export function buildCardDetailModal(card) {
 export function buildMetaDetailModal(entry) {
   const rep = entry.representative;
   const repCards = rep?.cards ? sortDeckEntriesPtcgpDefault(rep.cards, state.cardsById) : [];
-  const rows = repCards.map((c) => {
+  const ownership = evaluateDeckOwnership({ cards: repCards }, state.collection, state.cardsById);
+  const rows = repCards.map((c, idx) => {
     const card = state.cardsById.get(c.id);
     const thumb = card ? renderCardImgTag(card, 'rep-thumb', false) : '';
+    const own = ownership.byEntryIndex[idx];
+    const missHtml = state.showMissingBadges && own && own.missing > 0
+      ? `<span class="miss-pill ${own.ownedForSlot === 0 ? 'is-none' : 'is-short'}">${own.ownedForSlot === 0 ? '未持有' : `缺 ${own.missing}`}</span>`
+      : '';
     return `
       <li class="rep-row ${card ? '' : 'is-missing'}">
         ${thumb ? `<span class="rep-thumb-wrap">${thumb}</span>` : ''}
         <span class="rep-id">${esc(c.id)}</span>
-        <span class="rep-name">${card ? esc(card.name) : '卡庫缺失'}</span>
+        <span class="rep-name">${card ? esc(card.name) : '卡庫缺失'}${missHtml}</span>
         ${card ? `<span class="tokens-inline">${cardPrimaryTypes(card).map((t) => renderEnergyToken(t.key, 'sm')).join('')}</span>` : ''}
         <strong class="rep-qty">×${c.count}</strong>
       </li>
@@ -863,7 +910,7 @@ export function buildMetaDetailModal(entry) {
     <div class="detail-meta-head">
       <div>
         <p class="desc">參賽 ${entry.count} 套（使用率 ${(entry.share * 100).toFixed(2)}%）· ${entry.wins}勝 ${entry.draws}和 ${entry.losses}敗（勝率 ${entry.winRate != null ? (entry.winRate * 100).toFixed(2) + '%' : '—'}）· 冠軍 ${entry.champions} 次 / 八強 ${entry.top8} 次</p>
-        ${rep ? `<p class="desc">代表牌表出處：<a href="${esc(rep.url)}" target="_blank" rel="noopener">${esc(rep.event)}</a>（第 ${esc(rep.placing)} 名 · 該構築出現 ${rep.frequency} 次）</p>` : ''}
+        ${rep ? `<p class="desc">代表牌表出處：<a href="${esc(rep.url)}" target="_blank" rel="noopener">${esc(rep.event)}</a>（第 ${esc(rep.placing)} 名 · 該構築出現 ${rep.frequency} 次${state.showMissingBadges ? ` · 持卡進度 ${ownership.totalOwned}/20${ownership.totalMissing ? `（缺 ${ownership.totalMissing} 張）` : '（已集齊）'}` : ''}）</p>` : ''}
       </div>
     </div>
     ${rep ? `
@@ -900,7 +947,14 @@ export function buildDeckShowcaseModal(deck, opts = {}) {
   const issues = state.cardsMissing ? ['等待卡庫'] : validateDeck(deck, state.cardsById);
   const valid = !state.cardsMissing && issues.length === 0;
   return `
-    ${renderDeckShowcase(deck, state.cardsById, { valid, hiRes: true, immersive: true, spriteMap: state.spriteMap })}
+    ${renderDeckShowcase(deck, state.cardsById, {
+      valid,
+      hiRes: true,
+      immersive: true,
+      spriteMap: state.spriteMap,
+      collection: state.collection,
+      showMissing: state.showMissingBadges
+    })}
     <div class="actions spaced block-gap">
       <span class="muted">${valid ? '' : esc(issues[0] || '')}</span>
       <div class="actions">
@@ -908,6 +962,134 @@ export function buildDeckShowcaseModal(deck, opts = {}) {
         ${opts.cloneMetaId ? `<button class="btn btn-primary" type="button" data-action="clone-meta-deck" data-id="${esc(opts.cloneMetaId)}">複製到我的牌組</button>` : ''}
         ${opts.battleDeckId ? `<button class="btn btn-primary" type="button" data-action="deck-to-battle" data-id="${esc(opts.battleDeckId)}">前往對戰測試</button>` : ''}
       </div>
+    </div>
+  `;
+}
+
+export function buildCollectionToolsModal() {
+  const filtered = filterCatalogCards();
+  const ownedKinds = Object.values(state.collection || {}).filter((n) => n > 0).length;
+  const ownedCopies = Object.values(state.collection || {}).reduce((s, n) => s + (Number(n) || 0), 0);
+  return `
+    <div class="modal-stack">
+      <div class="status-note">已標記持有 <b>${ownedKinds}</b> 種卡牌（共 <b>${ownedCopies}</b> 張），目前圖鑑篩選結果共 <b>${filtered.length}</b> 張。</div>
+      <div class="detail-section">
+        <strong>批次標記目前篩選範圍（共 ${filtered.length} 張）</strong>
+        <p class="desc">可先在圖鑑選好系列（例如某擴充包），再一鍵設為已持有，最後逐張扣掉還沒抽到的卡。</p>
+        <div class="actions block-gap">
+          <button class="btn btn-outline" type="button" data-action="batch-collection-add1" ${filtered.length ? '' : 'disabled'}>全部各 +1 張</button>
+          <button class="btn btn-outline" type="button" data-action="batch-collection-fill2" ${filtered.length ? '' : 'disabled'}>全部補滿 ×2</button>
+          <button class="btn btn-danger" type="button" data-action="batch-collection-clear" ${filtered.length ? '' : 'disabled'}>清空此篩選持有</button>
+        </div>
+      </div>
+      <div class="detail-section">
+        <strong>帳號／全庫備份匯入匯出</strong>
+        <div class="actions block-gap">
+          <button class="btn btn-outline" type="button" data-action="export-full-backup">匯出全部牌組與收藏 JSON</button>
+          <button class="btn btn-outline" type="button" data-action="import-deck-trigger">匯入備份或單副牌表 JSON</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+export function buildAccountModal() {
+  const configured = isCloudConfigured();
+  const cfg = getCloudConfig();
+  const session = state.cloudSession;
+  const mode = uiState.auth.mode === 'signup' ? 'signup' : 'login';
+  const decksCnt = state.decks.length;
+  const ownedCnt = Object.values(state.collection || {}).filter((n) => n > 0).length;
+
+  if (session?.user) {
+    const syncLabel = state.cloudSyncAt ? new Date(state.cloudSyncAt).toLocaleString('zh-TW') : '尚未同步';
+    return `
+      <div class="modal-stack">
+        <div class="account-card">
+          <div class="account-card-head">
+            <div>
+              <strong>${esc(session.user.email || session.user.id)}</strong>
+              <p class="sub">雲端狀態：${esc(state.cloudSyncMessage || '已連線')} · 上次同步：${esc(syncLabel)}</p>
+            </div>
+            <span class="tag-opp">已登入</span>
+          </div>
+          <div class="account-stats">
+            <div><b>${decksCnt}</b><span>已存牌組</span></div>
+            <div><b>${ownedCnt}</b><span>已標記持有卡</span></div>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-primary" type="button" data-action="cloud-sync-now">立即雙向同步</button>
+          <button class="btn btn-outline" type="button" data-action="cloud-pull-overwrite">下載雲端覆蓋本機</button>
+          <button class="btn btn-outline" type="button" data-action="cloud-push-overwrite">上傳本機覆蓋雲端</button>
+        </div>
+        <div class="detail-section">
+          <strong>完整資料備份</strong>
+          <div class="actions block-gap">
+            <button class="btn btn-outline" type="button" data-action="export-full-backup">匯出全部牌組與收藏 JSON</button>
+            <button class="btn btn-outline" type="button" data-action="import-deck-trigger">匯入備份 JSON</button>
+            <button class="btn btn-danger" type="button" data-action="cloud-signout">登出帳號</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="modal-stack">
+      ${!configured ? `
+        <div class="status-note is-warn">目前尚未連結雲端帳號伺服器（仍可先於本機儲存牌組、標記缺卡並匯出備份）。</div>
+      ` : ''}
+      <div class="seg-group auth-tabs" role="group" aria-label="帳號模式切換">
+        <button class="seg-btn ${mode === 'login' ? 'is-active' : ''}" type="button" data-action="switch-auth-tab" data-mode="login">登入帳號</button>
+        <button class="seg-btn ${mode === 'signup' ? 'is-active' : ''}" type="button" data-action="switch-auth-tab" data-mode="signup">註冊新帳號</button>
+      </div>
+      <form id="cloud-auth-form" class="auth-form">
+        <label class="field-label">
+          <span>電子郵件（Email）</span>
+          <input id="auth-email" type="email" required autocomplete="email" placeholder="you@example.com" ${configured ? '' : 'disabled'}>
+        </label>
+        <label class="field-label">
+          <span>密碼（至少 6 碼）</span>
+          <input id="auth-password" type="password" required minlength="6" autocomplete="${mode === 'signup' ? 'new-password' : 'current-password'}" placeholder="輸入密碼" ${configured ? '' : 'disabled'}>
+        </label>
+        ${mode === 'signup' ? `
+          <label class="field-label">
+            <span>確認密碼</span>
+            <input id="auth-password2" type="password" required minlength="6" autocomplete="new-password" placeholder="再次輸入密碼" ${configured ? '' : 'disabled'}>
+          </label>
+        ` : ''}
+        <div class="actions">
+          <button class="btn btn-primary" type="submit" ${configured ? '' : 'disabled'}>${mode === 'signup' ? '建立新帳號並同步' : '登入帳號'}</button>
+          <button class="btn btn-outline" type="button" data-action="cloud-google-login" ${configured ? '' : 'disabled'}>使用 Google 帳號登入</button>
+        </div>
+      </form>
+      <div class="detail-section">
+        <strong>本機資料備份（目前本機：${decksCnt} 套牌組 · ${ownedCnt} 種持有卡）</strong>
+        <div class="actions block-gap">
+          <button class="btn btn-outline" type="button" data-action="export-full-backup">匯出全部資料 JSON</button>
+          <button class="btn btn-outline" type="button" data-action="import-deck-trigger">匯入備份 JSON</button>
+        </div>
+      </div>
+      ${!cfg.fromRepo ? `
+        <details class="cloud-setup-details">
+          <summary>管理員：設定本機測試用 Supabase 連線</summary>
+          <form id="cloud-config-form" class="auth-form">
+            <label class="field-label">
+              <span>Supabase Project URL</span>
+              <input id="cfg-sb-url" type="url" value="${esc(cfg.supabaseUrl)}" placeholder="https://xxxx.supabase.co">
+            </label>
+            <label class="field-label">
+              <span>Supabase Anon Key（公開金鑰）</span>
+              <input id="cfg-sb-key" type="text" value="${esc(cfg.supabaseAnonKey)}" placeholder="貼上 anon public key">
+            </label>
+            <div class="actions">
+              <button class="btn btn-outline" type="submit">套用連線設定</button>
+              ${cfg.supabaseUrl ? '<button class="btn btn-danger" type="button" data-action="cloud-clear-override">清除設定</button>' : ''}
+            </div>
+          </form>
+        </details>
+      ` : ''}
     </div>
   `;
 }

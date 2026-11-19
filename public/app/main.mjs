@@ -1,4 +1,4 @@
-import { normalizeFeaturedPokemon, readDeckFile, titleCase } from './core.mjs';
+import { normalizeFeaturedPokemon, titleCase } from './core.mjs';
 import {
   bindCardImageFallback,
   bindFoilEffects,
@@ -7,16 +7,30 @@ import {
   sortDeckEntriesPtcgpDefault
 } from './cardface.mjs';
 import {
+  saveCloudOverride,
+  signInAccount,
+  signOutAccount,
+  signUpAccount,
+  startGoogleSignIn
+} from './cloud.mjs';
+import {
   deleteDeck,
   ensureFullMeta,
+  exportFullBackupJson,
   freshnessStatus,
+  importBackupJson,
+  initCloudSessionAndSync,
   loadInitialData,
   saveDeck,
   saveDraft,
   saveRunRecord,
+  setCloudSyncListener,
   setFeaturedDeck,
+  setOwnedBatch,
   setOwnedCount,
-  state
+  setShowMissingBadges,
+  state,
+  syncWithCloud
 } from './data.mjs';
 import { icon } from './icons.mjs';
 import {
@@ -28,10 +42,13 @@ import {
   resolveOpponentLineup
 } from './battle.mjs';
 import {
+  buildAccountModal,
   buildCardDetailModal,
   buildCatalogAuditModal,
+  buildCollectionToolsModal,
   buildDeckShowcaseModal,
   buildMetaDetailModal,
+  filterCatalogCards,
   renderBattle,
   renderCatalog,
   renderCatalogGridHtml,
@@ -106,6 +123,22 @@ function updateChrome(route) {
     frEl.title = fr.detail;
     const textEl = frEl.querySelector('.freshness-text');
     if (textEl) textEl.textContent = fr.label;
+  }
+
+  const accBtn = document.getElementById('account-btn');
+  const accTxt = document.getElementById('account-btn-text');
+  if (accBtn && accTxt) {
+    const user = state.cloudSession?.user;
+    if (user) {
+      accBtn.dataset.state = state.cloudSyncState === 'error' ? 'error' : state.cloudSyncState === 'syncing' ? 'syncing' : 'online';
+      const label = (user.email || user.id || '已登入').split('@')[0];
+      accTxt.textContent = state.cloudSyncState === 'syncing' ? '同步中…' : label;
+      accBtn.title = `${user.email || user.id} · ${state.cloudSyncMessage || '已登入'}`;
+    } else {
+      accBtn.dataset.state = 'off';
+      accTxt.textContent = '登入 / 註冊';
+      accBtn.title = '帳號登入、註冊與雲端同步';
+    }
   }
 
   const totalDraft = (state.draft?.cards || []).reduce((s, c) => s + c.count, 0);
@@ -296,7 +329,7 @@ async function handleAction(el) {
   }
 
   if (action === 'reset-catalog-filters') {
-    uiState.catalog = { ...uiState.catalog, q: '', set: '', type: '', kind: '', subtype: '', stage: '', rarity: '', page: 1 };
+    uiState.catalog = { ...uiState.catalog, q: '', set: '', type: '', kind: '', subtype: '', stage: '', rarity: '', owned: '', page: 1 };
     renderRoute();
     return;
   }
@@ -306,11 +339,109 @@ async function handleAction(el) {
     return;
   }
 
+  if (action === 'open-collection-tools') {
+    openModal('收藏批次管理與備份', buildCollectionToolsModal());
+    return;
+  }
+
+  if (action === 'batch-collection-add1' || action === 'batch-collection-fill2' || action === 'batch-collection-clear') {
+    const list = filterCatalogCards();
+    const updates = list.map((c) => {
+      const cur = Number(state.collection?.[c.id] || 0);
+      if (action === 'batch-collection-clear') return [c.id, 0];
+      if (action === 'batch-collection-fill2') return [c.id, Math.max(cur, 2)];
+      return [c.id, Math.min(99, cur + 1)];
+    });
+    await setOwnedBatch(updates);
+    const resEl = document.getElementById('catalog-results');
+    if (resEl) resEl.innerHTML = renderCatalogGridHtml();
+    refreshDraftPanels();
+    if (dialogEl.open) dialogBodyEl.innerHTML = buildCollectionToolsModal();
+    showNotice(`已更新 ${updates.length} 張卡牌持有數量`);
+    return;
+  }
+
+  if (action === 'toggle-missing-badges') {
+    await setShowMissingBadges(!state.showMissingBadges);
+    renderRoute();
+    refreshDraftPanels();
+    showNotice(state.showMissingBadges ? '已開啟未持有／缺卡標記' : '已隱藏未持有／缺卡標記');
+    return;
+  }
+
+  if (action === 'export-full-backup') {
+    const blob = new Blob([exportFullBackupJson()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `pocket-lab-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    showNotice('已匯出全部牌組與收藏備份 JSON');
+    return;
+  }
+
+  if (action === 'open-account-modal') {
+    openModal('帳號與雲端同步', buildAccountModal());
+    return;
+  }
+
+  if (action === 'switch-auth-tab') {
+    uiState.auth.mode = el.dataset.mode || 'login';
+    dialogBodyEl.innerHTML = buildAccountModal();
+    return;
+  }
+
+  if (action === 'cloud-google-login') {
+    try {
+      startGoogleSignIn();
+    } catch (err) {
+      showNotice(err?.message || '無法啟動 Google 登入');
+    }
+    return;
+  }
+
+  if (action === 'cloud-sync-now' || action === 'cloud-pull-overwrite' || action === 'cloud-push-overwrite') {
+    const mode = action === 'cloud-pull-overwrite' ? 'pull' : action === 'cloud-push-overwrite' ? 'push' : 'merge';
+    try {
+      await syncWithCloud(mode);
+      renderRoute();
+      refreshDraftPanels();
+      if (dialogEl.open) dialogBodyEl.innerHTML = buildAccountModal();
+      showNotice(mode === 'pull' ? '已自雲端下載並套用' : mode === 'push' ? '已上傳覆蓋雲端備份' : '雲端雙向同步完成');
+    } catch (err) {
+      showNotice(err?.message || '雲端同步失敗');
+    }
+    return;
+  }
+
+  if (action === 'cloud-signout') {
+    await signOutAccount();
+    state.cloudSession = null;
+    state.cloudSyncState = 'idle';
+    state.cloudSyncMessage = '';
+    updateChrome(currentRoute());
+    if (dialogEl.open) dialogBodyEl.innerHTML = buildAccountModal();
+    showNotice('已登出帳號（本機資料保留）');
+    return;
+  }
+
+  if (action === 'cloud-clear-override') {
+    saveCloudOverride('', '');
+    if (dialogEl.open) dialogBodyEl.innerHTML = buildAccountModal();
+    showNotice('已清除本機連線設定');
+    return;
+  }
+
   if (action === 'own-delta') {
     const next = Math.max(0, (state.collection[id] || 0) + Number(el.dataset.delta || 0));
     await setOwnedCount(id, next);
     const valEl = document.getElementById('modal-own-val');
     if (valEl) valEl.textContent = String(next);
+    if (currentRoute() === 'catalog') {
+      const resEl = document.getElementById('catalog-results');
+      if (resEl) resEl.innerHTML = renderCatalogGridHtml();
+    }
+    refreshDraftPanels();
     return;
   }
 
@@ -664,7 +795,60 @@ document.addEventListener('change', async (e) => {
   else if (t.id === 'filter-subtype') { uiState.catalog.subtype = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-stage') { uiState.catalog.stage = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-rarity') { uiState.catalog.rarity = t.value; uiState.catalog.page = 1; renderRoute(); }
+  else if (t.id === 'filter-owned') { uiState.catalog.owned = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'battle-deck-select') { uiState.battle.deckId = t.value; uiState.battle.activeRunId = null; renderRoute(); }
+});
+
+document.addEventListener('submit', async (e) => {
+  const form = e.target;
+  if (form.id === 'cloud-auth-form') {
+    e.preventDefault();
+    const email = document.getElementById('auth-email')?.value || '';
+    const pass = document.getElementById('auth-password')?.value || '';
+    const pass2 = document.getElementById('auth-password2')?.value;
+    const isSignup = uiState.auth.mode === 'signup';
+    if (isSignup && pass2 != null && pass !== pass2) {
+      showNotice('兩次輸入的密碼不一致');
+      return;
+    }
+    const submitBtn = form.querySelector('[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      if (isSignup) {
+        const res = await signUpAccount(email, pass);
+        if (res.needsEmailVerification) {
+          showNotice('註冊成功！請先至信箱點擊驗證信後再登入');
+          uiState.auth.mode = 'login';
+          dialogBodyEl.innerHTML = buildAccountModal();
+          return;
+        }
+        state.cloudSession = res.session;
+      } else {
+        state.cloudSession = await signInAccount(email, pass);
+      }
+      await syncWithCloud('merge');
+      renderRoute();
+      refreshDraftPanels();
+      dialogBodyEl.innerHTML = buildAccountModal();
+      showNotice(isSignup ? '註冊並登入成功，資料已同步雲端' : '登入成功，已同步雲端牌組與收藏');
+    } catch (err) {
+      showNotice(err?.message || '驗證失敗');
+      if (submitBtn) submitBtn.disabled = false;
+    }
+    return;
+  }
+  if (form.id === 'cloud-config-form') {
+    e.preventDefault();
+    try {
+      const url = document.getElementById('cfg-sb-url')?.value || '';
+      const key = document.getElementById('cfg-sb-key')?.value || '';
+      saveCloudOverride(url, key);
+      dialogBodyEl.innerHTML = buildAccountModal();
+      showNotice('已套用 Supabase 連線設定');
+    } catch (err) {
+      showNotice(err?.message || '設定格式錯誤');
+    }
+  }
 });
 
 // 草稿牌組拖曳排序（桌面側欄與抽屜共用）
@@ -722,11 +906,17 @@ importInputEl.addEventListener('change', async () => {
   const file = importInputEl.files?.[0];
   if (!file) return;
   try {
-    const parsed = readDeckFile(await file.text());
-    const saved = await saveDeck({ id: crypto.randomUUID(), ...parsed });
-    state.selectedDeckId = saved.id;
-    renderRoute();
-    showNotice(`已匯入「${saved.name}」`);
+    const res = await importBackupJson(await file.text());
+    if (res.mode === 'backup') {
+      renderRoute();
+      refreshDraftPanels();
+      if (dialogEl.open) dialogBodyEl.innerHTML = buildAccountModal();
+      showNotice(`已匯入 ${res.deckCount} 套牌組與 ${res.colCount} 種收藏紀錄`);
+    } else {
+      state.selectedDeckId = res.saved.id;
+      renderRoute();
+      showNotice(`已匯入「${res.saved.name}」`);
+    }
   } catch (err) {
     showNotice('匯入失敗：' + (err?.message || '格式無效'));
   }
@@ -766,12 +956,21 @@ window.addEventListener('hashchange', () => renderRoute(true));
 async function boot() {
   bindCardImageFallback(document);
   populateBottomNav();
+  setCloudSyncListener(() => updateChrome(currentRoute()));
   if (state.fixture) {
     const banner = document.getElementById('fixture-banner');
     if (banner) banner.hidden = false;
   }
   await Promise.all([loadInitialData(false), probeEngine()]);
   renderRoute();
+  initCloudSessionAndSync()
+    .then((sess) => {
+      if (sess) {
+        renderRoute();
+        refreshDraftPanels();
+      }
+    })
+    .catch(() => {});
 }
 
 boot().catch((err) => {

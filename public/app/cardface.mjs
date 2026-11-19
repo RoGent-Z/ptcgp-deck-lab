@@ -1,3 +1,5 @@
+import { evaluateDeckOwnership } from './core.mjs';
+
 export const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
 }[ch]));
@@ -263,6 +265,8 @@ export function renderCardFace(card, opts = {}) {
   const foil = isFoilCard(card);
   const crown = isCrownCard(card);
   const inDeck = opts.inDeckCount || 0;
+  const trackOwned = opts.ownedCount != null && opts.showMissing !== false;
+  const ownedCount = Math.max(0, Number(opts.ownedCount || 0));
   const illegal = card.legal === false || card.playable === false;
   const engineMissing = opts.engineStatus && opts.engineStatus !== 'Implemented' && opts.engineStatus !== 'ok';
   const hiRes = Boolean(opts.hiRes);
@@ -280,7 +284,8 @@ export function renderCardFace(card, opts = {}) {
     t2 ? 'is-dual' : '',
     foil ? 'is-foil' : '',
     crown ? 'is-crown' : '',
-    hiRes ? 'is-hires' : ''
+    hiRes ? 'is-hires' : '',
+    trackOwned && ownedCount === 0 ? 'is-unowned' : ''
   ].filter(Boolean).join(' ');
 
   const tokensHtml = card.type === 'trainer'
@@ -288,6 +293,11 @@ export function renderCardFace(card, opts = {}) {
     : types.slice(0, 2).map((t) => renderEnergyToken(t.key, 'sm')).join('');
 
   const imgTag = renderCardImgTag(card, 'cf-img', hiRes);
+  const ownTagHtml = trackOwned
+    ? (ownedCount === 0
+        ? '<span class="cf-own-tag is-missing">未持有</span>'
+        : `<span class="cf-own-tag is-owned">持有 ×${ownedCount}</span>`)
+    : '';
 
   const badges = [];
   if (illegal) badges.push('<span class="cf-status is-warn">非標準</span>');
@@ -297,6 +307,7 @@ export function renderCardFace(card, opts = {}) {
     <article class="${classes}" style="${styleVars}" data-card-id="${esc(card.id)}">
       <button class="cf-hit" type="button" data-action="inspect-card" data-id="${esc(card.id)}" aria-label="查看 ${esc(card.name)} (${esc(card.id)})">
         <div class="cf-media">
+          ${ownTagHtml}
           <div class="cf-fallback" aria-hidden="true">
             <div class="cf-fb-emblem">${tokensHtml}</div>
             <span class="cf-fb-name">${esc(card.name)}</span>
@@ -325,11 +336,19 @@ export function renderCardFace(card, opts = {}) {
             <button class="cf-step is-add" type="button" data-action="add-card" data-id="${esc(card.id)}" aria-label="將 ${esc(card.name)} 加入牌組">+</button>
           </div>
         </div>` : ''}
+      ${trackOwned && !hiRes ? `
+        <div class="cf-own-row">
+          <span class="cf-own-label ${ownedCount > 0 ? 'is-owned' : 'is-missing'}">${ownedCount > 0 ? `持有 ×${ownedCount}` : '遊戲內未持有'}</span>
+          <div class="cf-actions">
+            ${ownedCount > 0 ? `<button class="cf-step" type="button" data-action="own-delta" data-id="${esc(card.id)}" data-delta="-1" aria-label="減少持有 ${esc(card.name)}">−</button>` : ''}
+            <button class="cf-step is-own-add" type="button" data-action="own-delta" data-id="${esc(card.id)}" data-delta="1" aria-label="標記持有 ${esc(card.name)}">+</button>
+          </div>
+        </div>` : ''}
     </article>
   `;
 }
 
-export function renderDeckMiniSlot(card, count, idFallback) {
+export function renderDeckMiniSlot(card, count, idFallback, opts = {}) {
   if (!card) {
     return `<div class="deck-slot is-missing" title="卡庫缺失 ${esc(idFallback)}">
       <span class="slot-id">${esc(idFallback)}</span>
@@ -339,10 +358,16 @@ export function renderDeckMiniSlot(card, count, idFallback) {
   }
   const t = cardPrimaryTypes(card)[0];
   const thumb = renderCardImgTag(card, 'slot-thumb', false);
-  return `<button class="deck-slot" type="button" style="--slot-c:${t.color};--slot-deep:${t.deep}" data-action="inspect-card" data-id="${esc(card.id)}" title="${esc(card.name)} (${esc(card.id)})">
+  const missingCount = Math.max(0, Number(opts.missingCount || 0));
+  const showMissing = opts.showMissing !== false && missingCount > 0;
+  const ownedForSlot = Number(opts.ownedForSlot || 0);
+  const missBadge = showMissing
+    ? `<span class="slot-miss ${ownedForSlot === 0 ? 'is-none' : 'is-short'}">${ownedForSlot === 0 ? '未持有' : `缺 ${missingCount}`}</span>`
+    : '';
+  return `<button class="deck-slot ${showMissing ? 'is-unowned' : ''}" type="button" style="--slot-c:${t.color};--slot-deep:${t.deep}" data-action="inspect-card" data-id="${esc(card.id)}" title="${esc(card.name)} (${esc(card.id)})">
     <span class="slot-thumb-wrap">${thumb}</span>
     <span class="slot-info">
-      <span class="slot-id">${esc(card.id)}</span>
+      <span class="slot-id">${esc(card.id)}${missBadge}</span>
       <span class="slot-name">${esc(card.name)}</span>
       <span class="slot-qty">×${count}</span>
     </span>
@@ -511,6 +536,17 @@ export function renderDeckShowcase(deck, cardsById, opts = {}) {
   const featuredList = opts.featuredPokemon || resolveFeaturedPokemon(deck, cardsById, opts.spriteMap || null);
   const spritesHtml = renderPokemonSprites(featuredList, 'md');
 
+  const trackMissing = Boolean(opts.collection && opts.showMissing !== false);
+  const ownership = trackMissing ? evaluateDeckOwnership(deck, opts.collection, cardsById) : null;
+  const slotMissList = [];
+  if (ownership) {
+    for (const e of ownership.byEntryIndex) {
+      for (let i = 0; i < e.count; i++) {
+        slotMissList.push(i >= e.ownedForSlot ? (e.ownedForSlot === 0 ? '未持有' : '缺卡') : '');
+      }
+    }
+  }
+
   const cardsHtml = expanded.map((item, idx) => {
     const card = item.card;
     if (!card) {
@@ -525,16 +561,19 @@ export function renderDeckShowcase(deck, cardsById, opts = {}) {
     const t2 = types[1] || null;
     const foil = isFoilCard(card);
     const crown = isCrownCard(card);
+    const missLabel = slotMissList[idx] || '';
     const cls = [
       'showcase-card',
       'card-face',
       t2 ? 'is-dual' : '',
       foil ? 'is-foil' : '',
-      crown ? 'is-crown' : ''
+      crown ? 'is-crown' : '',
+      missLabel ? 'is-slot-missing' : ''
     ].filter(Boolean).join(' ');
     const styleVars = `--c1:${t1.color};--c1-deep:${t1.deep};--c2:${t2 ? t2.color : t1.color};--c2-deep:${t2 ? t2.deep : t1.deep}`;
     return `<button class="${cls}" type="button" style="${styleVars}" data-action="inspect-card" data-id="${esc(card.id)}" aria-label="${esc(card.name)} (${esc(card.id)})">
       <span class="showcase-media">
+        ${missLabel ? `<span class="cf-own-tag is-missing">${esc(missLabel)}</span>` : ''}
         <span class="cf-fallback" aria-hidden="true">
           <span class="cf-fb-name">${esc(card.name)}</span>
           <span class="cf-fb-id">${esc(card.id)}</span>
@@ -552,6 +591,10 @@ export function renderDeckShowcase(deck, cardsById, opts = {}) {
     `<div class="showcase-empty" aria-label="空卡位 ${total + i + 1}"><span>${total + i + 1}</span></div>`
   ).join('');
 
+  const ownSummary = ownership && total > 0
+    ? (ownership.totalMissing > 0 ? ` · 缺 ${ownership.totalMissing} 張` : ' · 已齊全')
+    : '';
+
   return `
     <div class="showcase-board ${opts.immersive ? 'is-immersive' : ''}">
       <div class="showcase-plaque">
@@ -560,7 +603,7 @@ export function renderDeckShowcase(deck, cardsById, opts = {}) {
             ${spritesHtml}
             <strong class="showcase-title">${esc(deck?.name || '未命名牌組')}</strong>
           </div>
-          <span class="showcase-meta">${total}/20 張（寶可夢 ${pkCount} · 訓練家 ${trCount}）</span>
+          <span class="showcase-meta">${total}/20 張（寶可夢 ${pkCount} · 訓練家 ${trCount}${ownSummary}）</span>
         </div>
         <div class="showcase-plaque-right">
           <span class="tokens-inline">${tokens}</span>
