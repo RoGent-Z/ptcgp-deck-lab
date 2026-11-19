@@ -100,9 +100,25 @@ jobs:
           RAW_APK="android/app/build/outputs/apk/release/app-release.apk"
           test -f "$RAW_APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "$RAW_APK"
-          unzip -l "$RAW_APK" | grep -q "assets/public/index.html"
-          unzip -l "$RAW_APK" | grep -q "assets/public/data/cards.json"
-          unzip -l "$RAW_APK" | grep -q "res/.*ic_launcher"
+          python3 - "$RAW_APK" <<'PY'
+          import sys, zipfile
+          apk = sys.argv[1]
+          with zipfile.ZipFile(apk) as zf:
+              names = set(zf.namelist())
+          for req in (
+              "assets/public/index.html",
+              "assets/public/data/cards.json",
+              "assets/public/assets/mark.svg",
+          ):
+              assert req in names, f"missing bundled asset in APK: {req}"
+          print("Verified bundled web assets inside APK:", len(names), "entries")
+          PY
+          BADGING="$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$RAW_APK")"
+          echo "$BADGING" | grep -E "^(package:|application:|application-icon)"
+          echo "$BADGING" | grep -q "name='io.github.rogentz.pocketlab'"
+          echo "$BADGING" | grep -q "versionName='0.0.1'"
+          echo "$BADGING" | grep -q "label='Pocket Lab'"
+          echo "$BADGING" | grep -q "application-icon"
 
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VER="${GITHUB_REF_NAME}"
