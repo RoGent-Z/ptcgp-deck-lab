@@ -18,6 +18,7 @@ import {
 import { FIXTURE_CARDS, FIXTURE_SAMPLE_DECK } from '../public/app/fixture.mjs';
 import {
   getPokemonCategories,
+  matchesPokemonCategoryFilter,
   normalizeFeaturedPokemon,
   POKEMON_CATEGORY_OPTIONS,
   readDeckFile,
@@ -179,12 +180,20 @@ test('sortDeckEntriesPtcgpDefault groups evolution families & trainer subtypes w
   assert.equal(readDeckFile(JSON.stringify(customDeck)).customOrder, true);
 });
 
-test('catalog pokemon categories classify ultra beasts, ancient, future, mega, ex, rocket, regional, dual-type, abilities, fossils, and shiny cards accurately', () => {
+test('catalog pokemon categories support regional split, full paradox/UB coverage, and include/exclude combinators', () => {
   const cards = JSON.parse(readFileSync(new URL('../public/data/cards.json', import.meta.url), 'utf8'));
   const byId = new Map(cards.map((c) => [c.id, c]));
   const pokes = cards.filter((c) => c.type === 'pokemon');
 
-  // Verify every configured category has positive exact coverage
+  // Verify every configured category has positive exact coverage & redundant derived tags were removed
+  const optionIds = new Set(POKEMON_CATEGORY_OPTIONS.map((o) => o.id));
+  assert.equal(optionIds.has('ex_regular'), false);
+  assert.equal(optionIds.has('non_ex'), false);
+  assert.equal(optionIds.has('regional'), false);
+  for (const reg of ['alola', 'galar', 'hisui', 'paldea']) {
+    assert.ok(optionIds.has(reg), `expected regional split option ${reg}`);
+  }
+
   const counts = new Map(POKEMON_CATEGORY_OPTIONS.map((o) => [o.id, 0]));
   for (const c of pokes) {
     for (const id of getPokemonCategories(c)) {
@@ -195,32 +204,48 @@ test('catalog pokemon categories classify ultra beasts, ancient, future, mega, e
     assert.ok(counts.get(opt.id) > 0, `expected >0 cards for pokemon category ${opt.id}`);
   }
 
-  // Exact spot & boundary checks
+  // Paradox & UB prints across non-SV/non-A3a sets must be included
   assert.ok(getPokemonCategories(byId.get('A3a-006')).includes('ultra_beast')); // 爆肌蚊ex
   assert.ok(getPokemonCategories(byId.get('P-A-081')).includes('ultra_beast')); // 究極奈克洛茲瑪ex
   assert.ok(getPokemonCategories(byId.get('B4-016')).includes('ultra_beast'));  // 費洛美螂
-  assert.ok(getPokemonCategories(byId.get('B3a-026')).includes('ancient'));      // 振翼髮ex (古代)
-  assert.ok(getPokemonCategories(byId.get('B3a-036')).includes('ancient'));      // 故勒頓ex (古代)
-  assert.equal(getPokemonCategories(byId.get('B2a-063')).includes('ancient'), false); // B2a 故勒頓非古代機制卡
-  assert.equal(getPokemonCategories(byId.get('B3b-035')).includes('ancient'), false); // B3b 振翼髮無古代標記
-  assert.ok(getPokemonCategories(byId.get('B3a-019')).includes('future'));       // 密勒頓ex (未來)
-  assert.ok(getPokemonCategories(byId.get('B4b-102')).includes('future'));       // 鐵荊棘 B4b 複刻自 B3a
-  assert.equal(getPokemonCategories(byId.get('B2a-045')).includes('future'), false); // B2a 密勒頓非未來機制卡
+  assert.ok(getPokemonCategories(byId.get('B3a-026')).includes('ancient'));      // 振翼髮ex
+  assert.ok(getPokemonCategories(byId.get('B2a-063')).includes('ancient'));      // 故勒頓（非 B3a）
+  assert.ok(getPokemonCategories(byId.get('B3b-035')).includes('ancient'));      // 振翼髮（非 B3a）
+  assert.ok(getPokemonCategories(byId.get('B3a-019')).includes('future'));       // 密勒頓ex
+  assert.ok(getPokemonCategories(byId.get('B2a-045')).includes('future'));       // 密勒頓（非 B3a）
+  assert.ok(getPokemonCategories(byId.get('B3b-020')).includes('future'));       // 鐵包袱（非 B3a）
+  assert.ok(getPokemonCategories(byId.get('B4b-102')).includes('future'));       // 鐵荊棘
+
+  // Regional splits cover embedded prefixes like Team Rocket's Alolan Grimer & P-B Paldean Clodsire
+  assert.ok(getPokemonCategories(byId.get('B4a-040')).includes('alola'));
+  assert.ok(getPokemonCategories(byId.get('B4a-040')).includes('team_rocket'));
+  assert.ok(getPokemonCategories(byId.get('P-B-040')).includes('paldea'));
+  assert.ok(getPokemonCategories(byId.get('B4-095')).includes('galar'));
+  assert.ok(getPokemonCategories(byId.get('B3b-059')).includes('hisui'));
   assert.ok(getPokemonCategories(byId.get('B1-002')).includes('mega'));
   assert.ok(getPokemonCategories(byId.get('B1-002')).includes('ex'));
-  assert.equal(getPokemonCategories(byId.get('B1-002')).includes('ex_regular'), false);
-  assert.ok(getPokemonCategories(byId.get('B4a-007')).includes('team_rocket'));
   assert.ok(getPokemonCategories(byId.get('C1-042')).includes('dual_type'));
-  assert.ok(getPokemonCategories(byId.get('A1a-046')).includes('fossil_evo'));   // 化石翼龍ex
+  assert.ok(getPokemonCategories(byId.get('A1a-046')).includes('fossil_evo'));
 
   // Never false-match English names ending in "ex" without word/space separator (e.g. Toxapex)
   const tox = pokes.find((c) => c.nameEn === 'Toxapex');
-  if (tox) {
-    assert.equal(getPokemonCategories(tox).includes('ex'), false);
-    assert.ok(getPokemonCategories(tox).includes('non_ex'));
-  }
+  if (tox) assert.equal(getPokemonCategories(tox).includes('ex'), false);
 
-  // Trainer cards yield empty pokemon category list
+  // Include / exclude combinator semantics:
+  // 1) Exclude works standalone (e.g., !ex == all non-ex Pokemon)
+  const nonExCount = pokes.filter((c) => matchesPokemonCategoryFilter(c, [], ['ex'])).length;
+  assert.equal(nonExCount, pokes.length - counts.get('ex'));
+  // 2) Include + Exclude works together (e.g., ex && !mega == regular ex)
+  const regularExCount = pokes.filter((c) => matchesPokemonCategoryFilter(c, ['ex'], ['mega'])).length;
+  assert.equal(regularExCount, counts.get('ex') - counts.get('mega'));
+  // 3) Same-group multi-select uses OR (e.g., alola || galar), cross-group uses AND (e.g., (alola||galar) && ex)
+  const alolaOrGalar = pokes.filter((c) => matchesPokemonCategoryFilter(c, ['alola', 'galar'], [])).length;
+  assert.equal(alolaOrGalar, counts.get('alola') + counts.get('galar'));
+  const ubEx = pokes.filter((c) => matchesPokemonCategoryFilter(c, ['ultra_beast', 'ex'], []));
+  assert.ok(ubEx.some((c) => c.id === 'A3a-006') && !ubEx.some((c) => c.id === 'A3a-007'));
+
+  // Trainer cards yield empty pokemon category list and fail pokemon category filters
   const trainer = cards.find((c) => c.type === 'trainer');
   assert.deepEqual(getPokemonCategories(trainer), []);
+  assert.equal(matchesPokemonCategoryFilter(trainer, ['ex'], []), false);
 });

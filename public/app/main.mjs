@@ -56,9 +56,29 @@ import {
   renderDraftPanel,
   renderHome,
   renderMeta,
+  renderPokeTagPopoverBody,
+  renderPokeTagTriggerLabel,
   renderSources,
   uiState
 } from './views.mjs';
+
+function syncPokeTagUi() {
+  const f = uiState.catalog;
+  const trigger = document.getElementById('poke-tag-trigger');
+  const label = document.getElementById('poke-tag-trigger-text');
+  const pop = document.getElementById('poke-tag-popover');
+  const active = Boolean(f.pokeInclude.length || f.pokeExclude.length);
+  if (label) label.textContent = renderPokeTagTriggerLabel(f);
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', f.pokeTagOpen ? 'true' : 'false');
+    trigger.classList.toggle('has-active', active);
+    trigger.classList.toggle('select-followup', f.kind === 'pokemon' || active);
+  }
+  if (pop) {
+    pop.hidden = !f.pokeTagOpen;
+    if (f.pokeTagOpen) pop.innerHTML = renderPokeTagPopoverBody(f);
+  }
+}
 
 function toggleFeaturedSlugOnDeck(deck, slug) {
   const cur = resolveFeaturedPokemon(deck, state.cardsById, state.spriteMap).map((x) => x.slug);
@@ -311,7 +331,9 @@ async function handleAction(el) {
     if (nextType === 'trainer') {
       if (uiState.catalog.kind === 'pokemon') uiState.catalog.kind = '';
       uiState.catalog.stage = '';
-      uiState.catalog.pokeTag = '';
+      uiState.catalog.pokeInclude = [];
+      uiState.catalog.pokeExclude = [];
+      uiState.catalog.pokeTagOpen = false;
     } else {
       if (nextType && uiState.catalog.kind === 'trainer') uiState.catalog.kind = '';
       if (uiState.catalog.kind !== 'trainer') uiState.catalog.subtype = '';
@@ -329,8 +351,45 @@ async function handleAction(el) {
     return;
   }
 
+  if (action === 'toggle-poke-popover') {
+    uiState.catalog.pokeTagOpen = !uiState.catalog.pokeTagOpen;
+    syncPokeTagUi();
+    return;
+  }
+
+  if (action === 'cycle-poke-tag') {
+    const tagId = el.dataset.tag || '';
+    if (!tagId) return;
+    const f = uiState.catalog;
+    const inInc = f.pokeInclude.includes(tagId);
+    const inExc = f.pokeExclude.includes(tagId);
+    if (!inInc && !inExc) {
+      f.pokeInclude = [...f.pokeInclude, tagId];
+    } else if (inInc) {
+      f.pokeInclude = f.pokeInclude.filter((x) => x !== tagId);
+      f.pokeExclude = [...f.pokeExclude, tagId];
+    } else {
+      f.pokeExclude = f.pokeExclude.filter((x) => x !== tagId);
+    }
+    f.page = 1;
+    syncPokeTagUi();
+    const resEl = document.getElementById('catalog-results');
+    if (resEl) resEl.innerHTML = renderCatalogGridHtml();
+    return;
+  }
+
+  if (action === 'clear-poke-tags') {
+    uiState.catalog.pokeInclude = [];
+    uiState.catalog.pokeExclude = [];
+    uiState.catalog.page = 1;
+    syncPokeTagUi();
+    const resEl = document.getElementById('catalog-results');
+    if (resEl) resEl.innerHTML = renderCatalogGridHtml();
+    return;
+  }
+
   if (action === 'reset-catalog-filters') {
-    uiState.catalog = { ...uiState.catalog, q: '', set: '', type: '', kind: '', subtype: '', pokeTag: '', stage: '', rarity: '', owned: '', page: 1 };
+    uiState.catalog = { ...uiState.catalog, q: '', set: '', type: '', kind: '', subtype: '', pokeInclude: [], pokeExclude: [], pokeTagOpen: false, stage: '', rarity: '', owned: '', page: 1 };
     renderRoute();
     return;
   }
@@ -727,8 +786,20 @@ async function handleAction(el) {
 
 // 全局事件绑定
 document.addEventListener('click', (e) => {
+  if (uiState.catalog.pokeTagOpen && !e.target.closest?.('.tag-picker-wrap')) {
+    uiState.catalog.pokeTagOpen = false;
+    syncPokeTagUi();
+  }
   const btn = e.target.closest?.('[data-action]');
   if (btn) handleAction(btn);
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && uiState.catalog.pokeTagOpen) {
+    uiState.catalog.pokeTagOpen = false;
+    syncPokeTagUi();
+    document.getElementById('poke-tag-trigger')?.focus();
+  }
 });
 
 let qTimer = null;
@@ -775,7 +846,9 @@ document.addEventListener('change', async (e) => {
     uiState.catalog.kind = t.value;
     if (t.value === 'trainer') {
       uiState.catalog.stage = '';
-      uiState.catalog.pokeTag = '';
+      uiState.catalog.pokeInclude = [];
+      uiState.catalog.pokeExclude = [];
+      uiState.catalog.pokeTagOpen = false;
       if (uiState.catalog.type && uiState.catalog.type !== 'trainer') uiState.catalog.type = '';
     } else if (t.value === 'pokemon') {
       if (uiState.catalog.type === 'trainer') uiState.catalog.type = '';
@@ -787,7 +860,6 @@ document.addEventListener('change', async (e) => {
     renderRoute();
   }
   else if (t.id === 'filter-subtype') { uiState.catalog.subtype = t.value; uiState.catalog.page = 1; renderRoute(); }
-  else if (t.id === 'filter-poke-tag') { uiState.catalog.pokeTag = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-stage') { uiState.catalog.stage = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-rarity') { uiState.catalog.rarity = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-owned') { uiState.catalog.owned = t.value; uiState.catalog.page = 1; renderRoute(); }

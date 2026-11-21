@@ -4,6 +4,7 @@ import {
   getPokemonCategories,
   getPokemonCategoryLabel,
   interval,
+  matchesPokemonCategoryFilter,
   POKEMON_CATEGORY_GROUPS,
   titleCase,
   validateDeck
@@ -74,7 +75,21 @@ const TRAINER_SUBTYPE_OPTIONS = [
 ];
 
 export const uiState = {
-  catalog: { q: '', set: '', type: '', kind: '', subtype: '', pokeTag: '', stage: '', rarity: '', owned: '', page: 1, perPage: 30 },
+  catalog: {
+    q: '',
+    set: '',
+    type: '',
+    kind: '',
+    subtype: '',
+    pokeInclude: [],
+    pokeExclude: [],
+    pokeTagOpen: false,
+    stage: '',
+    rarity: '',
+    owned: '',
+    page: 1,
+    perPage: 30
+  },
   decks: { view: 'showcase' },
   meta: { sort: 'count', q: '', page: 1, perPage: 40 },
   battle: { deckId: null, running: false, activeRunId: null, abortCtrl: null },
@@ -373,10 +388,8 @@ export function filterCatalogCards() {
     if (f.set && c.set !== f.set) return false;
     if (f.kind && c.type !== f.kind) return false;
     if (f.subtype && (c.type !== 'trainer' || String(c.subtype || '').toLowerCase() !== f.subtype)) return false;
-    if (f.pokeTag) {
-      if (c.type === 'trainer') return false;
-      const cats = c._pokeCats || getPokemonCategories(c);
-      if (!cats.includes(f.pokeTag)) return false;
+    if ((f.pokeInclude.length || f.pokeExclude.length) && !matchesPokemonCategoryFilter(c, f.pokeInclude, f.pokeExclude)) {
+      return false;
     }
     if (f.stage && c.stage !== f.stage) return false;
     if (f.rarity && c.rarity !== f.rarity) return false;
@@ -396,6 +409,47 @@ export function filterCatalogCards() {
     if (qFold && !c._search.includes(qFold)) return false;
     return true;
   });
+}
+
+export function renderPokeTagTriggerLabel(f = uiState.catalog) {
+  const incCount = f.pokeInclude.length;
+  const excCount = f.pokeExclude.length;
+  if (!incCount && !excCount) return '寶可夢分類';
+  if (incCount === 1 && !excCount) return `✓ ${getPokemonCategoryLabel(f.pokeInclude[0])}`;
+  if (!incCount && excCount === 1) return `✕ 非${getPokemonCategoryLabel(f.pokeExclude[0])}`;
+  const parts = [];
+  if (incCount) parts.push(`✓${incCount}`);
+  if (excCount) parts.push(`✕${excCount}`);
+  return `分類 ${parts.join(' ')}`;
+}
+
+export function renderPokeTagPopoverBody(f = uiState.catalog) {
+  const incSet = new Set(f.pokeInclude);
+  const excSet = new Set(f.pokeExclude);
+  return `
+    <div class="tag-pop-head">
+      <span class="tag-pop-legend">
+        <span class="legend-chip is-inc">✓ 包含</span>
+        <span class="legend-chip is-exc">✕ 排除</span>
+        <span class="muted">再點取消</span>
+      </span>
+      ${(f.pokeInclude.length || f.pokeExclude.length) ? '<button class="mini-reset" type="button" data-action="clear-poke-tags">清空</button>' : ''}
+    </div>
+    ${POKEMON_CATEGORY_GROUPS.map((g) => `
+      <div class="tag-pop-group">
+        <div class="tag-pop-title">${esc(g.group)}${g.combine === 'any' ? ' <small>(複選並集)</small>' : ''}</div>
+        <div class="tag-pop-grid">
+          ${g.options.map((o) => {
+            const isInc = incSet.has(o.id);
+            const isExc = excSet.has(o.id);
+            const stateCls = isInc ? 'is-include' : (isExc ? 'is-exclude' : '');
+            const mark = isInc ? '✓ ' : (isExc ? '✕ ' : '');
+            return `<button class="tag-tri-btn ${stateCls}" type="button" data-action="cycle-poke-tag" data-tag="${esc(o.id)}" aria-pressed="${isInc ? 'true' : (isExc ? 'mixed' : 'false')}">${mark}${esc(o.label)}</button>`;
+          }).join('')}
+        </div>
+      </div>
+    `).join('')}
+  `;
 }
 
 export function renderCatalogGridHtml() {
@@ -502,14 +556,22 @@ export function renderCatalog() {
                 <option value="stage1" ${f.stage === 'stage1' ? 'selected' : ''}>1階進化</option>
                 <option value="stage2" ${f.stage === 'stage2' ? 'selected' : ''}>2階進化</option>
               </select>
-              <select id="filter-poke-tag" class="${(f.kind === 'pokemon' || f.pokeTag) ? 'select-followup' : ''}" aria-label="依寶可夢細部分類篩選">
-                <option value="">全部寶可夢分類</option>
-                ${POKEMON_CATEGORY_GROUPS.map((g) => `
-                  <optgroup label="${esc(g.group)}">
-                    ${g.options.map((o) => `<option value="${esc(o.id)}" ${f.pokeTag === o.id ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-                  </optgroup>
-                `).join('')}
-              </select>
+              <div class="tag-picker-wrap">
+                <button
+                  type="button"
+                  id="poke-tag-trigger"
+                  class="tag-picker-btn ${(f.kind === 'pokemon' || f.pokeInclude.length || f.pokeExclude.length) ? 'select-followup' : ''} ${(f.pokeInclude.length || f.pokeExclude.length) ? 'has-active' : ''}"
+                  data-action="toggle-poke-popover"
+                  aria-expanded="${f.pokeTagOpen ? 'true' : 'false'}"
+                  aria-controls="poke-tag-popover"
+                >
+                  <span id="poke-tag-trigger-text">${esc(renderPokeTagTriggerLabel(f))}</span>
+                  <span class="tag-picker-caret" aria-hidden="true">▾</span>
+                </button>
+                <div id="poke-tag-popover" class="tag-picker-popover" ${f.pokeTagOpen ? '' : 'hidden'}>
+                  ${renderPokeTagPopoverBody(f)}
+                </div>
+              </div>
             `}
             <select id="filter-rarity" aria-label="依稀有度篩選">
               <option value="">全部稀有度</option>
@@ -856,7 +918,7 @@ export function buildCardDetailModal(card) {
   const variants = findVariantsForCard(card);
   const owned = state.collection[card.id] || 0;
   const pokeCats = card.type === 'pokemon'
-    ? (card._pokeCats || getPokemonCategories(card)).filter((id) => id !== 'non_ex')
+    ? (card._pokeCats || getPokemonCategories(card))
     : [];
   const pokeTagsHtml = pokeCats.length
     ? `<div class="card-cat-tags">${pokeCats.map((id) => `<span class="card-cat-pill ${id === 'ultra_beast' || id === 'ancient' || id === 'future' || id === 'mega' ? 'is-special' : ''}">${esc(getPokemonCategoryLabel(id))}</span>`).join('')}</div>`

@@ -142,37 +142,54 @@ export function evaluateDeckOwnership(deck, collection, cardsById) {
 
 export const POKEMON_CATEGORY_GROUPS = [
   {
-    group: '規則與稀有等級',
+    id: 'rules',
+    group: '規則與版本',
+    combine: 'all',
     options: [
-      { id: 'ex', label: '寶可夢 ex（全部）', searchTerms: 'ex 寶可夢ex' },
-      { id: 'ex_regular', label: '一般 ex（不含超級進化）', searchTerms: '一般ex 普通ex' },
-      { id: 'mega', label: '超級進化（Mega）', searchTerms: '超級進化 mega 超級' },
-      { id: 'non_ex', label: '一般寶可夢（非 ex）', searchTerms: '非ex 一般寶可夢 普通寶可夢' },
-      { id: 'dual_type', label: '雙屬性寶可夢', searchTerms: '雙屬性 雙色' },
-      { id: 'shiny', label: '異色寶可夢', searchTerms: '異色 閃光' }
+      { id: 'ex', label: '寶可夢 ex', searchTerms: 'ex 寶可夢ex' },
+      { id: 'mega', label: '超級進化', searchTerms: '超級進化 mega 超級' },
+      { id: 'dual_type', label: '雙屬性', searchTerms: '雙屬性 雙色' },
+      { id: 'shiny', label: '異色', searchTerms: '異色 閃光' }
     ]
   },
   {
-    group: '主題與陣營分類',
+    id: 'theme',
+    group: '主題與陣營',
+    combine: 'any',
     options: [
       { id: 'ultra_beast', label: '究極異獸', searchTerms: '究極異獸 异兽 ultrabeast ub' },
       { id: 'ancient', label: '古代寶可夢', searchTerms: '古代 古代寶可夢 悖謬 ancient' },
       { id: 'future', label: '未來寶可夢', searchTerms: '未來 未來寶可夢 悖謬 future' },
-      { id: 'team_rocket', label: '火箭隊的寶可夢', searchTerms: '火箭隊 火箭隊的' }
+      { id: 'team_rocket', label: '火箭隊', searchTerms: '火箭隊 火箭隊的' }
     ]
   },
   {
-    group: '形態與對戰特徵',
+    id: 'region',
+    group: '地區形態',
+    combine: 'any',
     options: [
-      { id: 'regional', label: '地區形態（阿羅拉／伽勒爾／洗翠／帕底亞）', searchTerms: '地區形態 阿羅拉 伽勒爾 洗翠 帕底亞' },
+      { id: 'alola', label: '阿羅拉', searchTerms: '阿羅拉 alolan' },
+      { id: 'galar', label: '伽勒爾', searchTerms: '伽勒爾 galarian' },
+      { id: 'hisui', label: '洗翠', searchTerms: '洗翠 hisuian' },
+      { id: 'paldea', label: '帕底亞', searchTerms: '帕底亞 paldean' }
+    ]
+  },
+  {
+    id: 'trait',
+    group: '對戰特徵',
+    combine: 'all',
+    options: [
       { id: 'has_ability', label: '持有特性', searchTerms: '特性 持有特性 ability' },
-      { id: 'fossil_evo', label: '化石進化寶可夢', searchTerms: '化石 化石進化' }
+      { id: 'fossil_evo', label: '化石進化', searchTerms: '化石 化石進化' }
     ]
   }
 ];
 
 export const POKEMON_CATEGORY_OPTIONS = POKEMON_CATEGORY_GROUPS.flatMap((g) => g.options);
 const POKE_CATEGORY_BY_ID = new Map(POKEMON_CATEGORY_OPTIONS.map((o) => [o.id, o]));
+const POKE_CATEGORY_GROUP_BY_ID = new Map(
+  POKEMON_CATEGORY_GROUPS.flatMap((g) => g.options.map((o) => [o.id, g.id]))
+);
 
 const ULTRA_BEAST_NAMES = new Set([
   'Nihilego', 'Buzzwole', 'Pheromosa', 'Xurkitree', 'Celesteela',
@@ -204,15 +221,6 @@ function stripExSuffix(nameEn) {
   return String(nameEn || '').replace(/\s+ex$/i, '').trim();
 }
 
-function isParadoxTaggedPrint(card) {
-  if (Array.isArray(card?.tags)) {
-    if (card.tags.includes('ancient') || card.tags.includes('future')) return true;
-  }
-  if (card?.set === 'B3a') return true;
-  const srcTitle = typeof card?.source === 'string' ? card.source : (card?.source?.title || '');
-  return srcTitle.endsWith('（B3a）') || srcTitle.endsWith('(B3a)') || srcTitle.endsWith('（B4b）');
-}
-
 export function getPokemonCategories(card) {
   if (!card || card.type === 'trainer') return [];
   const cats = [];
@@ -225,9 +233,7 @@ export function getPokemonCategories(card) {
   const isEx = existingTags.has('ex') || /\sex$/i.test(nameEn) || name.endsWith('ex');
 
   if (isEx) cats.push('ex');
-  if (isEx && !isMega) cats.push('ex_regular');
   if (isMega) cats.push('mega');
-  if (!isEx && !isMega) cats.push('non_ex');
   if (Array.isArray(card.types) && card.types.length > 1) cats.push('dual_type');
   if (card.rarity === '✦' || card.rarity === '✦✦' || card.rarityCode === 'S' || card.rarityCode === 'SSR') {
     cats.push('shiny');
@@ -236,23 +242,21 @@ export function getPokemonCategories(card) {
   if (existingTags.has('ultra_beast') || ULTRA_BEAST_NAMES.has(baseEn)) {
     cats.push('ultra_beast');
   }
-  const paradoxPrint = isParadoxTaggedPrint(card);
-  if (existingTags.has('ancient') || (paradoxPrint && ANCIENT_PARADOX_BASES.has(baseEn))) {
+  if (existingTags.has('ancient') || ANCIENT_PARADOX_BASES.has(baseEn)) {
     cats.push('ancient');
   }
-  if (existingTags.has('future') || (paradoxPrint && FUTURE_PARADOX_BASES.has(baseEn))) {
+  if (existingTags.has('future') || FUTURE_PARADOX_BASES.has(baseEn)) {
     cats.push('future');
   }
   if (existingTags.has('team_rocket') || name.startsWith('火箭隊的') || /^Team Rocket['’]s\s/i.test(nameEn)) {
     cats.push('team_rocket');
   }
-  if (
-    existingTags.has('regional') ||
-    /^(阿羅拉|伽勒爾|洗翠|帕底亞)/.test(name) ||
-    /^(Alolan|Galarian|Hisuian|Paldean)\s/i.test(nameEn)
-  ) {
-    cats.push('regional');
-  }
+
+  if (existingTags.has('alola') || name.includes('阿羅拉') || /\bAlolan\b/i.test(nameEn)) cats.push('alola');
+  if (existingTags.has('galar') || name.includes('伽勒爾') || /\bGalarian\b/i.test(nameEn)) cats.push('galar');
+  if (existingTags.has('hisui') || name.includes('洗翠') || /\bHisuian\b/i.test(nameEn)) cats.push('hisui');
+  if (existingTags.has('paldea') || name.includes('帕底亞') || /\bPaldean\b/i.test(nameEn)) cats.push('paldea');
+
   if (Array.isArray(card.abilities) && card.abilities.length > 0) {
     cats.push('has_ability');
   }
@@ -264,6 +268,36 @@ export function getPokemonCategories(card) {
     cats.push('fossil_evo');
   }
   return cats;
+}
+
+export function matchesPokemonCategoryFilter(card, includeIds = [], excludeIds = []) {
+  const inc = Array.isArray(includeIds) ? includeIds.filter(Boolean) : [];
+  const exc = Array.isArray(excludeIds) ? excludeIds.filter(Boolean) : [];
+  if (!inc.length && !exc.length) return true;
+  if (!card || card.type === 'trainer') return false;
+
+  const cats = card._pokeCats || getPokemonCategories(card);
+  for (const id of exc) {
+    if (cats.includes(id)) return false;
+  }
+  if (!inc.length) return true;
+
+  const bucketed = new Map();
+  for (const id of inc) {
+    const grp = POKE_CATEGORY_GROUP_BY_ID.get(id) || 'other';
+    if (!bucketed.has(grp)) bucketed.set(grp, []);
+    bucketed.get(grp).push(id);
+  }
+  for (const g of POKEMON_CATEGORY_GROUPS) {
+    const selected = bucketed.get(g.id);
+    if (!selected?.length) continue;
+    if (g.combine === 'any') {
+      if (!selected.some((id) => cats.includes(id))) return false;
+    } else {
+      if (!selected.every((id) => cats.includes(id))) return false;
+    }
+  }
+  return true;
 }
 
 export function getPokemonCategoryLabel(id) {
