@@ -256,4 +256,22 @@ test('catalog pokemon categories support regional split, full paradox/UB coverag
   const stylesXml = readFileSync(new URL('../android/app/src/main/res/values/styles.xml', import.meta.url), 'utf8');
   assert.doesNotMatch(stylesXml, /DayNight/);
   assert.match(stylesXml, /Theme\.AppCompat\.Light\.NoActionBar/);
+
+  // Android native bridge activates __52poke_card/ CHT fallback right before English Limitless CDN
+  const webUrls = getCardImageUrls({ id: 'A1-001', set: 'A1' }, false);
+  assert.deepEqual(webUrls, [
+    'https://game.pokemontcgpocket.app/zh-tw/tcgp/A1/001/low.webp',
+    'https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/pocket/A1/A1_001_EN.webp'
+  ]);
+  globalThis.window = { PocketLabNative: { exportTextFile: () => true } };
+  try {
+    const apkUrls = getCardImageUrls({ id: 'A1-001', set: 'A1' }, false);
+    assert.deepEqual(apkUrls, [
+      'https://game.pokemontcgpocket.app/zh-tw/tcgp/A1/001/low.webp',
+      '__52poke_card/A1/001.png',
+      'https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/pocket/A1/A1_001_EN.webp'
+    ]);
+  } finally {
+    delete globalThis.window;
+  }
 });

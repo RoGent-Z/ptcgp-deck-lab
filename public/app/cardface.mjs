@@ -70,12 +70,18 @@ export function getCardImageUrls(card, hiRes = false) {
     const numStr = idStr.slice(idx + 1).padStart(3, '0');
     const zhHigh = `https://game.pokemontcgpocket.app/zh-tw/tcgp/${encodeURIComponent(setCode)}/${encodeURIComponent(numStr)}/high.webp`;
     const zhLow = `https://game.pokemontcgpocket.app/zh-tw/tcgp/${encodeURIComponent(setCode)}/${encodeURIComponent(numStr)}/low.webp`;
+    const isNativeAndroid = typeof window !== 'undefined' && typeof window.PocketLabNative?.exportTextFile === 'function';
+    const zh52Poke = isNativeAndroid
+      ? `__52poke_card/${encodeURIComponent(setCode)}/${encodeURIComponent(numStr)}.png`
+      : '';
     const enLimitless = `https://limitlesstcg.nyc3.cdn.digitaloceanspaces.com/pocket/${encodeURIComponent(setCode)}/${encodeURIComponent(setCode)}_${encodeURIComponent(numStr)}_EN.webp`;
     if (hiRes) {
-      urls.push(zhHigh, zhLow, enLimitless);
+      urls.push(zhHigh, zhLow);
     } else {
-      urls.push(zhLow, enLimitless);
+      urls.push(zhLow);
     }
+    if (zh52Poke) urls.push(zh52Poke);
+    urls.push(enLimitless);
   }
   return [...new Set(urls)];
 }
