@@ -1,0 +1,8 @@
+# Preserve byte-level hashes used by the local training and replay verifiers.
+engine/pocket_lab*.rs text eol=lf
+tools/battle/trainer*.mjs text eol=lf
+reports/battle-ml-c1/*.json text eol=lf
+reports/battle-ml-c1/*.jsonl text eol=lf
+reports/battle-ml-c1-v2/*.json text eol=lf
+reports/battle-ml-c1-v2/*.jsonl text eol=lf
+

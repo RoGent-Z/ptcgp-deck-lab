@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {join,resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {sha256,validateLineup} from './freeze.mjs';
+import {comparePolicies} from './compare-policies.mjs';
 
 function requireValue(condition,message){if(!condition)throw Error(message);}
 function validRank(rank){return Number.isInteger(rank)&&rank>=1&&rank<=10;}
@@ -130,10 +131,11 @@ async function evalReport(dir,lineup){
 function percent(x){return (x*100).toFixed(2)+'%';}
 function cell(value){return String(value).replaceAll('|','\\|').replace(/[\r\n]+/g,' ');}
 function wdl(c){return [c.wins,c.draws,c.losses].join('/');}
-function markdown({mirror,evaluation,source}){
+function markdown({mirror,evaluation,source,continuation}){
   const summary=[
     '# 固定牌表的對戰驗證','',
     '環境 '+source.season+'，榜單快照 '+source.asOf+'。第 11–26 名供訓練、第 27–30 名供驗證及選模，第 1–10 名供本次留出評估。','',
+    ...(continuation ? continuationSummary(continuation) : []),
     '## 同一模型的前十牌組對戰','',
     '固定第 1 名為玩家範例牌組（'+cell(mirror.playerDeck.name)+'），雙方均採用同一模型。範例牌組分別對陣前十名，每個對手各打 50 局，其中先攻和後攻各 25 局。對第 1 名的這組使用相同牌表。','',
     mirror.total+' 局共 '+mirror.wins+' 勝、'+mirror.draws+' 和、'+mirror.losses+' 負，綜合勝率 '+percent(mirror.winRate)+'（勝場 ÷ 500，每個對手權重相同）。表內先後攻戰績按勝／和／負排列，單對陣勝率附 Wilson 95% 區間。','',
@@ -149,6 +151,14 @@ function markdown({mirror,evaluation,source}){
   ];
   return summary.join('\n');
 }
+function continuationSummary({model,challenge,retained}){
+  return [
+    '## V2 續訓與 V1 對照','',
+    'V2 從 V1 權重開始，續訓 '+model.trainedGames.toLocaleString('en-US')+' 局，累計 '+model.cumulativeTrainingGames.toLocaleString('en-US')+' 局。入圍候選各打 768 局驗證，複選時每名候選以不同種子再打 1,152 局。','',
+    '凍結 V2 權重後，以獨立種子與 V1 直接對戰 '+challenge.games.toLocaleString('en-US')+' 局，共 '+challenge.wins+' 勝、'+challenge.draws+' 和、'+challenge.losses+' 負。V2 得分率 '+percent(challenge.score)+'，95% 區間 '+challenge.scoreCI95.map(percent).join('–')+'。本地保留策略為 **'+retained+'**。','',
+    '晉級門檻為得分率區間下界高於 50%。評估沿用同一批前十牌表，對局種子與原 V1 評估、此次訓練和驗證隔離。以下 500 局及對 V0 的對照均使用此次 V2 候選。','',
+  ];
+}
 async function replace(path,text){
   const temp=path+'.'+randomUUID()+'.tmp';
   await writeFile(temp,text);
@@ -162,6 +172,20 @@ export async function verifyRun(dir){
   const evaluation=await evalReport(dir,lineup);
   const report={schemaVersion:1,source:lineup.source,inputSha256:{lineup:sha256(lineupBytes),mirror:mirror.hash,evaluation:evaluation.hash},
     ranks:{train:[11,26],validation:[27,30],evaluation:[1,10]},mirror:mirror.summary,evaluation:evaluation.summary};
+  let candidate;
+  try { candidate=JSON.parse(await readFile(join(dir,'candidate-v2.json'),'utf8')); }
+  catch(error){ if(error.code!=='ENOENT')throw error; }
+  if(candidate){
+    const challenge=await comparePolicies(dir);
+    for(const field of ['games','wins','draws','losses','score']){
+      requireValue(candidate.challenge?.[field]===challenge[field],'V2 challenge differs from model metadata');
+    }
+    report.continuation={
+      model:{version:candidate.version,trainedGames:candidate.trainedGames,cumulativeTrainingGames:candidate.cumulativeTrainingGames},
+      challenge, retained:challenge.promote?'V2':'V1',
+    };
+    report.inputSha256.challenge=challenge.challengeSha256;
+  }
   await replace(join(dir,'report.json'),JSON.stringify(report,null,2)+'\n');
   await replace(join(dir,'report.md'),markdown(report));
   return report;

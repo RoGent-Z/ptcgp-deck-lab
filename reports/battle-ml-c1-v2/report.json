@@ -1,0 +1,1979 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "season": "C1",
+    "asOf": "2026-11-19T07:28:52.724Z",
+    "hash": "4a9ea59f3c873b7caf103358b1af0807eaa1bccf9e3198c0b3bc3287370ec370",
+    "sha256": "c57085f378c0f103df3e02a650962db06dae442c6aaad853c131035d465f4c56"
+  },
+  "inputSha256": {
+    "lineup": "eddf77cdc834ee9ffb43fa391e4e934306e853ddbd6708c04a8ed6a1460cbfd8",
+    "mirror": "2bc83f1322df8a75a88feb87791b351c5696d6d87915149e1d431a16a5c37fc3",
+    "evaluation": "99e23d00b69678d2a85c74ad52845e0eea11feae86b01a1a5bd3bd6f78ab1377",
+    "challenge": "691d64345f69071cdd33b74bdd0337f4a0853071e920b5d2632f9a1d371ec045"
+  },
+  "ranks": {
+    "train": [
+      11,
+      26
+    ],
+    "validation": [
+      27,
+      30
+    ],
+    "evaluation": [
+      1,
+      10
+    ]
+  },
+  "mirror": {
+    "total": 500,
+    "wins": 267,
+    "draws": 29,
+    "losses": 204,
+    "firstGames": 250,
+    "turns": 5147,
+    "actions": 38403,
+    "secondGames": 250,
+    "winRate": 0.534,
+    "score": 0.563,
+    "playerDeck": {
+      "rank": 1,
+      "id": "mega-charizard-y-ex-b1a-entei-ex-a4a",
+      "name": "超級噴火龍Yex · 炎帝ex"
+    },
+    "winRateDefinition": "wins/500, ten equally weighted opponents",
+    "byRank": [
+      {
+        "total": 50,
+        "wins": 22,
+        "draws": 4,
+        "losses": 24,
+        "firstGames": 25,
+        "turns": 466,
+        "actions": 3446,
+        "rank": 1,
+        "id": "mega-charizard-y-ex-b1a-entei-ex-a4a",
+        "name": "超級噴火龍Yex · 炎帝ex",
+        "secondGames": 25,
+        "winRate": 0.44,
+        "score": 0.48,
+        "winRateCI95": [
+          0.3116219921125717,
+          0.5769397197834315
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 11,
+            "draws": 1,
+            "losses": 13,
+            "firstGames": 25,
+            "turns": 236,
+            "actions": 1734,
+            "secondGames": 0,
+            "winRate": 0.44,
+            "score": 0.46
+          },
+          "second": {
+            "total": 25,
+            "wins": 11,
+            "draws": 3,
+            "losses": 11,
+            "firstGames": 0,
+            "turns": 230,
+            "actions": 1712,
+            "secondGames": 25,
+            "winRate": 0.44,
+            "score": 0.5
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 14,
+        "draws": 1,
+        "losses": 35,
+        "firstGames": 25,
+        "turns": 478,
+        "actions": 3733,
+        "rank": 2,
+        "id": "suicune-ex-a4a-baxcalibur-b2a",
+        "name": "水君ex · 戟脊龍",
+        "secondGames": 25,
+        "winRate": 0.28,
+        "score": 0.29,
+        "winRateCI95": [
+          0.17474170665911232,
+          0.4166512369595657
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 8,
+            "draws": 1,
+            "losses": 16,
+            "firstGames": 25,
+            "turns": 231,
+            "actions": 1817,
+            "secondGames": 0,
+            "winRate": 0.32,
+            "score": 0.34
+          },
+          "second": {
+            "total": 25,
+            "wins": 6,
+            "draws": 0,
+            "losses": 19,
+            "firstGames": 0,
+            "turns": 247,
+            "actions": 1916,
+            "secondGames": 25,
+            "winRate": 0.24,
+            "score": 0.24
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 23,
+        "draws": 6,
+        "losses": 21,
+        "firstGames": 25,
+        "turns": 404,
+        "actions": 2899,
+        "rank": 3,
+        "id": "umbreon-c1-hydreigon-b1",
+        "name": "月亮伊布 · 三首惡龍",
+        "secondGames": 25,
+        "winRate": 0.46,
+        "score": 0.52,
+        "winRateCI95": [
+          0.3296965219222435,
+          0.5960112860084253
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 14,
+            "draws": 3,
+            "losses": 8,
+            "firstGames": 25,
+            "turns": 205,
+            "actions": 1494,
+            "secondGames": 0,
+            "winRate": 0.56,
+            "score": 0.62
+          },
+          "second": {
+            "total": 25,
+            "wins": 9,
+            "draws": 3,
+            "losses": 13,
+            "firstGames": 0,
+            "turns": 199,
+            "actions": 1405,
+            "secondGames": 25,
+            "winRate": 0.36,
+            "score": 0.42
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 31,
+        "draws": 2,
+        "losses": 17,
+        "firstGames": 25,
+        "turns": 512,
+        "actions": 3900,
+        "rank": 4,
+        "id": "hoopa-ex-b4-mega-absol-ex-b1",
+        "name": "胡帕ex · 超級阿勃梭魯ex",
+        "secondGames": 25,
+        "winRate": 0.62,
+        "score": 0.64,
+        "winRateCI95": [
+          0.4815044693099298,
+          0.7413721068980641
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 15,
+            "draws": 0,
+            "losses": 10,
+            "firstGames": 25,
+            "turns": 251,
+            "actions": 1946,
+            "secondGames": 0,
+            "winRate": 0.6,
+            "score": 0.6
+          },
+          "second": {
+            "total": 25,
+            "wins": 16,
+            "draws": 2,
+            "losses": 7,
+            "firstGames": 0,
+            "turns": 261,
+            "actions": 1954,
+            "secondGames": 25,
+            "winRate": 0.64,
+            "score": 0.68
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 27,
+        "draws": 1,
+        "losses": 22,
+        "firstGames": 25,
+        "turns": 523,
+        "actions": 4070,
+        "rank": 5,
+        "id": "mega-greninja-ex-c1-greninja-ex-b1",
+        "name": "超級甲賀忍蛙ex · 甲賀忍蛙ex",
+        "secondGames": 25,
+        "winRate": 0.54,
+        "score": 0.55,
+        "winRateCI95": [
+          0.40398871399157477,
+          0.6703034780777566
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 13,
+            "draws": 1,
+            "losses": 11,
+            "firstGames": 25,
+            "turns": 262,
+            "actions": 2032,
+            "secondGames": 0,
+            "winRate": 0.52,
+            "score": 0.54
+          },
+          "second": {
+            "total": 25,
+            "wins": 14,
+            "draws": 0,
+            "losses": 11,
+            "firstGames": 0,
+            "turns": 261,
+            "actions": 2038,
+            "secondGames": 25,
+            "winRate": 0.56,
+            "score": 0.56
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 31,
+        "draws": 4,
+        "losses": 15,
+        "firstGames": 25,
+        "turns": 534,
+        "actions": 4090,
+        "rank": 6,
+        "id": "mega-altaria-ex-b1-greninja-a1",
+        "name": "超級七夕青鳥ex · 甲賀忍蛙",
+        "secondGames": 25,
+        "winRate": 0.62,
+        "score": 0.66,
+        "winRateCI95": [
+          0.4815044693099298,
+          0.7413721068980641
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 20,
+            "draws": 2,
+            "losses": 3,
+            "firstGames": 25,
+            "turns": 270,
+            "actions": 2074,
+            "secondGames": 0,
+            "winRate": 0.8,
+            "score": 0.84
+          },
+          "second": {
+            "total": 25,
+            "wins": 11,
+            "draws": 2,
+            "losses": 12,
+            "firstGames": 0,
+            "turns": 264,
+            "actions": 2016,
+            "secondGames": 25,
+            "winRate": 0.44,
+            "score": 0.48
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 30,
+        "draws": 4,
+        "losses": 16,
+        "firstGames": 25,
+        "turns": 587,
+        "actions": 4005,
+        "rank": 7,
+        "id": "mega-altaria-ex-b1-espeon-b3a",
+        "name": "超級七夕青鳥ex · 太陽伊布",
+        "secondGames": 25,
+        "winRate": 0.6,
+        "score": 0.64,
+        "winRateCI95": [
+          0.4618143774758936,
+          0.7239161026974346
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 13,
+            "draws": 2,
+            "losses": 10,
+            "firstGames": 25,
+            "turns": 296,
+            "actions": 2022,
+            "secondGames": 0,
+            "winRate": 0.52,
+            "score": 0.56
+          },
+          "second": {
+            "total": 25,
+            "wins": 17,
+            "draws": 2,
+            "losses": 6,
+            "firstGames": 0,
+            "turns": 291,
+            "actions": 1983,
+            "secondGames": 25,
+            "winRate": 0.68,
+            "score": 0.72
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 25,
+        "draws": 3,
+        "losses": 22,
+        "firstGames": 25,
+        "turns": 623,
+        "actions": 4432,
+        "rank": 8,
+        "id": "magnezone-b1a-miraidon-ex-b3a",
+        "name": "自爆磁怪 · 密勒頓ex",
+        "secondGames": 25,
+        "winRate": 0.5,
+        "score": 0.53,
+        "winRateCI95": [
+          0.3664451431682858,
+          0.6335548568317142
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 13,
+            "draws": 2,
+            "losses": 10,
+            "firstGames": 25,
+            "turns": 311,
+            "actions": 2222,
+            "secondGames": 0,
+            "winRate": 0.52,
+            "score": 0.56
+          },
+          "second": {
+            "total": 25,
+            "wins": 12,
+            "draws": 1,
+            "losses": 12,
+            "firstGames": 0,
+            "turns": 312,
+            "actions": 2210,
+            "secondGames": 25,
+            "winRate": 0.48,
+            "score": 0.5
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 40,
+        "draws": 3,
+        "losses": 7,
+        "firstGames": 25,
+        "turns": 518,
+        "actions": 3993,
+        "rank": 9,
+        "id": "giratina-ex-c1-dragonair-b4",
+        "name": "騎拉帝納ex · 哈克龍",
+        "secondGames": 25,
+        "winRate": 0.8,
+        "score": 0.83,
+        "winRateCI95": [
+          0.6696289406777459,
+          0.887562499842239
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 20,
+            "draws": 2,
+            "losses": 3,
+            "firstGames": 25,
+            "turns": 248,
+            "actions": 1924,
+            "secondGames": 0,
+            "winRate": 0.8,
+            "score": 0.84
+          },
+          "second": {
+            "total": 25,
+            "wins": 20,
+            "draws": 1,
+            "losses": 4,
+            "firstGames": 0,
+            "turns": 270,
+            "actions": 2069,
+            "secondGames": 25,
+            "winRate": 0.8,
+            "score": 0.82
+          }
+        }
+      },
+      {
+        "total": 50,
+        "wins": 24,
+        "draws": 1,
+        "losses": 25,
+        "firstGames": 25,
+        "turns": 502,
+        "actions": 3835,
+        "rank": 10,
+        "id": "greninja-ex-b1-mega-greninja-ex-c1",
+        "name": "甲賀忍蛙ex · 超級甲賀忍蛙ex",
+        "secondGames": 25,
+        "winRate": 0.48,
+        "score": 0.49,
+        "winRateCI95": [
+          0.34797135286578046,
+          0.6148825510995539
+        ],
+        "bySeat": {
+          "first": {
+            "total": 25,
+            "wins": 10,
+            "draws": 0,
+            "losses": 15,
+            "firstGames": 25,
+            "turns": 254,
+            "actions": 1967,
+            "secondGames": 0,
+            "winRate": 0.4,
+            "score": 0.4
+          },
+          "second": {
+            "total": 25,
+            "wins": 14,
+            "draws": 1,
+            "losses": 10,
+            "firstGames": 0,
+            "turns": 248,
+            "actions": 1868,
+            "secondGames": 25,
+            "winRate": 0.56,
+            "score": 0.58
+          }
+        }
+      }
+    ]
+  },
+  "evaluation": {
+    "total": 2160,
+    "wins": 1252,
+    "draws": 35,
+    "losses": 873,
+    "firstGames": 1080,
+    "turns": 24375,
+    "actions": 165142,
+    "secondGames": 1080,
+    "winRate": 0.5796296296296296,
+    "score": 0.5877314814814815,
+    "clusters": 540,
+    "scoreCI95": [
+      0.5668981481481481,
+      0.6078703703703704
+    ],
+    "beatsBaseline": true,
+    "baselineScore": 0.41226851851851853,
+    "scoreDifference": 0.17546296296296293,
+    "scoreDifferenceCI95": [
+      0.1337962962962962,
+      0.2157407407407408
+    ],
+    "bootstrap": {
+      "method": "stratified paired percentile bootstrap, 45 fixed matchups, 12 seed quartets per matchup",
+      "replicates": 10000,
+      "initialSeed": 1296846923
+    },
+    "byRank": [
+      {
+        "total": 216,
+        "wins": 127,
+        "draws": 4,
+        "losses": 85,
+        "firstGames": 108,
+        "turns": 2180,
+        "actions": 15128,
+        "rank": 1,
+        "id": "mega-charizard-y-ex-b1a-entei-ex-a4a",
+        "name": "超級噴火龍Yex · 炎帝ex",
+        "secondGames": 108,
+        "winRate": 0.5879629629629629,
+        "score": 0.5972222222222222
+      },
+      {
+        "total": 216,
+        "wins": 128,
+        "draws": 3,
+        "losses": 85,
+        "firstGames": 108,
+        "turns": 2416,
+        "actions": 17244,
+        "rank": 2,
+        "id": "suicune-ex-a4a-baxcalibur-b2a",
+        "name": "水君ex · 戟脊龍",
+        "secondGames": 108,
+        "winRate": 0.5925925925925926,
+        "score": 0.5995370370370371
+      },
+      {
+        "total": 216,
+        "wins": 120,
+        "draws": 14,
+        "losses": 82,
+        "firstGames": 108,
+        "turns": 2095,
+        "actions": 13816,
+        "rank": 3,
+        "id": "umbreon-c1-hydreigon-b1",
+        "name": "月亮伊布 · 三首惡龍",
+        "secondGames": 108,
+        "winRate": 0.5555555555555556,
+        "score": 0.5879629629629629
+      },
+      {
+        "total": 216,
+        "wins": 142,
+        "draws": 2,
+        "losses": 72,
+        "firstGames": 108,
+        "turns": 2336,
+        "actions": 15784,
+        "rank": 4,
+        "id": "hoopa-ex-b4-mega-absol-ex-b1",
+        "name": "胡帕ex · 超級阿勃梭魯ex",
+        "secondGames": 108,
+        "winRate": 0.6574074074074074,
+        "score": 0.6620370370370371
+      },
+      {
+        "total": 216,
+        "wins": 142,
+        "draws": 3,
+        "losses": 71,
+        "firstGames": 108,
+        "turns": 2611,
+        "actions": 18246,
+        "rank": 5,
+        "id": "mega-greninja-ex-c1-greninja-ex-b1",
+        "name": "超級甲賀忍蛙ex · 甲賀忍蛙ex",
+        "secondGames": 108,
+        "winRate": 0.6574074074074074,
+        "score": 0.6643518518518519
+      },
+      {
+        "total": 216,
+        "wins": 88,
+        "draws": 2,
+        "losses": 126,
+        "firstGames": 108,
+        "turns": 2515,
+        "actions": 17141,
+        "rank": 6,
+        "id": "mega-altaria-ex-b1-greninja-a1",
+        "name": "超級七夕青鳥ex · 甲賀忍蛙",
+        "secondGames": 108,
+        "winRate": 0.4074074074074074,
+        "score": 0.41203703703703703
+      },
+      {
+        "total": 216,
+        "wins": 107,
+        "draws": 1,
+        "losses": 108,
+        "firstGames": 108,
+        "turns": 2592,
+        "actions": 16376,
+        "rank": 7,
+        "id": "mega-altaria-ex-b1-espeon-b3a",
+        "name": "超級七夕青鳥ex · 太陽伊布",
+        "secondGames": 108,
+        "winRate": 0.49537037037037035,
+        "score": 0.4976851851851852
+      },
+      {
+        "total": 216,
+        "wins": 160,
+        "draws": 2,
+        "losses": 54,
+        "firstGames": 108,
+        "turns": 2633,
+        "actions": 16813,
+        "rank": 8,
+        "id": "magnezone-b1a-miraidon-ex-b3a",
+        "name": "自爆磁怪 · 密勒頓ex",
+        "secondGames": 108,
+        "winRate": 0.7407407407407407,
+        "score": 0.7453703703703703
+      },
+      {
+        "total": 216,
+        "wins": 120,
+        "draws": 1,
+        "losses": 95,
+        "firstGames": 108,
+        "turns": 2463,
+        "actions": 16944,
+        "rank": 9,
+        "id": "giratina-ex-c1-dragonair-b4",
+        "name": "騎拉帝納ex · 哈克龍",
+        "secondGames": 108,
+        "winRate": 0.5555555555555556,
+        "score": 0.5578703703703703
+      },
+      {
+        "total": 216,
+        "wins": 118,
+        "draws": 3,
+        "losses": 95,
+        "firstGames": 108,
+        "turns": 2534,
+        "actions": 17650,
+        "rank": 10,
+        "id": "greninja-ex-b1-mega-greninja-ex-c1",
+        "name": "甲賀忍蛙ex · 超級甲賀忍蛙ex",
+        "secondGames": 108,
+        "winRate": 0.5462962962962963,
+        "score": 0.5532407407407407
+      }
+    ],
+    "byMatchup": [
+      {
+        "ranks": [
+          1,
+          2
+        ],
+        "total": 48,
+        "wins": 25,
+        "draws": 0,
+        "losses": 23,
+        "firstGames": 24,
+        "turns": 453,
+        "actions": 3199,
+        "secondGames": 24,
+        "winRate": 0.5208333333333334,
+        "score": 0.5208333333333334
+      },
+      {
+        "ranks": [
+          1,
+          3
+        ],
+        "total": 48,
+        "wins": 24,
+        "draws": 1,
+        "losses": 23,
+        "firstGames": 24,
+        "turns": 419,
+        "actions": 2840,
+        "secondGames": 24,
+        "winRate": 0.5,
+        "score": 0.5104166666666666
+      },
+      {
+        "ranks": [
+          1,
+          4
+        ],
+        "total": 48,
+        "wins": 32,
+        "draws": 2,
+        "losses": 14,
+        "firstGames": 24,
+        "turns": 464,
+        "actions": 3227,
+        "secondGames": 24,
+        "winRate": 0.6666666666666666,
+        "score": 0.6875
+      },
+      {
+        "ranks": [
+          1,
+          5
+        ],
+        "total": 48,
+        "wins": 31,
+        "draws": 1,
+        "losses": 16,
+        "firstGames": 24,
+        "turns": 477,
+        "actions": 3491,
+        "secondGames": 24,
+        "winRate": 0.6458333333333334,
+        "score": 0.65625
+      },
+      {
+        "ranks": [
+          1,
+          6
+        ],
+        "total": 48,
+        "wins": 29,
+        "draws": 0,
+        "losses": 19,
+        "firstGames": 24,
+        "turns": 502,
+        "actions": 3525,
+        "secondGames": 24,
+        "winRate": 0.6041666666666666,
+        "score": 0.6041666666666666
+      },
+      {
+        "ranks": [
+          1,
+          7
+        ],
+        "total": 48,
+        "wins": 25,
+        "draws": 1,
+        "losses": 22,
+        "firstGames": 24,
+        "turns": 559,
+        "actions": 3610,
+        "secondGames": 24,
+        "winRate": 0.5208333333333334,
+        "score": 0.53125
+      },
+      {
+        "ranks": [
+          1,
+          8
+        ],
+        "total": 48,
+        "wins": 24,
+        "draws": 0,
+        "losses": 24,
+        "firstGames": 24,
+        "turns": 609,
+        "actions": 3982,
+        "secondGames": 24,
+        "winRate": 0.5,
+        "score": 0.5
+      },
+      {
+        "ranks": [
+          1,
+          9
+        ],
+        "total": 48,
+        "wins": 31,
+        "draws": 1,
+        "losses": 16,
+        "firstGames": 24,
+        "turns": 496,
+        "actions": 3614,
+        "secondGames": 24,
+        "winRate": 0.6458333333333334,
+        "score": 0.65625
+      },
+      {
+        "ranks": [
+          1,
+          10
+        ],
+        "total": 48,
+        "wins": 28,
+        "draws": 2,
+        "losses": 18,
+        "firstGames": 24,
+        "turns": 491,
+        "actions": 3477,
+        "secondGames": 24,
+        "winRate": 0.5833333333333334,
+        "score": 0.6041666666666666
+      },
+      {
+        "ranks": [
+          2,
+          3
+        ],
+        "total": 48,
+        "wins": 23,
+        "draws": 6,
+        "losses": 19,
+        "firstGames": 24,
+        "turns": 452,
+        "actions": 3016,
+        "secondGames": 24,
+        "winRate": 0.4791666666666667,
+        "score": 0.5416666666666666
+      },
+      {
+        "ranks": [
+          2,
+          4
+        ],
+        "total": 48,
+        "wins": 32,
+        "draws": 0,
+        "losses": 16,
+        "firstGames": 24,
+        "turns": 533,
+        "actions": 3680,
+        "secondGames": 24,
+        "winRate": 0.6666666666666666,
+        "score": 0.6666666666666666
+      },
+      {
+        "ranks": [
+          2,
+          5
+        ],
+        "total": 48,
+        "wins": 28,
+        "draws": 0,
+        "losses": 20,
+        "firstGames": 24,
+        "turns": 562,
+        "actions": 4008,
+        "secondGames": 24,
+        "winRate": 0.5833333333333334,
+        "score": 0.5833333333333334
+      },
+      {
+        "ranks": [
+          2,
+          6
+        ],
+        "total": 48,
+        "wins": 30,
+        "draws": 0,
+        "losses": 18,
+        "firstGames": 24,
+        "turns": 580,
+        "actions": 4017,
+        "secondGames": 24,
+        "winRate": 0.625,
+        "score": 0.625
+      },
+      {
+        "ranks": [
+          2,
+          7
+        ],
+        "total": 48,
+        "wins": 32,
+        "draws": 0,
+        "losses": 16,
+        "firstGames": 24,
+        "turns": 567,
+        "actions": 3924,
+        "secondGames": 24,
+        "winRate": 0.6666666666666666,
+        "score": 0.6666666666666666
+      },
+      {
+        "ranks": [
+          2,
+          8
+        ],
+        "total": 48,
+        "wins": 32,
+        "draws": 0,
+        "losses": 16,
+        "firstGames": 24,
+        "turns": 582,
+        "actions": 3931,
+        "secondGames": 24,
+        "winRate": 0.6666666666666666,
+        "score": 0.6666666666666666
+      },
+      {
+        "ranks": [
+          2,
+          9
+        ],
+        "total": 48,
+        "wins": 28,
+        "draws": 0,
+        "losses": 20,
+        "firstGames": 24,
+        "turns": 494,
+        "actions": 3620,
+        "secondGames": 24,
+        "winRate": 0.5833333333333334,
+        "score": 0.5833333333333334
+      },
+      {
+        "ranks": [
+          2,
+          10
+        ],
+        "total": 48,
+        "wins": 23,
+        "draws": 0,
+        "losses": 25,
+        "firstGames": 24,
+        "turns": 555,
+        "actions": 3872,
+        "secondGames": 24,
+        "winRate": 0.4791666666666667,
+        "score": 0.4791666666666667
+      },
+      {
+        "ranks": [
+          3,
+          4
+        ],
+        "total": 48,
+        "wins": 33,
+        "draws": 0,
+        "losses": 15,
+        "firstGames": 24,
+        "turns": 458,
+        "actions": 2915,
+        "secondGames": 24,
+        "winRate": 0.6875,
+        "score": 0.6875
+      },
+      {
+        "ranks": [
+          3,
+          5
+        ],
+        "total": 48,
+        "wins": 27,
+        "draws": 3,
+        "losses": 18,
+        "firstGames": 24,
+        "turns": 450,
+        "actions": 3147,
+        "secondGames": 24,
+        "winRate": 0.5625,
+        "score": 0.59375
+      },
+      {
+        "ranks": [
+          3,
+          6
+        ],
+        "total": 48,
+        "wins": 35,
+        "draws": 1,
+        "losses": 12,
+        "firstGames": 24,
+        "turns": 570,
+        "actions": 3545,
+        "secondGames": 24,
+        "winRate": 0.7291666666666666,
+        "score": 0.7395833333333334
+      },
+      {
+        "ranks": [
+          3,
+          7
+        ],
+        "total": 48,
+        "wins": 27,
+        "draws": 1,
+        "losses": 20,
+        "firstGames": 24,
+        "turns": 550,
+        "actions": 3358,
+        "secondGames": 24,
+        "winRate": 0.5625,
+        "score": 0.5729166666666666
+      },
+      {
+        "ranks": [
+          3,
+          8
+        ],
+        "total": 48,
+        "wins": 31,
+        "draws": 4,
+        "losses": 13,
+        "firstGames": 24,
+        "turns": 507,
+        "actions": 3280,
+        "secondGames": 24,
+        "winRate": 0.6458333333333334,
+        "score": 0.6875
+      },
+      {
+        "ranks": [
+          3,
+          9
+        ],
+        "total": 48,
+        "wins": 22,
+        "draws": 4,
+        "losses": 22,
+        "firstGames": 24,
+        "turns": 451,
+        "actions": 2853,
+        "secondGames": 24,
+        "winRate": 0.4583333333333333,
+        "score": 0.5
+      },
+      {
+        "ranks": [
+          3,
+          10
+        ],
+        "total": 48,
+        "wins": 27,
+        "draws": 5,
+        "losses": 16,
+        "firstGames": 24,
+        "turns": 502,
+        "actions": 3441,
+        "secondGames": 24,
+        "winRate": 0.5625,
+        "score": 0.6145833333333334
+      },
+      {
+        "ranks": [
+          4,
+          5
+        ],
+        "total": 48,
+        "wins": 27,
+        "draws": 0,
+        "losses": 21,
+        "firstGames": 24,
+        "turns": 577,
+        "actions": 4111,
+        "secondGames": 24,
+        "winRate": 0.5625,
+        "score": 0.5625
+      },
+      {
+        "ranks": [
+          4,
+          6
+        ],
+        "total": 48,
+        "wins": 22,
+        "draws": 1,
+        "losses": 25,
+        "firstGames": 24,
+        "turns": 424,
+        "actions": 2804,
+        "secondGames": 24,
+        "winRate": 0.4583333333333333,
+        "score": 0.46875
+      },
+      {
+        "ranks": [
+          4,
+          7
+        ],
+        "total": 48,
+        "wins": 28,
+        "draws": 0,
+        "losses": 20,
+        "firstGames": 24,
+        "turns": 542,
+        "actions": 3359,
+        "secondGames": 24,
+        "winRate": 0.5833333333333334,
+        "score": 0.5833333333333334
+      },
+      {
+        "ranks": [
+          4,
+          8
+        ],
+        "total": 48,
+        "wins": 29,
+        "draws": 1,
+        "losses": 18,
+        "firstGames": 24,
+        "turns": 702,
+        "actions": 4362,
+        "secondGames": 24,
+        "winRate": 0.6041666666666666,
+        "score": 0.6145833333333334
+      },
+      {
+        "ranks": [
+          4,
+          9
+        ],
+        "total": 48,
+        "wins": 33,
+        "draws": 0,
+        "losses": 15,
+        "firstGames": 24,
+        "turns": 510,
+        "actions": 3485,
+        "secondGames": 24,
+        "winRate": 0.6875,
+        "score": 0.6875
+      },
+      {
+        "ranks": [
+          4,
+          10
+        ],
+        "total": 48,
+        "wins": 34,
+        "draws": 0,
+        "losses": 14,
+        "firstGames": 24,
+        "turns": 565,
+        "actions": 3968,
+        "secondGames": 24,
+        "winRate": 0.7083333333333334,
+        "score": 0.7083333333333334
+      },
+      {
+        "ranks": [
+          5,
+          6
+        ],
+        "total": 48,
+        "wins": 28,
+        "draws": 0,
+        "losses": 20,
+        "firstGames": 24,
+        "turns": 530,
+        "actions": 3816,
+        "secondGames": 24,
+        "winRate": 0.5833333333333334,
+        "score": 0.5833333333333334
+      },
+      {
+        "ranks": [
+          5,
+          7
+        ],
+        "total": 48,
+        "wins": 23,
+        "draws": 0,
+        "losses": 25,
+        "firstGames": 24,
+        "turns": 546,
+        "actions": 3769,
+        "secondGames": 24,
+        "winRate": 0.4791666666666667,
+        "score": 0.4791666666666667
+      },
+      {
+        "ranks": [
+          5,
+          8
+        ],
+        "total": 48,
+        "wins": 26,
+        "draws": 1,
+        "losses": 21,
+        "firstGames": 24,
+        "turns": 709,
+        "actions": 4745,
+        "secondGames": 24,
+        "winRate": 0.5416666666666666,
+        "score": 0.5520833333333334
+      },
+      {
+        "ranks": [
+          5,
+          9
+        ],
+        "total": 48,
+        "wins": 29,
+        "draws": 0,
+        "losses": 19,
+        "firstGames": 24,
+        "turns": 581,
+        "actions": 4313,
+        "secondGames": 24,
+        "winRate": 0.6041666666666666,
+        "score": 0.6041666666666666
+      },
+      {
+        "ranks": [
+          5,
+          10
+        ],
+        "total": 48,
+        "wins": 26,
+        "draws": 0,
+        "losses": 22,
+        "firstGames": 24,
+        "turns": 626,
+        "actions": 4551,
+        "secondGames": 24,
+        "winRate": 0.5416666666666666,
+        "score": 0.5416666666666666
+      },
+      {
+        "ranks": [
+          6,
+          7
+        ],
+        "total": 48,
+        "wins": 24,
+        "draws": 0,
+        "losses": 24,
+        "firstGames": 24,
+        "turns": 576,
+        "actions": 3494,
+        "secondGames": 24,
+        "winRate": 0.5,
+        "score": 0.5
+      },
+      {
+        "ranks": [
+          6,
+          8
+        ],
+        "total": 48,
+        "wins": 29,
+        "draws": 0,
+        "losses": 19,
+        "firstGames": 24,
+        "turns": 525,
+        "actions": 3496,
+        "secondGames": 24,
+        "winRate": 0.6041666666666666,
+        "score": 0.6041666666666666
+      },
+      {
+        "ranks": [
+          6,
+          9
+        ],
+        "total": 48,
+        "wins": 29,
+        "draws": 0,
+        "losses": 19,
+        "firstGames": 24,
+        "turns": 527,
+        "actions": 3531,
+        "secondGames": 24,
+        "winRate": 0.6041666666666666,
+        "score": 0.6041666666666666
+      },
+      {
+        "ranks": [
+          6,
+          10
+        ],
+        "total": 48,
+        "wins": 29,
+        "draws": 0,
+        "losses": 19,
+        "firstGames": 24,
+        "turns": 597,
+        "actions": 4100,
+        "secondGames": 24,
+        "winRate": 0.6041666666666666,
+        "score": 0.6041666666666666
+      },
+      {
+        "ranks": [
+          7,
+          8
+        ],
+        "total": 48,
+        "wins": 33,
+        "draws": 0,
+        "losses": 15,
+        "firstGames": 24,
+        "turns": 658,
+        "actions": 4104,
+        "secondGames": 24,
+        "winRate": 0.6875,
+        "score": 0.6875
+      },
+      {
+        "ranks": [
+          7,
+          9
+        ],
+        "total": 48,
+        "wins": 29,
+        "draws": 0,
+        "losses": 19,
+        "firstGames": 24,
+        "turns": 603,
+        "actions": 3762,
+        "secondGames": 24,
+        "winRate": 0.6041666666666666,
+        "score": 0.6041666666666666
+      },
+      {
+        "ranks": [
+          7,
+          10
+        ],
+        "total": 48,
+        "wins": 26,
+        "draws": 0,
+        "losses": 22,
+        "firstGames": 24,
+        "turns": 553,
+        "actions": 3883,
+        "secondGames": 24,
+        "winRate": 0.5416666666666666,
+        "score": 0.5416666666666666
+      },
+      {
+        "ranks": [
+          8,
+          9
+        ],
+        "total": 48,
+        "wins": 19,
+        "draws": 0,
+        "losses": 29,
+        "firstGames": 24,
+        "turns": 623,
+        "actions": 4135,
+        "secondGames": 24,
+        "winRate": 0.3958333333333333,
+        "score": 0.3958333333333333
+      },
+      {
+        "ranks": [
+          8,
+          10
+        ],
+        "total": 48,
+        "wins": 25,
+        "draws": 0,
+        "losses": 23,
+        "firstGames": 24,
+        "turns": 549,
+        "actions": 3595,
+        "secondGames": 24,
+        "winRate": 0.5208333333333334,
+        "score": 0.5208333333333334
+      },
+      {
+        "ranks": [
+          9,
+          10
+        ],
+        "total": 48,
+        "wins": 25,
+        "draws": 0,
+        "losses": 23,
+        "firstGames": 24,
+        "turns": 569,
+        "actions": 4187,
+        "secondGames": 24,
+        "winRate": 0.5208333333333334,
+        "score": 0.5208333333333334
+      }
+    ]
+  },
+  "continuation": {
+    "model": {
+      "version": "selfplay-cem-v2",
+      "trainedGames": 73728,
+      "cumulativeTrainingGames": 92160
+    },
+    "challenge": {
+      "schemaVersion": 1,
+      "candidate": "v2",
+      "incumbent": "v1",
+      "challengeSha256": "691d64345f69071cdd33b74bdd0337f4a0853071e920b5d2632f9a1d371ec045",
+      "games": 5760,
+      "wins": 2822,
+      "draws": 97,
+      "losses": 2841,
+      "winRate": 0.48993055555555554,
+      "score": 0.49835069444444446,
+      "seedsPerPair": 32,
+      "matchups": 45,
+      "clusters": 1440,
+      "byMatchup": [
+        {
+          "ranks": [
+            1,
+            2
+          ],
+          "games": 128,
+          "wins": 67,
+          "draws": 0,
+          "losses": 61,
+          "winRate": 0.5234375,
+          "score": 0.5234375
+        },
+        {
+          "ranks": [
+            1,
+            3
+          ],
+          "games": 128,
+          "wins": 66,
+          "draws": 8,
+          "losses": 54,
+          "winRate": 0.515625,
+          "score": 0.546875
+        },
+        {
+          "ranks": [
+            1,
+            4
+          ],
+          "games": 128,
+          "wins": 64,
+          "draws": 8,
+          "losses": 56,
+          "winRate": 0.5,
+          "score": 0.53125
+        },
+        {
+          "ranks": [
+            1,
+            5
+          ],
+          "games": 128,
+          "wins": 65,
+          "draws": 2,
+          "losses": 61,
+          "winRate": 0.5078125,
+          "score": 0.515625
+        },
+        {
+          "ranks": [
+            1,
+            6
+          ],
+          "games": 128,
+          "wins": 63,
+          "draws": 2,
+          "losses": 63,
+          "winRate": 0.4921875,
+          "score": 0.5
+        },
+        {
+          "ranks": [
+            1,
+            7
+          ],
+          "games": 128,
+          "wins": 54,
+          "draws": 4,
+          "losses": 70,
+          "winRate": 0.421875,
+          "score": 0.4375
+        },
+        {
+          "ranks": [
+            1,
+            8
+          ],
+          "games": 128,
+          "wins": 65,
+          "draws": 1,
+          "losses": 62,
+          "winRate": 0.5078125,
+          "score": 0.51171875
+        },
+        {
+          "ranks": [
+            1,
+            9
+          ],
+          "games": 128,
+          "wins": 60,
+          "draws": 4,
+          "losses": 64,
+          "winRate": 0.46875,
+          "score": 0.484375
+        },
+        {
+          "ranks": [
+            1,
+            10
+          ],
+          "games": 128,
+          "wins": 67,
+          "draws": 3,
+          "losses": 58,
+          "winRate": 0.5234375,
+          "score": 0.53515625
+        },
+        {
+          "ranks": [
+            2,
+            3
+          ],
+          "games": 128,
+          "wins": 53,
+          "draws": 16,
+          "losses": 59,
+          "winRate": 0.4140625,
+          "score": 0.4765625
+        },
+        {
+          "ranks": [
+            2,
+            4
+          ],
+          "games": 128,
+          "wins": 76,
+          "draws": 0,
+          "losses": 52,
+          "winRate": 0.59375,
+          "score": 0.59375
+        },
+        {
+          "ranks": [
+            2,
+            5
+          ],
+          "games": 128,
+          "wins": 55,
+          "draws": 0,
+          "losses": 73,
+          "winRate": 0.4296875,
+          "score": 0.4296875
+        },
+        {
+          "ranks": [
+            2,
+            6
+          ],
+          "games": 128,
+          "wins": 72,
+          "draws": 0,
+          "losses": 56,
+          "winRate": 0.5625,
+          "score": 0.5625
+        },
+        {
+          "ranks": [
+            2,
+            7
+          ],
+          "games": 128,
+          "wins": 65,
+          "draws": 0,
+          "losses": 63,
+          "winRate": 0.5078125,
+          "score": 0.5078125
+        },
+        {
+          "ranks": [
+            2,
+            8
+          ],
+          "games": 128,
+          "wins": 63,
+          "draws": 0,
+          "losses": 65,
+          "winRate": 0.4921875,
+          "score": 0.4921875
+        },
+        {
+          "ranks": [
+            2,
+            9
+          ],
+          "games": 128,
+          "wins": 67,
+          "draws": 0,
+          "losses": 61,
+          "winRate": 0.5234375,
+          "score": 0.5234375
+        },
+        {
+          "ranks": [
+            2,
+            10
+          ],
+          "games": 128,
+          "wins": 71,
+          "draws": 0,
+          "losses": 57,
+          "winRate": 0.5546875,
+          "score": 0.5546875
+        },
+        {
+          "ranks": [
+            3,
+            4
+          ],
+          "games": 128,
+          "wins": 57,
+          "draws": 5,
+          "losses": 66,
+          "winRate": 0.4453125,
+          "score": 0.46484375
+        },
+        {
+          "ranks": [
+            3,
+            5
+          ],
+          "games": 128,
+          "wins": 59,
+          "draws": 10,
+          "losses": 59,
+          "winRate": 0.4609375,
+          "score": 0.5
+        },
+        {
+          "ranks": [
+            3,
+            6
+          ],
+          "games": 128,
+          "wins": 65,
+          "draws": 1,
+          "losses": 62,
+          "winRate": 0.5078125,
+          "score": 0.51171875
+        },
+        {
+          "ranks": [
+            3,
+            7
+          ],
+          "games": 128,
+          "wins": 67,
+          "draws": 1,
+          "losses": 60,
+          "winRate": 0.5234375,
+          "score": 0.52734375
+        },
+        {
+          "ranks": [
+            3,
+            8
+          ],
+          "games": 128,
+          "wins": 60,
+          "draws": 5,
+          "losses": 63,
+          "winRate": 0.46875,
+          "score": 0.48828125
+        },
+        {
+          "ranks": [
+            3,
+            9
+          ],
+          "games": 128,
+          "wins": 65,
+          "draws": 7,
+          "losses": 56,
+          "winRate": 0.5078125,
+          "score": 0.53515625
+        },
+        {
+          "ranks": [
+            3,
+            10
+          ],
+          "games": 128,
+          "wins": 56,
+          "draws": 5,
+          "losses": 67,
+          "winRate": 0.4375,
+          "score": 0.45703125
+        },
+        {
+          "ranks": [
+            4,
+            5
+          ],
+          "games": 128,
+          "wins": 51,
+          "draws": 3,
+          "losses": 74,
+          "winRate": 0.3984375,
+          "score": 0.41015625
+        },
+        {
+          "ranks": [
+            4,
+            6
+          ],
+          "games": 128,
+          "wins": 61,
+          "draws": 1,
+          "losses": 66,
+          "winRate": 0.4765625,
+          "score": 0.48046875
+        },
+        {
+          "ranks": [
+            4,
+            7
+          ],
+          "games": 128,
+          "wins": 61,
+          "draws": 1,
+          "losses": 66,
+          "winRate": 0.4765625,
+          "score": 0.48046875
+        },
+        {
+          "ranks": [
+            4,
+            8
+          ],
+          "games": 128,
+          "wins": 55,
+          "draws": 0,
+          "losses": 73,
+          "winRate": 0.4296875,
+          "score": 0.4296875
+        },
+        {
+          "ranks": [
+            4,
+            9
+          ],
+          "games": 128,
+          "wins": 61,
+          "draws": 1,
+          "losses": 66,
+          "winRate": 0.4765625,
+          "score": 0.48046875
+        },
+        {
+          "ranks": [
+            4,
+            10
+          ],
+          "games": 128,
+          "wins": 63,
+          "draws": 0,
+          "losses": 65,
+          "winRate": 0.4921875,
+          "score": 0.4921875
+        },
+        {
+          "ranks": [
+            5,
+            6
+          ],
+          "games": 128,
+          "wins": 61,
+          "draws": 0,
+          "losses": 67,
+          "winRate": 0.4765625,
+          "score": 0.4765625
+        },
+        {
+          "ranks": [
+            5,
+            7
+          ],
+          "games": 128,
+          "wins": 65,
+          "draws": 0,
+          "losses": 63,
+          "winRate": 0.5078125,
+          "score": 0.5078125
+        },
+        {
+          "ranks": [
+            5,
+            8
+          ],
+          "games": 128,
+          "wins": 64,
+          "draws": 8,
+          "losses": 56,
+          "winRate": 0.5,
+          "score": 0.53125
+        },
+        {
+          "ranks": [
+            5,
+            9
+          ],
+          "games": 128,
+          "wins": 75,
+          "draws": 0,
+          "losses": 53,
+          "winRate": 0.5859375,
+          "score": 0.5859375
+        },
+        {
+          "ranks": [
+            5,
+            10
+          ],
+          "games": 128,
+          "wins": 66,
+          "draws": 0,
+          "losses": 62,
+          "winRate": 0.515625,
+          "score": 0.515625
+        },
+        {
+          "ranks": [
+            6,
+            7
+          ],
+          "games": 128,
+          "wins": 72,
+          "draws": 0,
+          "losses": 56,
+          "winRate": 0.5625,
+          "score": 0.5625
+        },
+        {
+          "ranks": [
+            6,
+            8
+          ],
+          "games": 128,
+          "wins": 63,
+          "draws": 0,
+          "losses": 65,
+          "winRate": 0.4921875,
+          "score": 0.4921875
+        },
+        {
+          "ranks": [
+            6,
+            9
+          ],
+          "games": 128,
+          "wins": 69,
+          "draws": 0,
+          "losses": 59,
+          "winRate": 0.5390625,
+          "score": 0.5390625
+        },
+        {
+          "ranks": [
+            6,
+            10
+          ],
+          "games": 128,
+          "wins": 59,
+          "draws": 0,
+          "losses": 69,
+          "winRate": 0.4609375,
+          "score": 0.4609375
+        },
+        {
+          "ranks": [
+            7,
+            8
+          ],
+          "games": 128,
+          "wins": 61,
+          "draws": 0,
+          "losses": 67,
+          "winRate": 0.4765625,
+          "score": 0.4765625
+        },
+        {
+          "ranks": [
+            7,
+            9
+          ],
+          "games": 128,
+          "wins": 58,
+          "draws": 0,
+          "losses": 70,
+          "winRate": 0.453125,
+          "score": 0.453125
+        },
+        {
+          "ranks": [
+            7,
+            10
+          ],
+          "games": 128,
+          "wins": 59,
+          "draws": 0,
+          "losses": 69,
+          "winRate": 0.4609375,
+          "score": 0.4609375
+        },
+        {
+          "ranks": [
+            8,
+            9
+          ],
+          "games": 128,
+          "wins": 60,
+          "draws": 0,
+          "losses": 68,
+          "winRate": 0.46875,
+          "score": 0.46875
+        },
+        {
+          "ranks": [
+            8,
+            10
+          ],
+          "games": 128,
+          "wins": 55,
+          "draws": 1,
+          "losses": 72,
+          "winRate": 0.4296875,
+          "score": 0.43359375
+        },
+        {
+          "ranks": [
+            9,
+            10
+          ],
+          "games": 128,
+          "wins": 61,
+          "draws": 0,
+          "losses": 67,
+          "winRate": 0.4765625,
+          "score": 0.4765625
+        }
+      ],
+      "scoreCI95": [
+        0.48515625,
+        0.5114583333333333
+      ],
+      "bootstrap": {
+        "method": "paired seed quartet percentile bootstrap within each fixed matchup",
+        "replicates": 10000,
+        "initialSeed": 1296846923
+      },
+      "rule": "Promote V2 when the lower 95% confidence limit for its score (win=1, draw=0.5, loss=0) exceeds 0.5",
+      "promote": false,
+      "decision": "retain-v1"
+    },
+    "retained": "V1"
+  }
+}

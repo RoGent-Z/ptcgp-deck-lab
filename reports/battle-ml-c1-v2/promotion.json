@@ -1,0 +1,569 @@
+{
+  "schemaVersion": 1,
+  "candidate": "v2",
+  "incumbent": "v1",
+  "challengeSha256": "691d64345f69071cdd33b74bdd0337f4a0853071e920b5d2632f9a1d371ec045",
+  "games": 5760,
+  "wins": 2822,
+  "draws": 97,
+  "losses": 2841,
+  "winRate": 0.48993055555555554,
+  "score": 0.49835069444444446,
+  "seedsPerPair": 32,
+  "matchups": 45,
+  "clusters": 1440,
+  "byMatchup": [
+    {
+      "ranks": [
+        1,
+        2
+      ],
+      "games": 128,
+      "wins": 67,
+      "draws": 0,
+      "losses": 61,
+      "winRate": 0.5234375,
+      "score": 0.5234375
+    },
+    {
+      "ranks": [
+        1,
+        3
+      ],
+      "games": 128,
+      "wins": 66,
+      "draws": 8,
+      "losses": 54,
+      "winRate": 0.515625,
+      "score": 0.546875
+    },
+    {
+      "ranks": [
+        1,
+        4
+      ],
+      "games": 128,
+      "wins": 64,
+      "draws": 8,
+      "losses": 56,
+      "winRate": 0.5,
+      "score": 0.53125
+    },
+    {
+      "ranks": [
+        1,
+        5
+      ],
+      "games": 128,
+      "wins": 65,
+      "draws": 2,
+      "losses": 61,
+      "winRate": 0.5078125,
+      "score": 0.515625
+    },
+    {
+      "ranks": [
+        1,
+        6
+      ],
+      "games": 128,
+      "wins": 63,
+      "draws": 2,
+      "losses": 63,
+      "winRate": 0.4921875,
+      "score": 0.5
+    },
+    {
+      "ranks": [
+        1,
+        7
+      ],
+      "games": 128,
+      "wins": 54,
+      "draws": 4,
+      "losses": 70,
+      "winRate": 0.421875,
+      "score": 0.4375
+    },
+    {
+      "ranks": [
+        1,
+        8
+      ],
+      "games": 128,
+      "wins": 65,
+      "draws": 1,
+      "losses": 62,
+      "winRate": 0.5078125,
+      "score": 0.51171875
+    },
+    {
+      "ranks": [
+        1,
+        9
+      ],
+      "games": 128,
+      "wins": 60,
+      "draws": 4,
+      "losses": 64,
+      "winRate": 0.46875,
+      "score": 0.484375
+    },
+    {
+      "ranks": [
+        1,
+        10
+      ],
+      "games": 128,
+      "wins": 67,
+      "draws": 3,
+      "losses": 58,
+      "winRate": 0.5234375,
+      "score": 0.53515625
+    },
+    {
+      "ranks": [
+        2,
+        3
+      ],
+      "games": 128,
+      "wins": 53,
+      "draws": 16,
+      "losses": 59,
+      "winRate": 0.4140625,
+      "score": 0.4765625
+    },
+    {
+      "ranks": [
+        2,
+        4
+      ],
+      "games": 128,
+      "wins": 76,
+      "draws": 0,
+      "losses": 52,
+      "winRate": 0.59375,
+      "score": 0.59375
+    },
+    {
+      "ranks": [
+        2,
+        5
+      ],
+      "games": 128,
+      "wins": 55,
+      "draws": 0,
+      "losses": 73,
+      "winRate": 0.4296875,
+      "score": 0.4296875
+    },
+    {
+      "ranks": [
+        2,
+        6
+      ],
+      "games": 128,
+      "wins": 72,
+      "draws": 0,
+      "losses": 56,
+      "winRate": 0.5625,
+      "score": 0.5625
+    },
+    {
+      "ranks": [
+        2,
+        7
+      ],
+      "games": 128,
+      "wins": 65,
+      "draws": 0,
+      "losses": 63,
+      "winRate": 0.5078125,
+      "score": 0.5078125
+    },
+    {
+      "ranks": [
+        2,
+        8
+      ],
+      "games": 128,
+      "wins": 63,
+      "draws": 0,
+      "losses": 65,
+      "winRate": 0.4921875,
+      "score": 0.4921875
+    },
+    {
+      "ranks": [
+        2,
+        9
+      ],
+      "games": 128,
+      "wins": 67,
+      "draws": 0,
+      "losses": 61,
+      "winRate": 0.5234375,
+      "score": 0.5234375
+    },
+    {
+      "ranks": [
+        2,
+        10
+      ],
+      "games": 128,
+      "wins": 71,
+      "draws": 0,
+      "losses": 57,
+      "winRate": 0.5546875,
+      "score": 0.5546875
+    },
+    {
+      "ranks": [
+        3,
+        4
+      ],
+      "games": 128,
+      "wins": 57,
+      "draws": 5,
+      "losses": 66,
+      "winRate": 0.4453125,
+      "score": 0.46484375
+    },
+    {
+      "ranks": [
+        3,
+        5
+      ],
+      "games": 128,
+      "wins": 59,
+      "draws": 10,
+      "losses": 59,
+      "winRate": 0.4609375,
+      "score": 0.5
+    },
+    {
+      "ranks": [
+        3,
+        6
+      ],
+      "games": 128,
+      "wins": 65,
+      "draws": 1,
+      "losses": 62,
+      "winRate": 0.5078125,
+      "score": 0.51171875
+    },
+    {
+      "ranks": [
+        3,
+        7
+      ],
+      "games": 128,
+      "wins": 67,
+      "draws": 1,
+      "losses": 60,
+      "winRate": 0.5234375,
+      "score": 0.52734375
+    },
+    {
+      "ranks": [
+        3,
+        8
+      ],
+      "games": 128,
+      "wins": 60,
+      "draws": 5,
+      "losses": 63,
+      "winRate": 0.46875,
+      "score": 0.48828125
+    },
+    {
+      "ranks": [
+        3,
+        9
+      ],
+      "games": 128,
+      "wins": 65,
+      "draws": 7,
+      "losses": 56,
+      "winRate": 0.5078125,
+      "score": 0.53515625
+    },
+    {
+      "ranks": [
+        3,
+        10
+      ],
+      "games": 128,
+      "wins": 56,
+      "draws": 5,
+      "losses": 67,
+      "winRate": 0.4375,
+      "score": 0.45703125
+    },
+    {
+      "ranks": [
+        4,
+        5
+      ],
+      "games": 128,
+      "wins": 51,
+      "draws": 3,
+      "losses": 74,
+      "winRate": 0.3984375,
+      "score": 0.41015625
+    },
+    {
+      "ranks": [
+        4,
+        6
+      ],
+      "games": 128,
+      "wins": 61,
+      "draws": 1,
+      "losses": 66,
+      "winRate": 0.4765625,
+      "score": 0.48046875
+    },
+    {
+      "ranks": [
+        4,
+        7
+      ],
+      "games": 128,
+      "wins": 61,
+      "draws": 1,
+      "losses": 66,
+      "winRate": 0.4765625,
+      "score": 0.48046875
+    },
+    {
+      "ranks": [
+        4,
+        8
+      ],
+      "games": 128,
+      "wins": 55,
+      "draws": 0,
+      "losses": 73,
+      "winRate": 0.4296875,
+      "score": 0.4296875
+    },
+    {
+      "ranks": [
+        4,
+        9
+      ],
+      "games": 128,
+      "wins": 61,
+      "draws": 1,
+      "losses": 66,
+      "winRate": 0.4765625,
+      "score": 0.48046875
+    },
+    {
+      "ranks": [
+        4,
+        10
+      ],
+      "games": 128,
+      "wins": 63,
+      "draws": 0,
+      "losses": 65,
+      "winRate": 0.4921875,
+      "score": 0.4921875
+    },
+    {
+      "ranks": [
+        5,
+        6
+      ],
+      "games": 128,
+      "wins": 61,
+      "draws": 0,
+      "losses": 67,
+      "winRate": 0.4765625,
+      "score": 0.4765625
+    },
+    {
+      "ranks": [
+        5,
+        7
+      ],
+      "games": 128,
+      "wins": 65,
+      "draws": 0,
+      "losses": 63,
+      "winRate": 0.5078125,
+      "score": 0.5078125
+    },
+    {
+      "ranks": [
+        5,
+        8
+      ],
+      "games": 128,
+      "wins": 64,
+      "draws": 8,
+      "losses": 56,
+      "winRate": 0.5,
+      "score": 0.53125
+    },
+    {
+      "ranks": [
+        5,
+        9
+      ],
+      "games": 128,
+      "wins": 75,
+      "draws": 0,
+      "losses": 53,
+      "winRate": 0.5859375,
+      "score": 0.5859375
+    },
+    {
+      "ranks": [
+        5,
+        10
+      ],
+      "games": 128,
+      "wins": 66,
+      "draws": 0,
+      "losses": 62,
+      "winRate": 0.515625,
+      "score": 0.515625
+    },
+    {
+      "ranks": [
+        6,
+        7
+      ],
+      "games": 128,
+      "wins": 72,
+      "draws": 0,
+      "losses": 56,
+      "winRate": 0.5625,
+      "score": 0.5625
+    },
+    {
+      "ranks": [
+        6,
+        8
+      ],
+      "games": 128,
+      "wins": 63,
+      "draws": 0,
+      "losses": 65,
+      "winRate": 0.4921875,
+      "score": 0.4921875
+    },
+    {
+      "ranks": [
+        6,
+        9
+      ],
+      "games": 128,
+      "wins": 69,
+      "draws": 0,
+      "losses": 59,
+      "winRate": 0.5390625,
+      "score": 0.5390625
+    },
+    {
+      "ranks": [
+        6,
+        10
+      ],
+      "games": 128,
+      "wins": 59,
+      "draws": 0,
+      "losses": 69,
+      "winRate": 0.4609375,
+      "score": 0.4609375
+    },
+    {
+      "ranks": [
+        7,
+        8
+      ],
+      "games": 128,
+      "wins": 61,
+      "draws": 0,
+      "losses": 67,
+      "winRate": 0.4765625,
+      "score": 0.4765625
+    },
+    {
+      "ranks": [
+        7,
+        9
+      ],
+      "games": 128,
+      "wins": 58,
+      "draws": 0,
+      "losses": 70,
+      "winRate": 0.453125,
+      "score": 0.453125
+    },
+    {
+      "ranks": [
+        7,
+        10
+      ],
+      "games": 128,
+      "wins": 59,
+      "draws": 0,
+      "losses": 69,
+      "winRate": 0.4609375,
+      "score": 0.4609375
+    },
+    {
+      "ranks": [
+        8,
+        9
+      ],
+      "games": 128,
+      "wins": 60,
+      "draws": 0,
+      "losses": 68,
+      "winRate": 0.46875,
+      "score": 0.46875
+    },
+    {
+      "ranks": [
+        8,
+        10
+      ],
+      "games": 128,
+      "wins": 55,
+      "draws": 1,
+      "losses": 72,
+      "winRate": 0.4296875,
+      "score": 0.43359375
+    },
+    {
+      "ranks": [
+        9,
+        10
+      ],
+      "games": 128,
+      "wins": 61,
+      "draws": 0,
+      "losses": 67,
+      "winRate": 0.4765625,
+      "score": 0.4765625
+    }
+  ],
+  "scoreCI95": [
+    0.48515625,
+    0.5114583333333333
+  ],
+  "bootstrap": {
+    "method": "paired seed quartet percentile bootstrap within each fixed matchup",
+    "replicates": 10000,
+    "initialSeed": 1296846923
+  },
+  "rule": "Promote V2 when the lower 95% confidence limit for its score (win=1, draw=0.5, loss=0) exceeds 0.5",
+  "promote": false,
+  "decision": "retain-v1"
+}

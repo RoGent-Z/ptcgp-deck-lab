@@ -1,0 +1,256 @@
+{
+  "mode": "independent-engine-replays",
+  "summaries": {
+    "mirror": {
+      "wins": 267,
+      "losses": 204,
+      "draws": 29,
+      "total": 500,
+      "winRate": 0.534
+    },
+    "holdout": {
+      "wins": 1252,
+      "losses": 873,
+      "draws": 35,
+      "total": 2160,
+      "winRate": 0.5796296296296296
+    },
+    "challenge": {
+      "wins": 2822,
+      "losses": 2841,
+      "draws": 97,
+      "total": 5760,
+      "winRate": 0.48993055555555554
+    }
+  },
+  "provenance": {
+    "engineCommit": "a0f9d14bf2dd2a342e53cd7057486d7ce96ea545",
+    "trainedGames": 73728,
+    "engineArchiveSha256": "1de0d38c441e4360b7b9f215057fa1eb70a3facd22de50bef0011cbca4391ed6",
+    "bridgeSha256": "a8a6e2947457d1c9963df3f72526b1dd106e1437952916b4672203edc6c18ffc",
+    "cliSha256": "aa0d4b1788689c7f09cc026b8d8f13c4ffe6215b3023405a455adb0d18d0540e",
+    "trainerSha256": "70428174360b057e74976d20517c1bfd1573739929442ce0adb46f9ffa29532d",
+    "lineupSha256": "eddf77cdc834ee9ffb43fa391e4e934306e853ddbd6708c04a8ed6a1460cbfd8",
+    "trainerCommonSha256": "ad47132357fb761326cb9c7f48254bf3ef032235b204e5634f7ad6da8a2bf122",
+    "parentModelSha256": "cee96996ed2a195e7f87d0ed1ed653fd8c26ca8e2568263fbfe3bd1c7cbd415e",
+    "parentTrainingSha256": "e17742061a3ff3b7163a33f9062d4c7db4c13636fa02ca56695b444bee7a75bc",
+    "baselineWeightsSha256": "19ec2c0bc61e307ba8434d10148efa3444082c0e9ca86adcd226fe3d35b5e94f",
+    "candidateWeightsSha256": "ba9c7fe8d29c27113f835ae1a58ef250a6502922e28b70462defd19d7e28036c"
+  },
+  "verificationEngine": {
+    "target": "wasm32-wasip1",
+    "binarySha256": "3d4412e10bcf69ec55c86701441042f7a7061c20458db2187c0d939649d131ba"
+  },
+  "replays": [
+    {
+      "kind": "mirror",
+      "deckRank": 1,
+      "enemyRank": 1,
+      "first": 0,
+      "seed": 4222850940,
+      "outcome": "win",
+      "turns": 11,
+      "actions": 79,
+      "points": [
+        5,
+        2
+      ],
+      "traceSha256": "3042d99067c72098abd971d8b8500b8598e56eaac0e391e811387b729ea38f6a"
+    },
+    {
+      "kind": "mirror",
+      "deckRank": 1,
+      "enemyRank": 1,
+      "first": 1,
+      "seed": 4172108075,
+      "outcome": "loss",
+      "turns": 9,
+      "actions": 66,
+      "points": [
+        2,
+        3
+      ],
+      "traceSha256": "c65b944a35394f9d5c7be7565a9d1afd62a54ee50ddd43699ebbcc4b4553e068"
+    },
+    {
+      "kind": "mirror",
+      "deckRank": 1,
+      "enemyRank": 5,
+      "first": 0,
+      "seed": 4040963030,
+      "outcome": "loss",
+      "turns": 10,
+      "actions": 83,
+      "points": [
+        2,
+        4
+      ],
+      "traceSha256": "068e5b58279f2ffb251529b98b554d9359ba25696100da27fd4e40027a0eb447"
+    },
+    {
+      "kind": "mirror",
+      "deckRank": 1,
+      "enemyRank": 5,
+      "first": 1,
+      "seed": 2444195969,
+      "outcome": "loss",
+      "turns": 9,
+      "actions": 63,
+      "points": [
+        1,
+        3
+      ],
+      "traceSha256": "c7a7cc89f541bbfaf673a6706ea9bc27bcb34912681ada8a0a929490fec1ce0b"
+    },
+    {
+      "kind": "mirror",
+      "deckRank": 1,
+      "enemyRank": 10,
+      "first": 0,
+      "seed": 401368236,
+      "outcome": "win",
+      "turns": 3,
+      "actions": 24,
+      "points": [
+        1,
+        0
+      ],
+      "traceSha256": "0640c31672b1f1025d1ec41716087b9bdc5b21d78e41a9d06e01ff3ab69a966e"
+    },
+    {
+      "kind": "mirror",
+      "deckRank": 1,
+      "enemyRank": 10,
+      "first": 1,
+      "seed": 3055060507,
+      "outcome": "win",
+      "turns": 10,
+      "actions": 73,
+      "points": [
+        3,
+        1
+      ],
+      "traceSha256": "21976d0ff8e2dd4fe7bfb3d6f57a21bccc03d03a4b600a79795ded89b94dc4a6"
+    },
+    {
+      "kind": "holdout",
+      "deckRank": 1,
+      "enemyRank": 10,
+      "first": 0,
+      "seed": 274102301,
+      "outcome": "loss",
+      "turns": 6,
+      "actions": 40,
+      "points": [
+        0,
+        2
+      ],
+      "traceSha256": "ee933b9b5cc5e7f59f306a609cc44199fe2cc841b37c04af132585bd1871f210"
+    },
+    {
+      "kind": "holdout",
+      "deckRank": 1,
+      "enemyRank": 10,
+      "first": 1,
+      "seed": 274102301,
+      "outcome": "loss",
+      "turns": 11,
+      "actions": 73,
+      "points": [
+        2,
+        3
+      ],
+      "traceSha256": "cfd81cde1d8e876bea53aa9c7e5bf6d9282a50fbd8f99b21b9f23c0c663ae91b"
+    },
+    {
+      "kind": "holdout",
+      "deckRank": 10,
+      "enemyRank": 1,
+      "first": 0,
+      "seed": 274102301,
+      "outcome": "loss",
+      "turns": 10,
+      "actions": 66,
+      "points": [
+        0,
+        3
+      ],
+      "traceSha256": "83dc5bf869eb4b90d15c365435bb4a122cb4c31ccd48d33963f5b84d35a055c1"
+    },
+    {
+      "kind": "holdout",
+      "deckRank": 10,
+      "enemyRank": 1,
+      "first": 1,
+      "seed": 274102301,
+      "outcome": "loss",
+      "turns": 9,
+      "actions": 61,
+      "points": [
+        2,
+        3
+      ],
+      "traceSha256": "da544b35dcae0a50f70aed4491d489144a00ed790d001ff09c44dc834f0a41f9"
+    },
+    {
+      "kind": "challenge",
+      "deckRank": 1,
+      "enemyRank": 10,
+      "first": 0,
+      "seed": 2095100021,
+      "outcome": "win",
+      "turns": 9,
+      "actions": 62,
+      "points": [
+        5,
+        0
+      ],
+      "traceSha256": "6b8d38b411c404cfc795839eb529ab53beaf940d78286c6bce1513c121cc7b1d"
+    },
+    {
+      "kind": "challenge",
+      "deckRank": 1,
+      "enemyRank": 10,
+      "first": 1,
+      "seed": 2095100021,
+      "outcome": "win",
+      "turns": 10,
+      "actions": 74,
+      "points": [
+        3,
+        0
+      ],
+      "traceSha256": "52437300e6aa11549764b66c4efa7b47ca5e35f892a8e458d0f8553f6c633a7e"
+    },
+    {
+      "kind": "challenge",
+      "deckRank": 10,
+      "enemyRank": 1,
+      "first": 0,
+      "seed": 2095100021,
+      "outcome": "loss",
+      "turns": 14,
+      "actions": 98,
+      "points": [
+        2,
+        5
+      ],
+      "traceSha256": "d84234c6ef30c041ba33e84f632ce8005362581484b0fd33d50e18ba353a8b8a"
+    },
+    {
+      "kind": "challenge",
+      "deckRank": 10,
+      "enemyRank": 1,
+      "first": 1,
+      "seed": 2095100021,
+      "outcome": "loss",
+      "turns": 13,
+      "actions": 97,
+      "points": [
+        2,
+        5
+      ],
+      "traceSha256": "fb19344c6daa8347b9cdd85234577caa32d3e26f5b5ea93ea614ae3fe8ef1f4c"
+    }
+  ]
+}

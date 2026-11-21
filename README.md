@@ -45,7 +45,23 @@ Project_15_宝可梦卡牌对战模拟站/
   - `tools/cards/*` 已生成完整 **4,577 张**繁中卡牌 `cards.json` 与 27 系列 `catalog.json`（52Poké 精准匹配 4,562 张 + 15 张官译兜底）；
   - 前端 6 大页面、数据卡面组件与 50 格点阵界面已完成真卡库实机验收，14 项单元测试全部通过；
   - `.github/workflows/test.yml` 与 `deploy.yml` 已按分层定时和 Pages Artifact 发布就位。
-- **待续作（M3 / M5 / M6）**：Rust 规则引擎 WASM 编译（需 `cargo` + `wasm32-unknown-unknown`）、AI 模型权重训练与正式 GitHub Pages 上线验收（详见 `docs/00_接手指南.md`）。
+- **浏览器对战**：浏览器 WASM 接入与在线对战验收见 [接手指南](docs/00_接手指南.md)。
+
+## 本地对战策略训练
+
+本地训练沿用固定 C1 赛事快照与 DeckGym 规则引擎。第 11–26 名用于训练，第 27–30 名用于选模和复选，原始前十用于最终对战评估。V1 的脚本与权重已归档，V2 从 V1 权重启动并保存独立断点。两版的可复算记录见 [V1 报告](reports/battle-ml-c1/report.md) 和 [V2 报告](reports/battle-ml-c1-v2/report.md)。
+
+2026-11-21 续训 73,728 局后，V2 对 V1 的独立 5,760 局得分率为 49.84%，95% 区间为 48.52%–51.15%。模型选型保留 V1，V2 权重及对局保留为实验记录。
+
+```powershell
+node tools/battle/build.mjs
+node tools/battle/trainer-v2.mjs reports/battle-ml-c1-v2 6
+node tools/battle/compare-policies.mjs reports/battle-ml-c1-v2
+node tools/battle/verify-report.mjs reports/battle-ml-c1-v2
+node tools/battle/verify-replay.mjs reports/battle-ml-c1-v2
+```
+
+V2 的晋级结果保存在 `promotion.json`。对照训练产物时，优先检查二进制、训练脚本、牌表与父模型散列，以及 `challenge.jsonl` 的四向交叉赛果。若重建出的引擎二进制散列不同，原 V2 断点会拒绝混用。原始 V1 运行入口为 `tools/battle/trainer-v1.mjs`。
 
 ## 后续维护
 

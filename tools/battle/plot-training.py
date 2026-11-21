@@ -22,13 +22,18 @@ def main():
     font_path = Path("C:/Windows/Fonts/msyh.ttc")
     chinese = font_path.is_file()
     font = FontProperties(fname=font_path) if chinese else FontProperties()
-    title = "C1 对战策略训练" if chinese else "C1 battle policy training"
+    continuation = "parentVersion" in training
+    title = ("C1 对战策略续训" if continuation else "C1 对战策略训练") if chinese else (
+        "C1 battle policy continuation" if continuation else "C1 battle policy training")
     x_label = "训练轮次" if chinese else "Training round"
-    y_label = "对冻结基线的得分率" if chinese else "Score against frozen baseline"
+    opponent = "V1" if continuation else "V0"
+    y_label = f"对 {opponent} 的得分率" if chinese else f"Score against {opponent}"
     candidate_label = "本轮最佳候选" if chinese else "Best candidate this round"
-    champion_label = "截至该轮的保留模型" if chinese else "Best retained policy"
-    footer = ("验证牌表为赛事第 27–30 名，每个候选 192 局，和局计半分。"
-              if chinese else "Validation ranks 27–30. 192 games per candidate. Draws are worth half a point.")
+    champion_label = ("迄今最佳 V2 候选" if chinese else "Best V2 candidate so far") if continuation else (
+        "截至该轮的保留模型" if chinese else "Best retained policy")
+    games = generations[0]["validation"]["games"]
+    footer = (f"验证牌表为赛事第 27–30 名，每个候选 {games} 局，和局计半分。"
+              if chinese else f"Validation ranks 27–30. {games} games per candidate. Draws are worth half a point.")
     rounds = [row["round"] for row in generations]
     candidate = [row["validation"]["score"] for row in generations]
     champion = [row["championValidation"]["score"] for row in generations]

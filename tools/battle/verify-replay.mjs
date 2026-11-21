@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scheduleHoldout, seed32 } from './trainer-v1.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const countByOutcome = {win:'wins', loss:'losses', draw:'draws'};
@@ -68,6 +69,105 @@ export function auditEvaluation(rows, decks, seedsPerSeat=12) {
   return auditEvents(rows);
 }
 
+export function auditChallenge(rows, decks, holdout, mirror) {
+  assert.equal(decks.length,10,'Challenge requires all ten holdout decks');
+  const summary=auditEvaluation(rows,decks,32);
+  const seen=new Set();
+  for (const [phase,games,expected] of [['challenge',rows,1440],['holdout',holdout,null],['mirror',mirror,500]]) {
+    const seeds=new Set(games.map(row=>row.seed));
+    for (const seed of seeds) {
+      assert.ok(!seen.has(seed),'Seed reused across tests: '+phase+'/'+seed);
+      seen.add(seed);
+    }
+    assert.equal(seeds.size,expected ?? games.length/4,'Repeated seed within '+phase);
+  }
+  return summary;
+}
+
+function checkScore(tally, games) {
+  assert.equal(tally?.games,games,'Unexpected number of games');
+  for (const key of ['wins','losses','draws']) assert.ok(Number.isInteger(tally[key]) && tally[key]>=0,'Invalid '+key);
+  assert.equal(tally.wins+tally.losses+tally.draws,games,'Result counts do not add up to games');
+  assert.equal(tally.score,(tally.wins+.5*tally.draws)/games,'Incorrect draw-adjusted score');
+}
+
+function auditPublishedSeeds(comparisons,mirror,decks,continued) {
+  // The original, checksum-verified v1 schedule routine also defines the v2 paired seeds.
+  const ranks=decks.map(deck=>deck.rank);
+  for (const {kind,rows} of comparisons) {
+    const direct=kind==='challenge';
+    const phase=direct?'v2-v1-challenge':continued?'v2-v0-eval':'test';
+    const expected=new Set(scheduleHoldout(ranks,direct?32:12,phase).map(row=>row.ranks.join('/')+'/'+row.seed));
+    for (const row of rows) {
+      assert.ok(expected.has(row.ranks.join('/')+'/'+row.seed),'Unexpected '+kind+' seed for this pair');
+    }
+  }
+  const experiment=continued?'pocket-lab-c1-cem-v2':'pocket-lab-c1-cem-v1';
+  for (const row of mirror) {
+    assert.equal(row.seed,seed32([experiment,'example',row.id,row.index].join('|')),'Unexpected example seed');
+  }
+}
+
+export function auditContinuation(candidate,training,parent,parentTraining) {
+  assert.equal(candidate.version,'selfplay-cem-v2');
+  assert.equal(parent.version,'selfplay-cem-v1');
+  assert.equal(training.parentVersion,parent.version);
+  assert.equal(parent.trainedGames,18432,'Unexpected frozen parent game count');
+  assert.equal(parentTraining.trainedGames,parent.trainedGames);
+  assert.equal(training.parentTrainedGames,parent.trainedGames);
+  assert.equal(candidate.parentTrainedGames,parent.trainedGames);
+  assert.deepEqual(parentTraining.bestCandidate?.weight,parent.weights,'Frozen parent checkpoint weights differ from parent model');
+  assert.deepEqual(parentTraining.provenance,parent.provenance,'Frozen parent provenance differs from checkpoint');
+  const config=training.config;
+  assert.equal(config.generations,16);
+  assert.equal(training.generations.length,config.generations,'Missing completed training generations');
+  assert.equal(config.candidates,24);
+  assert.equal(config.trainGamesPerCandidate,192);
+  assert.equal(config.checkedPerGeneration,3);
+  assert.equal(config.selectionCandidates,6);
+  let accumulated=0;
+  for (const [i,g] of training.generations.entries()) {
+    assert.equal(g.round,i+1,'Unexpected generation number');
+    assert.equal(g.candidates.length,config.candidates,'Missing trained candidate');
+    const entries=new Map(g.candidates.map(entry=>[entry.index,entry]));
+    let games=0;
+    for (let index=0;index<config.candidates;index++) {
+      const entry=entries.get(index);
+      assert.equal(entry?.epoch,g.round,'Missing trained candidate in generation');
+      checkScore(entry.training,config.trainGamesPerCandidate);
+      games+=entry.training.games;
+    }
+    assert.equal(g.games,games,'Wrong games in generation');
+    accumulated+=games;
+    assert.equal(g.totalGames,accumulated,'Wrong cumulative games in checkpoint');
+    assert.equal(g.validated.length,config.checkedPerGeneration,'Missing validation candidate');
+    assert.equal(new Set(g.validated.map(entry=>entry.index)).size,g.validated.length,'Repeated validation candidate');
+    for (const entry of g.validated) {
+      const measured=entries.get(entry.index);
+      assert.deepEqual(entry.weight,measured?.weight,'Validation weights absent from measured population');
+      assert.deepEqual(entry.training,measured.training,'Validation candidate training result changed');
+      checkScore(entry.validation,768);
+    }
+  }
+  assert.equal(training.trainedGames,accumulated,'Training checkpoint game total differs');
+  assert.equal(candidate.trainedGames,accumulated,'Candidate trained games must count only this run');
+  assert.equal(candidate.cumulativeTrainingGames,parent.trainedGames+accumulated,'Unexpected total across both training runs');
+  const {chosen,finalists}=training.selection;
+  assert.ok(finalists.length>0 && finalists.length<=config.selectionCandidates,'Invalid finalist count');
+  assert.equal(new Set(finalists.map(f=>JSON.stringify(f.weight))).size,finalists.length,'Duplicate finalist weights');
+  assert.deepEqual(chosen,finalists[0],'Selected candidate differs from top finalist');
+  for (const entry of finalists) {
+    const tested=training.generations[entry.epoch-1]?.validated.find(c=>c.index===entry.index);
+    assert.ok(tested,'Finalist was absent from validation');
+    for (const key of ['weight','training','validation']) assert.deepEqual(entry[key],tested[key],'Finalist '+key+' changed');
+    checkScore(entry.confirmation,1152);
+    assert.ok(chosen.confirmation.score>=entry.confirmation.score,'Selected candidate has a lower confirmation score');
+  }
+  assert.deepEqual(candidate.weights,chosen.weight,'Selected candidate weights differ');
+  assert.deepEqual(candidate.selection,{round:chosen.epoch,candidateIndex:chosen.index,
+    validation:chosen.validation,confirmation:chosen.confirmation},'Model selection differs from training record');
+}
+
 export function sampleMirror(rows) {
   return [1,5,10].flatMap(rank => [0,49].map(index => {
     const row = rows.find(r => r.rank === rank && r.index === index);
@@ -130,33 +230,78 @@ function runIsolated(inputs, binary) {
 
 export function verifyRun(folder, {recordsOnly=false}={}) {
   const json = name => JSON.parse(readFileSync(join(folder,name),'utf8'));
+  const fileHash = path => digest(readFileSync(path));
   const lineup=json('lineup.json');
   assert.ok(Array.isArray(lineup.decks), 'Missing frozen deck lineup');
   const decks = lineup.decks.filter(d => d.rank >= 1 && d.rank <= 10);
   const baseline=json('baseline-v0.json');
-  const candidate=json('candidate-v1.json');
+  const training=json('training.json');
+  const continued=training.schemaVersion === 2;
+  assert.ok(continued || training.schemaVersion===1,'Unknown training checkpoint version');
+  const candidate=json(continued?'candidate-v2.json':'candidate-v1.json');
   auditModels(baseline,candidate);
+  assert.equal(baseline.version,'baseline-v0');
+  assert.equal(candidate.version,continued?'selfplay-cem-v2':'selfplay-cem-v1');
   const mirror=readJsonLines(folder,'mirror-500.jsonl');
   const holdout=readJsonLines(folder,'eval.jsonl');
   const summaries={mirror:auditMirror(mirror,decks),holdout:auditEvaluation(holdout,decks)};
-  const training=json('training.json');
+  const comparisons=[{kind:'holdout',rows:holdout,summary:candidate.eval,opponent:baseline}];
+  const trainerDir=join(root,'tools/battle');
+  const archive=join(trainerDir,'trainer-v1.mjs');
+  const archiveHash=fileHash(archive);
   const actualDigests={
-    engineArchiveSha256:digest(readFileSync(join(root,'engine/deckgym-source.tgz'))),
-    bridgeSha256:digest(readFileSync(join(root,'engine/pocket_lab.rs'))),
-    trainerSha256:digest(readFileSync(join(root,'tools/battle/trainer.mjs'))),
-    lineupSha256:digest(readFileSync(join(folder,'lineup.json')))
+    engineArchiveSha256:fileHash(join(root,'engine/deckgym-source.tgz')),
+    bridgeSha256:fileHash(join(root,'engine/pocket_lab.rs')),
+    cliSha256:fileHash(join(root,'engine/pocket_lab_cli.rs')),
+    trainerSha256:continued?fileHash(join(trainerDir,'trainer-v2.mjs')):archiveHash,
+    lineupSha256:fileHash(join(folder,'lineup.json'))
   };
+  const parentTraining=continued?json('parent-training.json'):training;
+  const originalBaseline=parentTraining.generations[0].candidates.find(entry=>entry.index===0);
+  assert.deepEqual(baseline.weights,originalBaseline?.weight,'Frozen baseline weights differ from initial v1 generation');
+  if (continued) {
+    const parent=json('parent-v1.json');
+    auditModels(baseline,parent);
+    auditContinuation(candidate,training,parent,parentTraining);
+    assert.deepEqual(parent.source,lineup.source,'Parent uses a different source snapshot');
+    assert.deepEqual(parentTraining.source,lineup.source,'Parent checkpoint uses a different source snapshot');
+    assert.deepEqual(parent.featureNames,candidate.featureNames,'Parent feature ordering differs');
+    assert.deepEqual(parent.provenance,{engineArchiveSha256:actualDigests.engineArchiveSha256,
+      bridgeSha256:actualDigests.bridgeSha256,cliSha256:actualDigests.cliSha256,
+      engineBinarySha256:candidate.provenance.engineBinarySha256,engineTarget:candidate.provenance.engineTarget,
+      lineupSha256:actualDigests.lineupSha256,trainerSha256:archiveHash},'Parent run uses different frozen inputs');
+    Object.assign(actualDigests,{
+      trainerCommonSha256:fileHash(join(trainerDir,'trainer.mjs')),
+      parentModelSha256:fileHash(join(folder,'parent-v1.json')),
+      parentTrainingSha256:fileHash(join(folder,'parent-training.json'))
+    });
+    const originalRun=join(root,'reports/battle-ml-c1');
+    for (const [original,hash] of [['candidate-v1.json',actualDigests.parentModelSha256],['training.json',actualDigests.parentTrainingSha256]]) {
+      const file=join(originalRun,original);
+      if (existsSync(file)) assert.equal(fileHash(file),hash,'Parent copy differs from archived v1 '+original);
+    }
+    const challenge=readJsonLines(folder,'challenge.jsonl');
+    summaries.challenge=auditChallenge(challenge,decks,holdout,mirror);
+    comparisons.push({kind:'challenge',rows:challenge,summary:candidate.challenge,opponent:parent});
+  } else {
+    assert.deepEqual(training.bestCandidate.weight,candidate.weights,'Final weights differ from selected checkpoint');
+    assert.equal(training.generations.reduce((sum,g) => sum + g.games,0),candidate.trainedGames,'Wrong training-game total');
+  }
   for (const artifact of [baseline,candidate,training]) {
+    if (continued) assert.equal(artifact.provenance.trainerFile,'trainer-v2.mjs','Unexpected continuation trainer');
     for (const [key,hash] of Object.entries(actualDigests)) {
       assert.equal(artifact.provenance?.[key],hash,'Frozen '+key+' differs from current input');
     }
+    assert.deepEqual(artifact.provenance,candidate.provenance,'Artifacts have different provenance');
     assert.deepEqual(artifact.source,lineup.source,'Artifacts refer to different source snapshots');
   }
-  assert.deepEqual(training.bestCandidate.weight,candidate.weights,'Final weights differ from selected checkpoint');
-  assert.equal(training.generations.reduce((sum,g) => sum + g.games,0),candidate.trainedGames,'Wrong training-game total');
-  const heldOut=summaries.holdout;
-  for (const key of ['wins','draws','losses']) assert.equal(candidate.eval?.[key],heldOut[key],'Incorrect holdout '+key);
-  assert.equal(candidate.eval.games,heldOut.total);
+  auditPublishedSeeds(comparisons,mirror,decks,continued);
+  for (const {kind,summary,opponent} of comparisons) {
+    const totals=summaries[kind];
+    assert.equal(summary?.opponent,opponent.version,'Opponent differs for '+kind);
+    for (const key of ['wins','draws','losses']) assert.equal(summary[key],totals[key],'Incorrect '+kind+' '+key);
+    checkScore(summary,totals.total);
+  }
   const provenance={engineCommit:candidate.engineCommit,trainedGames:candidate.trainedGames,
     ...actualDigests,baselineWeightsSha256:digest(JSON.stringify(baseline.weights)),candidateWeightsSha256:digest(JSON.stringify(candidate.weights))};
   if(recordsOnly) return {mode:'records-only',summaries,provenance};
@@ -166,11 +311,13 @@ export function verifyRun(folder, {recordsOnly=false}={}) {
   const samples=sampleMirror(mirror).map(row => ({
     kind:'mirror',row,left:example,right:byRank.get(row.rank),enemyWeights:candidate.weights
   }));
-  // Holdout seat and deck ownership are separate. Check both for each of the extreme ranks.
-  for (const deckRank of [1,10]) for (const first of [0,1]) {
-    const row=holdout.find(r => r.deckRank === deckRank && r.first === first && r.ranks.includes(1) && r.ranks.includes(10));
-    assert.ok(row,'Missing held-out replay sample');
-    samples.push({kind:'holdout',row,left:byRank.get(deckRank),right:byRank.get(row.ranks.find(r => r !== deckRank)),enemyWeights:baseline.weights});
+  // Check deck ownership and turn order independently against each frozen policy.
+  for (const {kind,rows,opponent} of comparisons) {
+    for (const deckRank of [1,10]) for (const first of [0,1]) {
+      const row=rows.find(r => r.deckRank === deckRank && r.first === first && r.ranks.includes(1) && r.ranks.includes(10));
+      assert.ok(row,'Missing '+kind+' replay sample');
+      samples.push({kind,row,left:byRank.get(deckRank),right:byRank.get(row.ranks.find(r => r !== deckRank)),enemyWeights:opponent.weights});
+    }
   }
   const asEngineDeck = d => ({cards:d.cards,energy:d.energy});
   const inputs=samples.map(({row,left,right,enemyWeights}) => ({
@@ -182,9 +329,11 @@ export function verifyRun(folder, {recordsOnly=false}={}) {
   const binary=join(build,manifest.filename);
   const binarySha256=digest(readFileSync(binary));
   assert.equal(binarySha256,manifest.sha256,'Replay engine binary differs from its build manifest');
+  assert.equal(binarySha256,candidate.provenance.engineBinarySha256,'The selected engine binary differs from the training engine');
+  assert.equal(manifest.target,candidate.provenance.engineTarget,'The replay and training engine targets differ');
   assert.equal(manifest.sourceArchiveSha256,actualDigests.engineArchiveSha256,'Replay binary uses a different upstream archive');
   assert.equal(manifest.bridgeSha256,actualDigests.bridgeSha256,'Replay binary uses a different rules bridge');
-  assert.equal(manifest.cliSha256,digest(readFileSync(join(root,'engine/pocket_lab_cli.rs'))),'Replay binary uses a different driver');
+  assert.equal(manifest.cliSha256,actualDigests.cliSha256,'Replay binary uses a different driver');
   const a=runIsolated(inputs,binary);
   const b=runIsolated([...inputs].reverse(),binary).reverse();
   const replays=samples.map(({kind,row,left,right},i) => ({
