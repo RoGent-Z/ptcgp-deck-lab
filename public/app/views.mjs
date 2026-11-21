@@ -75,6 +75,7 @@ const TRAINER_SUBTYPE_OPTIONS = [
 ];
 
 export const uiState = {
+  openSelect: null,
   catalog: {
     q: '',
     set: '',
@@ -411,6 +412,70 @@ export function filterCatalogCards() {
   });
 }
 
+export function renderSwissSelect({
+  id,
+  title,
+  value = '',
+  options = [],
+  followUp = false,
+  columns = 1,
+  disabled = false,
+  fullWidth = false
+}) {
+  const activeOpt = options.find((o) => String(o.value) === String(value)) || options[0];
+  const isOpen = uiState.openSelect === id;
+  const hasValue = Boolean(value);
+  return `
+    <div class="swiss-select-wrap ${fullWidth ? 'is-full' : ''}" data-select-wrap="${esc(id)}">
+      <button
+        type="button"
+        id="${esc(id)}"
+        class="tag-picker-btn swiss-select-btn ${followUp ? 'select-followup' : ''} ${hasValue ? 'has-active' : ''} ${fullWidth ? 'is-full' : ''}"
+        data-action="toggle-swiss-select"
+        data-select-id="${esc(id)}"
+        aria-haspopup="listbox"
+        aria-expanded="${isOpen ? 'true' : 'false'}"
+        aria-controls="${esc(id)}-popover"
+        ${disabled ? 'disabled' : ''}
+      >
+        <span class="swiss-select-val">${esc(activeOpt?.label || title || '請選擇')}</span>
+        <span class="tag-picker-caret" aria-hidden="true">▾</span>
+      </button>
+      <div
+        id="${esc(id)}-popover"
+        class="tag-picker-popover swiss-select-popover ${columns > 1 ? 'is-wide' : ''}"
+        role="listbox"
+        aria-label="${esc(title)}"
+        ${isOpen ? '' : 'hidden'}
+      >
+        <div class="tag-pop-head">
+          <strong>${esc(title)}</strong>
+          <button class="mini-reset" type="button" data-action="close-swiss-select">關閉</button>
+        </div>
+        <div class="swiss-select-list ${columns > 1 ? 'is-grid-2' : ''}">
+          ${options.map((o) => {
+            const selected = String(o.value) === String(value);
+            return `
+              <button
+                type="button"
+                class="swiss-opt ${selected ? 'is-selected' : ''}"
+                data-action="pick-swiss-select"
+                data-select-id="${esc(id)}"
+                data-value="${esc(o.value)}"
+                role="option"
+                aria-selected="${selected ? 'true' : 'false'}"
+              >
+                <span class="swiss-opt-mark" aria-hidden="true">${selected ? '✓' : ''}</span>
+                <span class="swiss-opt-label">${esc(o.label)}</span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 export function renderPokeTagTriggerLabel(f = uiState.catalog) {
   const incCount = f.pokeInclude.length;
   const excCount = f.pokeExclude.length;
@@ -433,7 +498,10 @@ export function renderPokeTagPopoverBody(f = uiState.catalog) {
         <span class="legend-chip is-exc">✕ 排除</span>
         <span class="muted">再點取消</span>
       </span>
-      ${(f.pokeInclude.length || f.pokeExclude.length) ? '<button class="mini-reset" type="button" data-action="clear-poke-tags">清空</button>' : ''}
+      <span class="tag-pop-actions">
+        ${(f.pokeInclude.length || f.pokeExclude.length) ? '<button class="mini-reset" type="button" data-action="clear-poke-tags">清空</button>' : ''}
+        <button class="mini-reset" type="button" data-action="close-swiss-select">完成</button>
+      </span>
     </div>
     ${POKEMON_CATEGORY_GROUPS.map((g) => `
       <div class="tag-pop-group">
@@ -535,27 +603,50 @@ export function renderCatalog() {
             ${typeChips}
           </div>
           <div class="select-row">
-            <select id="filter-set" aria-label="依系列篩選">
-              <option value="">全部系列</option>
-              ${sets.map((s) => `<option value="${esc(s.id)}" ${f.set === s.id ? 'selected' : ''}>${esc(s.id)} ${esc(s.name || '')}</option>`).join('')}
-            </select>
-            <select id="filter-kind" aria-label="依類別篩選">
-              <option value="">全部類別</option>
-              <option value="pokemon" ${f.kind === 'pokemon' ? 'selected' : ''}>寶可夢</option>
-              <option value="trainer" ${f.kind === 'trainer' ? 'selected' : ''}>訓練家</option>
-            </select>
+            ${renderSwissSelect({
+              id: 'filter-set',
+              title: '選擇卡包系列',
+              value: f.set,
+              columns: 2,
+              options: [
+                { value: '', label: '全部系列' },
+                ...sets.map((s) => ({ value: s.id, label: `${s.id} ${s.name || ''}`.trim() }))
+              ]
+            })}
+            ${renderSwissSelect({
+              id: 'filter-kind',
+              title: '選擇卡牌類別',
+              value: f.kind,
+              options: [
+                { value: '', label: '全部類別' },
+                { value: 'pokemon', label: '寶可夢' },
+                { value: 'trainer', label: '訓練家' }
+              ]
+            })}
             ${(f.kind === 'trainer' || f.type === 'trainer') ? `
-              <select id="filter-subtype" class="select-followup" aria-label="依訓練家子類別篩選">
-                <option value="">全部訓練家</option>
-                ${TRAINER_SUBTYPE_OPTIONS.map((o) => `<option value="${esc(o.id)}" ${f.subtype === o.id ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-              </select>
+              ${renderSwissSelect({
+                id: 'filter-subtype',
+                title: '選擇訓練家子類',
+                value: f.subtype,
+                followUp: true,
+                options: [
+                  { value: '', label: '全部訓練家' },
+                  ...TRAINER_SUBTYPE_OPTIONS.map((o) => ({ value: o.id, label: o.label }))
+                ]
+              })}
             ` : `
-              <select id="filter-stage" class="${f.kind === 'pokemon' ? 'select-followup' : ''}" aria-label="依進化階段篩選">
-                <option value="">全部階段</option>
-                <option value="basic" ${f.stage === 'basic' ? 'selected' : ''}>基礎</option>
-                <option value="stage1" ${f.stage === 'stage1' ? 'selected' : ''}>1階進化</option>
-                <option value="stage2" ${f.stage === 'stage2' ? 'selected' : ''}>2階進化</option>
-              </select>
+              ${renderSwissSelect({
+                id: 'filter-stage',
+                title: '選擇進化階段',
+                value: f.stage,
+                followUp: f.kind === 'pokemon',
+                options: [
+                  { value: '', label: '全部階段' },
+                  { value: 'basic', label: '基礎' },
+                  { value: 'stage1', label: '1階進化' },
+                  { value: 'stage2', label: '2階進化' }
+                ]
+              })}
               <div class="tag-picker-wrap">
                 <button
                   type="button"
@@ -573,16 +664,27 @@ export function renderCatalog() {
                 </div>
               </div>
             `}
-            <select id="filter-rarity" aria-label="依稀有度篩選">
-              <option value="">全部稀有度</option>
-              ${rarities.map((r) => `<option value="${esc(r)}" ${f.rarity === r ? 'selected' : ''}>${esc(r)}</option>`).join('')}
-            </select>
-            <select id="filter-owned" aria-label="依持有狀態篩選">
-              <option value="">全部持有狀態</option>
-              <option value="missing" ${f.owned === 'missing' ? 'selected' : ''}>遊戲內未持有 (0 張)</option>
-              <option value="short" ${f.owned === 'short' ? 'selected' : ''}>未滿編 (&lt; 2 張)</option>
-              <option value="owned" ${f.owned === 'owned' ? 'selected' : ''}>已持有 (≥ 1 張)</option>
-            </select>
+            ${renderSwissSelect({
+              id: 'filter-rarity',
+              title: '選擇稀有度',
+              value: f.rarity,
+              columns: 2,
+              options: [
+                { value: '', label: '全部稀有度' },
+                ...rarities.map((r) => ({ value: r, label: r }))
+              ]
+            })}
+            ${renderSwissSelect({
+              id: 'filter-owned',
+              title: '選擇持有狀態',
+              value: f.owned,
+              options: [
+                { value: '', label: '全部持有狀態' },
+                { value: 'missing', label: '遊戲內未持有 (0 張)' },
+                { value: 'short', label: '未滿編 (< 2 張)' },
+                { value: 'owned', label: '已持有 (≥ 1 張)' }
+              ]
+            })}
           </div>
         </div>
         <div id="catalog-results">${renderCatalogGridHtml()}</div>
@@ -826,14 +928,19 @@ export function renderBattle() {
       <section class="panel">
         <h2>1. 選擇測試牌組與引擎狀態</h2>
         <div class="field-stack">
-          <label class="field-label">
+          <div class="field-label">
             <span>參戰牌組</span>
-            <select id="battle-deck-select" ${decks.length ? '' : 'disabled'}>
-              ${decks.length
-                ? decks.map((d) => `<option value="${esc(d.id)}" ${selectedDeck?.id === d.id ? 'selected' : ''}>${esc(d.name)} (${deckTotalCount(d)}/20)</option>`).join('')
-                : '<option>尚無已儲存牌組</option>'}
-            </select>
-          </label>
+            ${renderSwissSelect({
+              id: 'battle-deck-select',
+              title: '選擇參戰牌組',
+              value: selectedDeck?.id || '',
+              fullWidth: true,
+              disabled: !decks.length,
+              options: decks.length
+                ? decks.map((d) => ({ value: d.id, label: `${d.name} (${deckTotalCount(d)}/20)` }))
+                : [{ value: '', label: '尚無已儲存牌組' }]
+            })}
+          </div>
           ${selectedDeck && !deckLegal ? `<div class="status-note is-warn">目前選中的牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
         </div>
         <div class="engine-status-card ${state.engineReady ? 'is-ready' : 'is-pending'}">

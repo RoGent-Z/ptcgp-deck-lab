@@ -2,11 +2,13 @@ package io.github.rogentz.pocketlab;
 
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
+import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
@@ -22,6 +24,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
         super.onCreate(savedInstanceState);
 
         getWindow().getDecorView().setBackgroundColor(0xFFF6F6F4);
@@ -34,6 +37,9 @@ public class MainActivity extends BridgeActivity {
 
         if (getBridge() != null && getBridge().getWebView() != null) {
             WebView webView = getBridge().getWebView();
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                webView.setForceDarkAllowed(false);
+            }
             webView.addJavascriptInterface(new PocketLabNativeBridge(), "PocketLabNative");
 
             ViewCompat.setOnApplyWindowInsetsListener(webView, (view, windowInsets) -> {

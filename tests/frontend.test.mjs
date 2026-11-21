@@ -248,4 +248,12 @@ test('catalog pokemon categories support regional split, full paradox/UB coverag
   const trainer = cards.find((c) => c.type === 'trainer');
   assert.deepEqual(getPokemonCategories(trainer), []);
   assert.equal(matchesPokemonCategoryFilter(trainer, ['ex'], []), false);
+
+  // Views use unified custom Swiss select panels instead of ugly native <select> dialogs on Android
+  const viewsSrc = readFileSync(new URL('../public/app/views.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(viewsSrc, /<select\b/);
+  assert.match(viewsSrc, /renderSwissSelect/);
+  const stylesXml = readFileSync(new URL('../android/app/src/main/res/values/styles.xml', import.meta.url), 'utf8');
+  assert.doesNotMatch(stylesXml, /DayNight/);
+  assert.match(stylesXml, /Theme\.AppCompat\.Light\.NoActionBar/);
 });

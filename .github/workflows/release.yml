@@ -115,17 +115,18 @@ jobs:
               assert req in names, f"missing bundled asset in APK: {req}"
           print("Verified bundled web assets inside APK:", len(names), "entries")
           PY
+          PKG_VER="$(node -p "require('./package.json').version")"
           BADGING="$("$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$RAW_APK")"
           echo "$BADGING" | grep -E "^(package:|application:|application-icon)"
           echo "$BADGING" | grep -q "name='io.github.rogentz.pocketlab'"
-          echo "$BADGING" | grep -q "versionName='0.0.1'"
+          echo "$BADGING" | grep -q "versionName='${PKG_VER}'"
           echo "$BADGING" | grep -q "label='Pocket Lab'"
           echo "$BADGING" | grep -q "application-icon"
 
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             VER="${GITHUB_REF_NAME}"
           else
-            VER="v0.0.1-${GITHUB_SHA::7}"
+            VER="v${PKG_VER}-${GITHUB_SHA::7}"
           fi
           mkdir -p dist
           OUT_APK="dist/PocketLab-${VER}-android.apk"

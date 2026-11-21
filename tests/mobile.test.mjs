@@ -5,12 +5,12 @@ import path from 'node:path';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 
-test('package.json, capacitor.config.json, and manifest.webmanifest match Pocket Lab v0.0.1 metadata', () => {
+test('package.json, capacitor.config.json, and manifest.webmanifest stay aligned for Pocket Lab release', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const cap = JSON.parse(fs.readFileSync(path.join(ROOT, 'capacitor.config.json'), 'utf8'));
   const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'public/manifest.webmanifest'), 'utf8'));
 
-  assert.equal(pkg.version, '0.0.1');
+  assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
   assert.equal(cap.appId, 'io.github.rogentz.pocketlab');
   assert.equal(cap.appName, 'Pocket Lab');
   assert.equal(cap.webDir, 'public');
@@ -29,10 +29,11 @@ test('package.json, capacitor.config.json, and manifest.webmanifest match Pocket
   }
 });
 
-test('Android launcher/adaptive icons and versionName stay synchronized with mark.svg', () => {
+test('Android launcher/adaptive icons and versionName stay synchronized with package.json & mark.svg', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const resDir = path.join(ROOT, 'android/app/src/main/res');
   const buildGradle = fs.readFileSync(path.join(ROOT, 'android/app/build.gradle'), 'utf8');
-  assert.match(buildGradle, /versionName\s+"0\.0\.1"/);
+  assert.match(buildGradle, new RegExp(`versionName\\s+"${pkg.version.replace(/\./g, '\\.')}"`));
   assert.match(buildGradle, /applicationId\s+"io\.github\.rogentz\.pocketlab"/);
 
   for (const density of ['mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi']) {
