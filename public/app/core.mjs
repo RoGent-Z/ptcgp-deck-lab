@@ -74,6 +74,78 @@ export function summarizeBatch(events,ids){
   const clean=validOutcomes(events,ids);
   return {...aggregate(clean),complete:ids.length===10 && clean.length===500};
 }
+export function isEngineImplementedStatus(status) {
+  return status === 'Fully implemented' || status === 'Implemented' || status === 'Complete' || status === 'ok';
+}
+export function computeCompositeWinRate(events, lineup = []) {
+  const oppIds = lineup.map((x) => x.entry?.id || x.id).filter(Boolean);
+  const clean = validOutcomes(events || [], oppIds);
+  const overall = aggregate(clean);
+  const firstEvents = clean.filter((e) => e.index < 25);
+  const secondEvents = clean.filter((e) => e.index >= 25);
+  const firstTally = aggregate(firstEvents);
+  const secondTally = aggregate(secondEvents);
+
+  let turnSum = 0, turnCount = 0;
+  for (const e of clean) {
+    if (Number.isFinite(e.turns) && e.turns > 0) {
+      turnSum += e.turns;
+      turnCount++;
+    }
+  }
+
+  let top10TotalShare = 0;
+  let completedShare = 0;
+  let weightedWinSum = 0;
+  let weightedScoreSum = 0;
+  const byOpponent = [];
+
+  for (const item of lineup) {
+    const entry = item.entry || item;
+    const share = Number(entry?.share || 0);
+    if (share > 0) top10TotalShare += share;
+    const oppEvents = resultsFor(clean, entry.id);
+    const tally = aggregate(oppEvents);
+    if (tally.total > 0) {
+      const winRate = tally.wins / tally.total;
+      const scoreRate = (tally.wins + 0.5 * tally.draws) / tally.total;
+      if (share > 0) {
+        completedShare += share;
+        weightedWinSum += winRate * share;
+        weightedScoreSum += scoreRate * share;
+      }
+      byOpponent.push({
+        id: entry.id,
+        name: entry.name,
+        rank: item.rank,
+        share,
+        ...tally,
+        winRate,
+        scoreRate
+      });
+    }
+  }
+
+  const completedWithGames = byOpponent.filter((x) => x.total >= 10);
+  const sortedByWr = [...completedWithGames].sort((a, b) => b.winRate - a.winRate || b.wins - a.wins);
+
+  return {
+    ...overall,
+    complete: oppIds.length === 10 && clean.length === 500,
+    equalWinRate: overall.total ? overall.wins / overall.total : null,
+    equalScoreRate: overall.total ? (overall.wins + 0.5 * overall.draws) / overall.total : null,
+    equalCI95: interval(overall.wins, overall.total),
+    weightedWinRate: completedShare > 0 ? weightedWinSum / completedShare : null,
+    weightedScoreRate: completedShare > 0 ? weightedScoreSum / completedShare : null,
+    completedShare,
+    top10TotalShare,
+    first: { ...firstTally, winRate: firstTally.total ? firstTally.wins / firstTally.total : null },
+    second: { ...secondTally, winRate: secondTally.total ? secondTally.wins / secondTally.total : null },
+    avgTurns: turnCount ? turnSum / turnCount : null,
+    bestMatchups: sortedByWr.slice(0, 2),
+    worstMatchups: [...sortedByWr].reverse().slice(0, 2)
+  };
+}
 export function interval(w,n){
   if(!n)return '—'; const z=1.95996398454, p=w/n, a=1+z*z/n;
   const middle=(p+z*z/(2*n))/a, half=z*Math.sqrt(p*(1-p)/n+z*z/(4*n*n))/a;

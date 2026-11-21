@@ -34,6 +34,7 @@ import {
 } from './data.mjs';
 import { icon } from './icons.mjs';
 import {
+  ensureCardCoverage,
   executeBattleBatch,
   executeFixturePreviewBatch,
   fnv1a32,
@@ -123,9 +124,29 @@ function applySwissSelectValue(selectId, value) {
   } else if (selectId === 'battle-deck-select') {
     uiState.battle.deckId = value;
     uiState.battle.activeRunId = null;
+  } else if (selectId === 'battle-model-select') {
+    uiState.battle.modelId = value;
+    uiState.battle.activeRunId = null;
   }
   uiState.openSelect = null;
   renderRoute();
+}
+
+function getSelectedBattleModel() {
+  const id = uiState.battle.modelId || state.modelManifest?.defaultModelId || 'v1';
+  const model = state.modelsById.get(id) || state.modelInfo;
+  return {
+    id,
+    version: model?.version || 'baseline-v0',
+    weights: model?.weights || Array(22).fill(0)
+  };
+}
+
+function getWeightsForVersion(version) {
+  for (const m of state.modelsById.values()) {
+    if (m?.version === version && Array.isArray(m.weights)) return m.weights;
+  }
+  return getSelectedBattleModel().weights;
 }
 
 function toggleFeaturedSlugOnDeck(deck, slug) {
@@ -744,15 +765,46 @@ async function handleAction(el) {
     return;
   }
 
+  if (action === 'quick-load-meta-deck') {
+    const entry = (state.meta?.entries || []).find((e) => e.representative?.cards?.length === 20 || e.representative?.cards?.length);
+    if (!entry?.representative) { showNotice('目前無可用的賽事代表牌組'); return; }
+    const autoFeatured = resolveFeaturedPokemon(entry.representative, state.cardsById, state.spriteMap).map((x) => x.slug);
+    const created = await saveDeck({
+      id: crypto.randomUUID(),
+      name: `${entry.name} (榜首代表)`,
+      cards: sortDeckEntriesPtcgpDefault(entry.representative.cards, state.cardsById),
+      energy: structuredClone(entry.representative.energy),
+      featuredPokemon: autoFeatured,
+      customOrder: true
+    });
+    uiState.battle.deckId = created.id;
+    uiState.battle.activeRunId = null;
+    renderRoute();
+    showNotice(`已載入「${created.name}」供綜合勝率測試`);
+    return;
+  }
+
   if (action === 'start-real-battle' || action === 'run-fixture-preview') {
     const isDemo = action === 'run-fixture-preview';
     const deck = state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0];
     if (!deck) { showNotice('請先選擇或建立一套牌組'); return; }
-    const lineup = resolveOpponentLineup(state.meta).selected;
+
+    if (!isDemo && state.engineReady) {
+      const ids = [
+        ...(state.meta?.entries || []).slice(0, 20).flatMap((e) => (e.representative?.cards || []).map((c) => c.id)),
+        ...(deck.cards || []).map((c) => c.id)
+      ];
+      ensureCardCoverage(ids);
+    }
+
+    const lineup = resolveOpponentLineup(state.meta, isDemo ? null : state.coverageMap).selected;
     if (lineup.length < 10) { showNotice('目前不足 10 個有效對手'); return; }
 
-    let run = state.runs.find((r) => r.runId === uiState.battle.activeRunId)
-      || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.events.length < 500);
+    const model = getSelectedBattleModel();
+    const targetVersion = isDemo ? '展示樣板' : model.version;
+
+    let run = state.runs.find((r) => r.runId === uiState.battle.activeRunId && r.deckId === deck.id && (r.isDemo || r.modelVersion === targetVersion))
+      || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.modelVersion === targetVersion && r.events.length < 500);
 
     if (!run) {
       run = {
@@ -760,7 +812,7 @@ async function handleAction(el) {
         deckId: deck.id,
         deckName: deck.name,
         season: state.meta?.season || 'C1',
-        modelVersion: isDemo ? '展示樣板' : (state.modelInfo?.version || 'baseline-v0'),
+        modelVersion: targetVersion,
         isDemo,
         events: [],
         createdAt: new Date().toISOString()
@@ -782,8 +834,7 @@ async function handleAction(el) {
       if (isDemo) {
         await executeFixturePreviewBatch({ run, lineup, onTick: updateView, signal: uiState.battle.abortCtrl.signal });
       } else {
-        const weights = state.modelInfo?.weights || Array(22).fill(0);
-        await executeBattleBatch({ run, deck, lineup, weights, onTick: updateView, signal: uiState.battle.abortCtrl.signal });
+        await executeBattleBatch({ run, deck, lineup, weights: model.weights, onTick: updateView, signal: uiState.battle.abortCtrl.signal });
       }
       if (!uiState.battle.abortCtrl.signal.aborted) {
         showNotice('500 局模擬已完成');
@@ -809,13 +860,14 @@ async function handleAction(el) {
     uiState.battle.abortCtrl?.abort();
     uiState.battle.running = false;
     const deck = state.decks.find((d) => d.id === uiState.battle.deckId);
+    const model = getSelectedBattleModel();
     if (deck) {
       const fresh = {
         runId: `run-${Date.now().toString(36)}`,
         deckId: deck.id,
         deckName: deck.name,
         season: state.meta?.season || 'C1',
-        modelVersion: state.modelInfo?.version || 'baseline-v0',
+        modelVersion: model.version,
         isDemo: false,
         events: [],
         createdAt: new Date().toISOString()
@@ -838,7 +890,7 @@ async function handleAction(el) {
     let logText = '';
     if (state.engineReady && state.runtimeFn && opp?.representative) {
       const deck = state.decks.find((d) => d.id === run.deckId);
-      const weights = state.modelInfo?.weights || Array(22).fill(0);
+      const weights = getWeightsForVersion(run?.modelVersion);
       const replay = state.runtimeFn({
         op: 'game',
         deck: { cards: deck.cards, energy: deck.energy },

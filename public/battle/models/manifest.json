@@ -1,0 +1,352 @@
+{
+  "schemaVersion": 1,
+  "season": "C1",
+  "sourceAsOf": "2026-11-19T07:28:52.724Z",
+  "defaultModelId": "v1",
+  "models": [
+    {
+      "id": "v1",
+      "file": "battle/models/v1.json",
+      "version": "selfplay-cem-v1",
+      "label": "selfplay-cem-v1（正式保留 · 推薦）",
+      "badge": "正式保留",
+      "trainedGames": 18432,
+      "cumulativeTrainingGames": 18432,
+      "vsBaseline": {
+        "games": 2160,
+        "wins": 1289,
+        "draws": 41,
+        "losses": 830,
+        "winRate": 0.5967592592592592,
+        "score": 0.60625
+      }
+    },
+    {
+      "id": "v2",
+      "file": "battle/models/v2.json",
+      "version": "selfplay-cem-v2",
+      "label": "selfplay-cem-v2（92,160 局續訓實驗）",
+      "badge": "實驗記錄",
+      "trainedGames": 73728,
+      "cumulativeTrainingGames": 92160,
+      "vsBaseline": {
+        "games": 2160,
+        "wins": 1252,
+        "draws": 35,
+        "losses": 873,
+        "winRate": 0.5796296296296296,
+        "score": 0.5877314814814815,
+        "scoreCI95": [
+          0.5668981481481481,
+          0.6078703703703704
+        ]
+      },
+      "vsV1": {
+        "games": 5760,
+        "wins": 2822,
+        "draws": 97,
+        "losses": 2841,
+        "winRate": 0.48993055555555554,
+        "score": 0.49835069444444446,
+        "scoreCI95": [
+          0.48515625,
+          0.5114583333333333
+        ],
+        "promoted": false
+      }
+    },
+    {
+      "id": "baseline-v0",
+      "file": "battle/models/baseline-v0.json",
+      "version": "baseline-v0",
+      "label": "baseline-v0（啟發式規則基線）",
+      "badge": "基線",
+      "trainedGames": 0,
+      "cumulativeTrainingGames": 0
+    }
+  ],
+  "benchmark": {
+    "retainedPolicy": "v1",
+    "promoted": false,
+    "decision": "retain-v1",
+    "decisionRule": "Promote V2 when the lower 95% confidence limit for its score (win=1, draw=0.5, loss=0) exceeds 0.5",
+    "challengeVsIncumbent": {
+      "games": 5760,
+      "wins": 2822,
+      "draws": 97,
+      "losses": 2841,
+      "winRate": 0.48993055555555554,
+      "score": 0.49835069444444446,
+      "scoreCI95": [
+        0.48515625,
+        0.5114583333333333
+      ]
+    },
+    "mirror": {
+      "playerDeck": {
+        "rank": 1,
+        "id": "mega-charizard-y-ex-b1a-entei-ex-a4a",
+        "name": "超級噴火龍Yex · 炎帝ex"
+      },
+      "total": 500,
+      "wins": 267,
+      "draws": 29,
+      "losses": 204,
+      "winRate": 0.534,
+      "score": 0.563,
+      "byRank": [
+        {
+          "rank": 1,
+          "id": "mega-charizard-y-ex-b1a-entei-ex-a4a",
+          "name": "超級噴火龍Yex · 炎帝ex",
+          "total": 50,
+          "wins": 22,
+          "draws": 4,
+          "losses": 24,
+          "winRate": 0.44,
+          "score": 0.48,
+          "winRateCI95": [
+            0.3116219921125717,
+            0.5769397197834315
+          ],
+          "first": {
+            "wins": 11,
+            "draws": 1,
+            "losses": 13
+          },
+          "second": {
+            "wins": 11,
+            "draws": 3,
+            "losses": 11
+          }
+        },
+        {
+          "rank": 2,
+          "id": "suicune-ex-a4a-baxcalibur-b2a",
+          "name": "水君ex · 戟脊龍",
+          "total": 50,
+          "wins": 14,
+          "draws": 1,
+          "losses": 35,
+          "winRate": 0.28,
+          "score": 0.29,
+          "winRateCI95": [
+            0.17474170665911232,
+            0.4166512369595657
+          ],
+          "first": {
+            "wins": 8,
+            "draws": 1,
+            "losses": 16
+          },
+          "second": {
+            "wins": 6,
+            "draws": 0,
+            "losses": 19
+          }
+        },
+        {
+          "rank": 3,
+          "id": "umbreon-c1-hydreigon-b1",
+          "name": "月亮伊布 · 三首惡龍",
+          "total": 50,
+          "wins": 23,
+          "draws": 6,
+          "losses": 21,
+          "winRate": 0.46,
+          "score": 0.52,
+          "winRateCI95": [
+            0.3296965219222435,
+            0.5960112860084253
+          ],
+          "first": {
+            "wins": 14,
+            "draws": 3,
+            "losses": 8
+          },
+          "second": {
+            "wins": 9,
+            "draws": 3,
+            "losses": 13
+          }
+        },
+        {
+          "rank": 4,
+          "id": "hoopa-ex-b4-mega-absol-ex-b1",
+          "name": "胡帕ex · 超級阿勃梭魯ex",
+          "total": 50,
+          "wins": 31,
+          "draws": 2,
+          "losses": 17,
+          "winRate": 0.62,
+          "score": 0.64,
+          "winRateCI95": [
+            0.4815044693099298,
+            0.7413721068980641
+          ],
+          "first": {
+            "wins": 15,
+            "draws": 0,
+            "losses": 10
+          },
+          "second": {
+            "wins": 16,
+            "draws": 2,
+            "losses": 7
+          }
+        },
+        {
+          "rank": 5,
+          "id": "mega-greninja-ex-c1-greninja-ex-b1",
+          "name": "超級甲賀忍蛙ex · 甲賀忍蛙ex",
+          "total": 50,
+          "wins": 27,
+          "draws": 1,
+          "losses": 22,
+          "winRate": 0.54,
+          "score": 0.55,
+          "winRateCI95": [
+            0.40398871399157477,
+            0.6703034780777566
+          ],
+          "first": {
+            "wins": 13,
+            "draws": 1,
+            "losses": 11
+          },
+          "second": {
+            "wins": 14,
+            "draws": 0,
+            "losses": 11
+          }
+        },
+        {
+          "rank": 6,
+          "id": "mega-altaria-ex-b1-greninja-a1",
+          "name": "超級七夕青鳥ex · 甲賀忍蛙",
+          "total": 50,
+          "wins": 31,
+          "draws": 4,
+          "losses": 15,
+          "winRate": 0.62,
+          "score": 0.66,
+          "winRateCI95": [
+            0.4815044693099298,
+            0.7413721068980641
+          ],
+          "first": {
+            "wins": 20,
+            "draws": 2,
+            "losses": 3
+          },
+          "second": {
+            "wins": 11,
+            "draws": 2,
+            "losses": 12
+          }
+        },
+        {
+          "rank": 7,
+          "id": "mega-altaria-ex-b1-espeon-b3a",
+          "name": "超級七夕青鳥ex · 太陽伊布",
+          "total": 50,
+          "wins": 30,
+          "draws": 4,
+          "losses": 16,
+          "winRate": 0.6,
+          "score": 0.64,
+          "winRateCI95": [
+            0.4618143774758936,
+            0.7239161026974346
+          ],
+          "first": {
+            "wins": 13,
+            "draws": 2,
+            "losses": 10
+          },
+          "second": {
+            "wins": 17,
+            "draws": 2,
+            "losses": 6
+          }
+        },
+        {
+          "rank": 8,
+          "id": "magnezone-b1a-miraidon-ex-b3a",
+          "name": "自爆磁怪 · 密勒頓ex",
+          "total": 50,
+          "wins": 25,
+          "draws": 3,
+          "losses": 22,
+          "winRate": 0.5,
+          "score": 0.53,
+          "winRateCI95": [
+            0.3664451431682858,
+            0.6335548568317142
+          ],
+          "first": {
+            "wins": 13,
+            "draws": 2,
+            "losses": 10
+          },
+          "second": {
+            "wins": 12,
+            "draws": 1,
+            "losses": 12
+          }
+        },
+        {
+          "rank": 9,
+          "id": "giratina-ex-c1-dragonair-b4",
+          "name": "騎拉帝納ex · 哈克龍",
+          "total": 50,
+          "wins": 40,
+          "draws": 3,
+          "losses": 7,
+          "winRate": 0.8,
+          "score": 0.83,
+          "winRateCI95": [
+            0.6696289406777459,
+            0.887562499842239
+          ],
+          "first": {
+            "wins": 20,
+            "draws": 2,
+            "losses": 3
+          },
+          "second": {
+            "wins": 20,
+            "draws": 1,
+            "losses": 4
+          }
+        },
+        {
+          "rank": 10,
+          "id": "greninja-ex-b1-mega-greninja-ex-c1",
+          "name": "甲賀忍蛙ex · 超級甲賀忍蛙ex",
+          "total": 50,
+          "wins": 24,
+          "draws": 1,
+          "losses": 25,
+          "winRate": 0.48,
+          "score": 0.49,
+          "winRateCI95": [
+            0.34797135286578046,
+            0.6148825510995539
+          ],
+          "first": {
+            "wins": 10,
+            "draws": 0,
+            "losses": 15
+          },
+          "second": {
+            "wins": 14,
+            "draws": 1,
+            "losses": 10
+          }
+        }
+      ]
+    },
+    "byDeckVsBaseline": []
+  }
+}

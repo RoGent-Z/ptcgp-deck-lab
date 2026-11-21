@@ -29,3 +29,40 @@ test("seeded first and second seat games resolve by the rules and replay exactly
     assert.deepEqual(engine(input), a);
   }
 });
+
+test("deployed trained models (v1/v2) and manifest execute WASM batch deterministically", async () => {
+  const manifest = JSON.parse(await readFile(new URL("../public/battle/models/manifest.json", import.meta.url), "utf8"));
+  assert.equal(manifest.defaultModelId, "v1");
+  const v1 = JSON.parse(await readFile(new URL("../public/battle/models/v1.json", import.meta.url), "utf8"));
+  const v2 = JSON.parse(await readFile(new URL("../public/battle/models/v2.json", import.meta.url), "utf8"));
+  assert.equal(v1.weights.length, 22);
+  assert.equal(v2.weights.length, 22);
+
+  const metaTop = JSON.parse(await readFile(new URL("../public/data/meta.top.json", import.meta.url), "utf8"));
+  const top10 = metaTop.entries.slice(0, 10);
+  const distinctIds = [...new Set(top10.flatMap((e) => e.representative.cards.map((c) => c.id)))];
+
+  const engine = await instantiateBattle(await readFile(wasm));
+  const cov = engine({ op: "coverage", ids: distinctIds });
+  for (const id of distinctIds) {
+    assert.equal(cov.coverage[id], "Fully implemented", id);
+  }
+
+  const batch = engine({
+    op: "batch",
+    games: top10.slice(0, 4).map((opp, i) => ({
+      op: "game",
+      deck: { cards: top10[0].representative.cards, energy: top10[0].representative.energy },
+      enemy: { cards: opp.representative.cards, energy: opp.representative.energy },
+      weights: v1.weights,
+      seed: 100 + i,
+      first: i % 2,
+      replay: false
+    }))
+  });
+  assert.equal(batch.results.length, 4);
+  for (const res of batch.results) {
+    assert.ok(["win", "loss", "draw"].includes(res.outcome));
+    assert.ok(Number.isInteger(res.turns) && res.turns > 0);
+  }
+});

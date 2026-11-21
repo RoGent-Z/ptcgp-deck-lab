@@ -28,7 +28,7 @@ import {
 } from './cardface.mjs';
 import { findVariantsForCard, foldText, state } from './data.mjs';
 import { icon } from './icons.mjs';
-import { renderBattleReport, resolveOpponentLineup } from './battle.mjs';
+import { ensureCardCoverage, getUnsupportedCards, renderBattleReport, resolveOpponentLineup } from './battle.mjs';
 
 function renderPokemonPicker(deck, mode = 'draft') {
   if (mode !== 'draft') return '';
@@ -93,7 +93,7 @@ export const uiState = {
   },
   decks: { view: 'showcase' },
   meta: { sort: 'count', q: '', page: 1, perPage: 40 },
-  battle: { deckId: null, running: false, activeRunId: null, abortCtrl: null },
+  battle: { deckId: null, modelId: null, running: false, activeRunId: null, abortCtrl: null },
   auth: { mode: 'login' }
 };
 
@@ -896,6 +896,65 @@ export function renderMeta() {
   `;
 }
 
+function renderTrainingBenchmarkSection() {
+  const manifest = state.modelManifest;
+  const bench = manifest?.benchmark;
+  if (!bench) return '';
+  const ch = bench.challengeVsIncumbent;
+  const mirror = bench.mirror;
+  const chScorePct = ch?.score != null ? (ch.score * 100).toFixed(2) + '%' : '—';
+  const chCiText = Array.isArray(ch?.scoreCI95)
+    ? `${(ch.scoreCI95[0] * 100).toFixed(2)}%–${(ch.scoreCI95[1] * 100).toFixed(2)}%`
+    : '—';
+  const mirrorWrText = mirror?.winRate != null ? (mirror.winRate * 100).toFixed(2) + '%' : '—';
+  const mirrorScoreText = mirror?.score != null ? (mirror.score * 100).toFixed(2) + '%' : '—';
+  const rankRows = (mirror?.byRank || []).map((r) => `
+    <tr>
+      <td class="num">#${r.rank}</td>
+      <td>${esc(r.name)}</td>
+      <td class="num">${r.wins}/${r.draws}/${r.losses}</td>
+      <td class="num"><strong>${(r.winRate * 100).toFixed(1)}%</strong></td>
+      <td class="num">${r.first ? `${r.first.wins}/${r.first.draws}/${r.first.losses}` : '—'}</td>
+      <td class="num">${r.second ? `${r.second.wins}/${r.second.draws}/${r.second.losses}` : '—'}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <details class="panel block-gap bench-details">
+      <summary class="bench-summary">
+        <div>
+          <h2>C1-V2 訓練決策與環境基準參考</h2>
+          <p class="sub">自對弈保留 <b>selfplay-cem-v1</b> · 榜首牌組對前十 500 局基準綜合勝率 <b>${mirrorWrText}</b>（${mirror?.wins || 0}勝 ${mirror?.draws || 0}和 ${mirror?.losses || 0}敗）</p>
+        </div>
+        <span class="bench-toggle">展開檢視明細</span>
+      </summary>
+      <div class="bench-body">
+        <div class="bench-cards">
+          <div class="bench-card">
+            <span class="comp-label">模型選型決策（V2 vs V1）</span>
+            <strong>保留 V1（正式版）</strong>
+            <small>V2 續訓 73,728 局（累計 92,160 局）對 V1 獨立測試 ${ch?.games || 0} 局得分率 ${chScorePct}（95% CI ${chCiText}），下界未超過 50.0% 門檻，故線上預設維持 V1。</small>
+          </div>
+          <div class="bench-card">
+            <span class="comp-label">榜首對前十 500 局基準</span>
+            <strong>${mirrorWrText} 勝率 · ${mirrorScoreText} 積分</strong>
+            <small>代表牌組：${esc(mirror?.playerDeck?.name || '超級噴火龍Yex · 炎帝ex')}（雙方均使用 V2 權重，各對手先 25 / 後 25 局）。</small>
+          </div>
+        </div>
+        ${rankRows ? `
+          <div class="bench-table-wrap">
+            <table class="bench-table">
+              <thead>
+                <tr><th>排名</th><th>對手原型</th><th>勝/和/敗</th><th>對戰勝率</th><th>先攻 25 局</th><th>後攻 25 局</th></tr>
+              </thead>
+              <tbody>${rankRows}</tbody>
+            </table>
+          </div>` : ''}
+      </div>
+    </details>
+  `;
+}
+
 // 5. 對戰測試 #battle
 export function renderBattle() {
   const m = state.meta;
@@ -903,30 +962,53 @@ export function renderBattle() {
   const selectedDeck = decks.find((d) => d.id === uiState.battle.deckId) || decks[0] || null;
   if (selectedDeck && uiState.battle.deckId !== selectedDeck.id) uiState.battle.deckId = selectedDeck.id;
 
-  const lineup = resolveOpponentLineup(m);
-  const deckIssues = selectedDeck && !state.cardsMissing ? validateDeck(selectedDeck, state.cardsById) : [];
-  const deckLegal = selectedDeck && (state.cardsMissing || deckIssues.length === 0) && deckTotalCount(selectedDeck) === 20;
+  const modelList = state.modelManifest?.models || [];
+  const defaultModelId = state.modelManifest?.defaultModelId || 'v1';
+  if (!uiState.battle.modelId || (modelList.length && !state.modelsById.has(uiState.battle.modelId))) {
+    uiState.battle.modelId = state.modelsById.has(defaultModelId) ? defaultModelId : (modelList[0]?.id || 'current');
+  }
+  const activeModel = state.modelsById.get(uiState.battle.modelId) || state.modelInfo;
+  const activeModelMeta = activeModel?.metaEntry || modelList.find((x) => x.id === uiState.battle.modelId) || null;
+  const activeModelVersion = activeModel?.version || 'baseline-v0';
 
-  // 匹配最近一次相同指紋的測試紀錄（支援斷點續跑）
-  const activeRun = (uiState.battle.activeRunId && state.runs.find((r) => r.runId === uiState.battle.activeRunId))
-    || (selectedDeck && state.runs.find((r) => r.deckId === selectedDeck.id && r.season === m?.season))
+  if (state.engineReady && state.runtimeFn) {
+    const coverIds = [
+      ...(m?.entries || []).slice(0, 20).flatMap((e) => (e.representative?.cards || []).map((c) => c.id)),
+      ...(selectedDeck?.cards || []).map((c) => c.id)
+    ];
+    ensureCardCoverage(coverIds);
+  }
+
+  const lineup = resolveOpponentLineup(m, state.coverageMap);
+  const deckIssues = selectedDeck && !state.cardsMissing ? validateDeck(selectedDeck, state.cardsById) : [];
+  const unsupportedDeckCards = selectedDeck ? getUnsupportedCards(selectedDeck.cards) : [];
+  const deckLegal = selectedDeck && (state.cardsMissing || deckIssues.length === 0) && deckTotalCount(selectedDeck) === 20;
+  const engineSupported = unsupportedDeckCards.length === 0;
+
+  // 匹配相同牌組 + 賽季 + 策略模型的測試紀錄（支援斷點續跑）
+  const activeRun = (uiState.battle.activeRunId && state.runs.find((r) => r.runId === uiState.battle.activeRunId && r.deckId === selectedDeck?.id && (r.isDemo || r.modelVersion === activeModelVersion)))
+    || (selectedDeck && state.runs.find((r) => r.deckId === selectedDeck.id && r.season === m?.season && !r.isDemo && r.modelVersion === activeModelVersion))
     || null;
 
-  const modelBadge = state.modelInfo
-    ? `${state.modelInfo.version} · 訓練 ${state.modelInfo.trainedGames || 0} 局`
+  const modelBadge = activeModel
+    ? `${activeModelVersion} · 訓練 ${(activeModel.cumulativeTrainingGames || activeModel.trainedGames || 0).toLocaleString('zh-TW')} 局${activeModelMeta?.vsBaseline?.score ? ` · 對基線 ${(activeModelMeta.vsBaseline.score * 100).toFixed(1)}%` : ''}`
     : '規則基線 v0（未發現模型檔案）';
 
-  const canRunReal = Boolean(state.engineReady && selectedDeck && deckLegal && lineup.selected.length === 10);
+  const modelOptions = modelList.length
+    ? modelList.map((entry) => ({ value: entry.id, label: entry.label || entry.version }))
+    : [{ value: 'current', label: activeModelVersion }];
+
+  const canRunReal = Boolean(state.engineReady && selectedDeck && deckLegal && engineSupported && lineup.selected.length === 10);
 
   return `
     <div class="page-head">
-      <h1>對戰測試</h1>
-      <p class="desc">對照目前賽事使用率前十牌組進行批次模擬測試。</p>
+      <h1>對戰測試與模擬綜合勝率</h1>
+      <p class="desc">載入 DeckGym WASM 規則引擎，對賽事前十牌組進行先 25 / 後 25 共 500 局實戰模擬，計算等權與環境使用率加權綜合勝率。</p>
     </div>
 
     <div class="battle-setup-grid">
       <section class="panel">
-        <h2>1. 選擇測試牌組與引擎狀態</h2>
+        <h2>1. 選擇測試牌組與策略模型</h2>
         <div class="field-stack">
           <div class="field-label">
             <span>參戰牌組</span>
@@ -935,27 +1017,40 @@ export function renderBattle() {
               title: '選擇參戰牌組',
               value: selectedDeck?.id || '',
               fullWidth: true,
-              disabled: !decks.length,
+              disabled: !decks.length || uiState.battle.running,
               options: decks.length
                 ? decks.map((d) => ({ value: d.id, label: `${d.name} (${deckTotalCount(d)}/20)` }))
-                : [{ value: '', label: '尚無已儲存牌組' }]
+                : [{ value: '', label: '尚無已儲存牌組（可下方一鍵匯入榜首）' }]
+            })}
+          </div>
+          <div class="field-label">
+            <span>AI 決策模型</span>
+            ${renderSwissSelect({
+              id: 'battle-model-select',
+              title: '選擇 AI 決策模型',
+              value: uiState.battle.modelId || '',
+              fullWidth: true,
+              disabled: uiState.battle.running,
+              options: modelOptions
             })}
           </div>
           ${selectedDeck && !deckLegal ? `<div class="status-note is-warn">目前選中的牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
+          ${unsupportedDeckCards.length ? `<div class="status-note is-warn">以下卡牌尚未實裝至 DeckGym 規則引擎，暫無法模擬：${unsupportedDeckCards.map((c) => esc(c.id)).join('、')}</div>` : ''}
         </div>
         <div class="engine-status-card ${state.engineReady ? 'is-ready' : 'is-pending'}">
           <div>
-            <strong>模擬引擎：${state.engineReady ? '已就緒' : '籌備中'}</strong>
+            <strong>模擬引擎：${state.engineReady ? 'WASM 已就緒' : '籌備中'}</strong>
             <p>${state.engineReady ? `目前模型：${esc(modelBadge)}` : esc(state.engineError || '對戰模擬引擎尚未開放，目前可瀏覽賽事前十牌組清單。')}</p>
           </div>
         </div>
         <div class="actions block-gap">
           <button class="btn btn-primary" type="button" data-action="start-real-battle" ${canRunReal && !uiState.battle.running ? '' : 'disabled'}>
-            ${icon('play', 15)}<span>${activeRun && !activeRun.isDemo && activeRun.events.length > 0 && activeRun.events.length < 500 ? `繼續剩餘 ${500 - activeRun.events.length} 局` : '開始 500 局模擬'}</span>
+            ${icon('play', 15)}<span>${activeRun && !activeRun.isDemo && activeRun.events.length > 0 && activeRun.events.length < 500 ? `繼續剩餘 ${500 - activeRun.events.length} 局` : '開始 500 局綜合模擬'}</span>
           </button>
           ${uiState.battle.running ? `<button class="btn btn-outline" type="button" data-action="pause-battle">${icon('pause', 15)}暫停</button>` : ''}
+          ${(m?.entries?.length && !uiState.battle.running) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck">${icon('plus', 15)}${decks.length ? '匯入榜首試測' : '一鍵匯入榜首並測試'}</button>` : ''}
           ${state.fixture ? `<button class="btn btn-outline" type="button" data-action="run-fixture-preview" ${uiState.battle.running ? 'disabled' : ''}>展示點陣預覽</button>` : ''}
-          ${activeRun ? `<button class="btn btn-outline" type="button" data-action="reset-battle-run">清空重測</button>` : ''}
+          ${activeRun ? `<button class="btn btn-outline" type="button" data-action="reset-battle-run" ${uiState.battle.running ? 'disabled' : ''}>清空重測</button>` : ''}
         </div>
       </section>
 
@@ -978,8 +1073,10 @@ export function renderBattle() {
     <section class="panel block-gap" id="battle-report-area">
       ${activeRun
         ? renderBattleReport(activeRun, lineup.selected, { canReplay: state.engineReady || state.fixture })
-        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>開始對戰測試後，此處將顯示各對戰勝負紀錄與統計詳情。</p></div>'}
+        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>開始 500 局對戰測試後，此處將即時計算等權與環境加權「模擬綜合勝率」、先後手勝率與各對陣 50 格點陣詳情。</p></div>'}
     </section>
+
+    ${renderTrainingBenchmarkSection()}
   `;
 }
 

@@ -815,8 +815,10 @@ input::placeholder { color: var(--text-faint); }
   display: grid;
   gap: 10px;
 }
-.swiss-select-popover { width: min(260px, 88vw); }
+.swiss-select-popover { width: min(280px, 88vw); overflow-x: hidden; }
 .swiss-select-popover.is-wide { width: min(440px, 90vw); }
+.swiss-select-wrap.is-full .swiss-select-popover { width: 100%; max-width: 100%; }
+.swiss-select-popover .swiss-opt { white-space: normal; word-break: break-word; }
 .tag-picker-popover[hidden] { display: none; }
 .tag-pop-head {
   display: flex;
@@ -1786,6 +1788,82 @@ button.dot-cell:hover { transform: scale(1.25); outline: 1.5px solid var(--line-
 .dot-cell.is-draw { background: var(--draw); animation: dotPop 0.14s ease-out; }
 @keyframes dotPop { from { transform: scale(0.5); } to { transform: scale(1); } }
 
+/* 模擬綜合勝率多維度指標與基準面板 */
+.composite-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+.comp-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--r-ctrl);
+  background: var(--grey-0);
+  border: 1px solid var(--line);
+  min-width: 0;
+}
+.comp-card.is-accent {
+  border-color: var(--swiss-red);
+  background: var(--swiss-red-soft, #fff5f5);
+}
+.comp-label { font-size: 0.78rem; color: var(--text-mute); font-weight: 600; }
+.comp-val {
+  font-family: var(--font-num);
+  font-size: 1.55rem;
+  line-height: 1.1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.comp-card.is-accent .comp-val { color: var(--swiss-red); }
+.comp-val.is-sm { font-size: 1.2rem; }
+.comp-sub { font-size: 0.76rem; color: var(--text-mute); line-height: 1.4; }
+
+.bench-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.bench-summary::-webkit-details-marker { display: none; }
+.bench-toggle {
+  flex-shrink: 0;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--swiss-red);
+  border: 1px solid var(--line-strong);
+  padding: 5px 10px;
+  border-radius: var(--r-ctrl);
+  background: var(--grey-0);
+}
+.bench-details[open] .bench-toggle { background: var(--line-strong); color: #fff; }
+.bench-body { margin-top: 14px; display: grid; gap: 12px; }
+.bench-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.bench-card {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--r-ctrl);
+  background: var(--grey-0);
+  border: 1px solid var(--line);
+}
+.bench-card strong { font-size: 1.05rem; color: var(--text); }
+.bench-card small { font-size: 0.8rem; color: var(--text-mute); line-height: 1.5; }
+.bench-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r-ctrl); }
+.bench-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+.bench-table th, .bench-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  white-space: nowrap;
+}
+.bench-table th { background: var(--grey-0); font-weight: 700; color: var(--text-mute); font-size: 0.78rem; }
+.bench-table td.num, .bench-table th:nth-child(n+3) { text-align: right; font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+.bench-table tr:last-child td { border-bottom: 0; }
+
 /* 数据来源 */
 .sources-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 .sources-grid .is-span2 { grid-column: 1 / -1; }
@@ -1991,6 +2069,8 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.72); }
   .card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .draft-sidebar { position: static; }
   .battle-row { grid-template-columns: minmax(0, 1fr); }
+  .composite-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .bench-cards { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 767px) {

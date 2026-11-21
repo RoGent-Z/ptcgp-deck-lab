@@ -36,6 +36,9 @@ export const state = {
   engineError: '',
   runtimeFn: null,
   modelInfo: null,
+  modelManifest: null,
+  modelsById: new Map(),
+  coverageMap: null,
   cloudSession: null,
   lastSyncedUserId: null,
   cloudSyncState: 'idle',
@@ -84,7 +87,7 @@ function indexMetaEntries(meta, foldMap) {
 export async function loadInitialData(forceRefresh = false) {
   const prevHash = state.meta?.hash;
 
-  const [fold, metaTop, cardsData, catalogData, modelData, spritesData] = await Promise.all([
+  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, spritesData] = await Promise.all([
     Object.keys(state.foldMap).length
       ? Promise.resolve(state.foldMap)
       : fetchJsonOptional('assets/han-fold.json').catch(() => ({})),
@@ -93,6 +96,7 @@ export async function loadInitialData(forceRefresh = false) {
       .catch(() => null),
     fetchJsonOptional('data/cards.json', forceRefresh).catch(() => null),
     fetchJsonOptional('data/catalog.json', forceRefresh).catch(() => null),
+    fetchJsonOptional('battle/models/manifest.json', forceRefresh).catch(() => null),
     fetchJsonOptional('battle/models/current.json', forceRefresh)
       .then((d) => d || fetchJsonOptional('battle/models/baseline-v0.json', forceRefresh))
       .catch(() => null),
@@ -107,7 +111,25 @@ export async function loadInitialData(forceRefresh = false) {
     state.meta = metaTop;
     state.metaFullLoaded = !metaTop.truncated;
   }
-  state.modelInfo = modelData;
+
+  state.modelManifest = modelManifestData || null;
+  state.modelsById = new Map();
+  if (modelManifestData?.models?.length) {
+    const loadedModels = await Promise.all(
+      modelManifestData.models.map(async (entry) => {
+        const data = await fetchJsonOptional(entry.file, forceRefresh).catch(() => null);
+        return data ? [entry.id, { ...data, metaEntry: entry }] : null;
+      })
+    );
+    for (const pair of loadedModels) {
+      if (pair) state.modelsById.set(pair[0], pair[1]);
+    }
+  }
+  const defaultId = modelManifestData?.defaultModelId || 'v1';
+  state.modelInfo = state.modelsById.get(defaultId) || fallbackModelData || null;
+  if (state.modelInfo && !state.modelsById.has(defaultId)) {
+    state.modelsById.set(defaultId, state.modelInfo);
+  }
 
   if (Array.isArray(cardsData) && cardsData.length > 0) {
     state.cards = cardsData;

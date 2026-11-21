@@ -4,7 +4,7 @@
   "private": true,
   "description": "Pocket Lab — 寶可夢卡牌 Pocket 牌組構築與賽事對戰研究站",
   "scripts": {
-    "test": "node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs",
+    "test": "node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs",
     "android:icons": "python tools/mobile/build_icons.py",
     "android:sync": "npx cap sync android"
   },

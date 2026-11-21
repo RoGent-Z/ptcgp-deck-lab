@@ -64,7 +64,7 @@ jobs:
           fi
 
       - name: Run verification tests before publish
-        run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs
+        run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs
 
       - name: Upload Pages artifact (public/)
         uses: actions/upload-pages-artifact@v3
