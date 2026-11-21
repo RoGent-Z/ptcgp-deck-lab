@@ -7,7 +7,7 @@ import {
   mergeVaultSnapshots,
   pushRemoteVault
 } from './cloud.mjs';
-import { normalizeFeaturedPokemon, normalizeSearch, readDeckFile } from './core.mjs';
+import { getPokemonCategories, getPokemonCategorySearchTerms, normalizeFeaturedPokemon, normalizeSearch, readDeckFile } from './core.mjs';
 import { all, get, put, remove } from './storage.mjs';
 
 export const isFixtureMode = () => new URLSearchParams(location.search).get('fixture') === '1';
@@ -65,8 +65,11 @@ function indexCards(cards, foldMap) {
   for (const c of cards) {
     const moveText = (c.attacks || []).map((a) => `${a.name || ''} ${a.effect || ''}`).join(' ');
     const abText = (c.abilities || []).map((a) => `${a.name || ''} ${a.effect || ''}`).join(' ');
+    const cats = getPokemonCategories(c);
+    c._pokeCats = cats;
+    const catTerms = cats.map((id) => getPokemonCategorySearchTerms(id)).join(' ');
     c._search = normalizeSearch(
-      `${c.id} ${c.name} ${c.nameEn || ''} ${c.set || ''} ${c.setName || ''} ${moveText} ${abText} ${c.effect || ''}`,
+      `${c.id} ${c.name} ${c.nameEn || ''} ${c.set || ''} ${c.setName || ''} ${moveText} ${abText} ${c.effect || ''} ${catTerms}`,
       foldMap
     );
   }

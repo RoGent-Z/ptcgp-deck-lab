@@ -16,7 +16,13 @@ import {
   sortDeckEntriesPtcgpDefault
 } from '../public/app/cardface.mjs';
 import { FIXTURE_CARDS, FIXTURE_SAMPLE_DECK } from '../public/app/fixture.mjs';
-import { normalizeFeaturedPokemon, readDeckFile, validateDeck } from '../public/app/core.mjs';
+import {
+  getPokemonCategories,
+  normalizeFeaturedPokemon,
+  POKEMON_CATEGORY_OPTIONS,
+  readDeckFile,
+  validateDeck
+} from '../public/app/core.mjs';
 
 test('cardface renders pokemon, dual-type foil, and official energy icon without text or XSS', () => {
   const xssCard = {
@@ -171,4 +177,50 @@ test('sortDeckEntriesPtcgpDefault groups evolution families & trainer subtypes w
   };
   assert.deepEqual(expandDeckCards(customDeck, byId).map((x) => x.id), ['P-A-005', 'P-A-005', 'A4-214']);
   assert.equal(readDeckFile(JSON.stringify(customDeck)).customOrder, true);
+});
+
+test('catalog pokemon categories classify ultra beasts, ancient, future, mega, ex, rocket, regional, dual-type, abilities, fossils, and shiny cards accurately', () => {
+  const cards = JSON.parse(readFileSync(new URL('../public/data/cards.json', import.meta.url), 'utf8'));
+  const byId = new Map(cards.map((c) => [c.id, c]));
+  const pokes = cards.filter((c) => c.type === 'pokemon');
+
+  // Verify every configured category has positive exact coverage
+  const counts = new Map(POKEMON_CATEGORY_OPTIONS.map((o) => [o.id, 0]));
+  for (const c of pokes) {
+    for (const id of getPokemonCategories(c)) {
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+  }
+  for (const opt of POKEMON_CATEGORY_OPTIONS) {
+    assert.ok(counts.get(opt.id) > 0, `expected >0 cards for pokemon category ${opt.id}`);
+  }
+
+  // Exact spot & boundary checks
+  assert.ok(getPokemonCategories(byId.get('A3a-006')).includes('ultra_beast')); // 爆肌蚊ex
+  assert.ok(getPokemonCategories(byId.get('P-A-081')).includes('ultra_beast')); // 究極奈克洛茲瑪ex
+  assert.ok(getPokemonCategories(byId.get('B4-016')).includes('ultra_beast'));  // 費洛美螂
+  assert.ok(getPokemonCategories(byId.get('B3a-026')).includes('ancient'));      // 振翼髮ex (古代)
+  assert.ok(getPokemonCategories(byId.get('B3a-036')).includes('ancient'));      // 故勒頓ex (古代)
+  assert.equal(getPokemonCategories(byId.get('B2a-063')).includes('ancient'), false); // B2a 故勒頓非古代機制卡
+  assert.equal(getPokemonCategories(byId.get('B3b-035')).includes('ancient'), false); // B3b 振翼髮無古代標記
+  assert.ok(getPokemonCategories(byId.get('B3a-019')).includes('future'));       // 密勒頓ex (未來)
+  assert.ok(getPokemonCategories(byId.get('B4b-102')).includes('future'));       // 鐵荊棘 B4b 複刻自 B3a
+  assert.equal(getPokemonCategories(byId.get('B2a-045')).includes('future'), false); // B2a 密勒頓非未來機制卡
+  assert.ok(getPokemonCategories(byId.get('B1-002')).includes('mega'));
+  assert.ok(getPokemonCategories(byId.get('B1-002')).includes('ex'));
+  assert.equal(getPokemonCategories(byId.get('B1-002')).includes('ex_regular'), false);
+  assert.ok(getPokemonCategories(byId.get('B4a-007')).includes('team_rocket'));
+  assert.ok(getPokemonCategories(byId.get('C1-042')).includes('dual_type'));
+  assert.ok(getPokemonCategories(byId.get('A1a-046')).includes('fossil_evo'));   // 化石翼龍ex
+
+  // Never false-match English names ending in "ex" without word/space separator (e.g. Toxapex)
+  const tox = pokes.find((c) => c.nameEn === 'Toxapex');
+  if (tox) {
+    assert.equal(getPokemonCategories(tox).includes('ex'), false);
+    assert.ok(getPokemonCategories(tox).includes('non_ex'));
+  }
+
+  // Trainer cards yield empty pokemon category list
+  const trainer = cards.find((c) => c.type === 'trainer');
+  assert.deepEqual(getPokemonCategories(trainer), []);
 });

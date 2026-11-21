@@ -1,4 +1,13 @@
-import { deckFingerprint, evaluateDeckOwnership, interval, titleCase, validateDeck } from './core.mjs';
+import {
+  deckFingerprint,
+  evaluateDeckOwnership,
+  getPokemonCategories,
+  getPokemonCategoryLabel,
+  interval,
+  POKEMON_CATEGORY_GROUPS,
+  titleCase,
+  validateDeck
+} from './core.mjs';
 import { getCloudConfig, isCloudConfigured } from './cloud.mjs';
 import {
   cardPrimaryTypes,
@@ -65,7 +74,7 @@ const TRAINER_SUBTYPE_OPTIONS = [
 ];
 
 export const uiState = {
-  catalog: { q: '', set: '', type: '', kind: '', subtype: '', stage: '', rarity: '', owned: '', page: 1, perPage: 30 },
+  catalog: { q: '', set: '', type: '', kind: '', subtype: '', pokeTag: '', stage: '', rarity: '', owned: '', page: 1, perPage: 30 },
   decks: { view: 'showcase' },
   meta: { sort: 'count', q: '', page: 1, perPage: 40 },
   battle: { deckId: null, running: false, activeRunId: null, abortCtrl: null },
@@ -364,6 +373,11 @@ export function filterCatalogCards() {
     if (f.set && c.set !== f.set) return false;
     if (f.kind && c.type !== f.kind) return false;
     if (f.subtype && (c.type !== 'trainer' || String(c.subtype || '').toLowerCase() !== f.subtype)) return false;
+    if (f.pokeTag) {
+      if (c.type === 'trainer') return false;
+      const cats = c._pokeCats || getPokemonCategories(c);
+      if (!cats.includes(f.pokeTag)) return false;
+    }
     if (f.stage && c.stage !== f.stage) return false;
     if (f.rarity && c.rarity !== f.rarity) return false;
     if (f.type) {
@@ -482,11 +496,19 @@ export function renderCatalog() {
                 ${TRAINER_SUBTYPE_OPTIONS.map((o) => `<option value="${esc(o.id)}" ${f.subtype === o.id ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
               </select>
             ` : `
-              <select id="filter-stage" aria-label="依進化階段篩選">
+              <select id="filter-stage" class="${f.kind === 'pokemon' ? 'select-followup' : ''}" aria-label="依進化階段篩選">
                 <option value="">全部階段</option>
                 <option value="basic" ${f.stage === 'basic' ? 'selected' : ''}>基礎</option>
                 <option value="stage1" ${f.stage === 'stage1' ? 'selected' : ''}>1階進化</option>
                 <option value="stage2" ${f.stage === 'stage2' ? 'selected' : ''}>2階進化</option>
+              </select>
+              <select id="filter-poke-tag" class="${(f.kind === 'pokemon' || f.pokeTag) ? 'select-followup' : ''}" aria-label="依寶可夢細部分類篩選">
+                <option value="">全部寶可夢分類</option>
+                ${POKEMON_CATEGORY_GROUPS.map((g) => `
+                  <optgroup label="${esc(g.group)}">
+                    ${g.options.map((o) => `<option value="${esc(o.id)}" ${f.pokeTag === o.id ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+                  </optgroup>
+                `).join('')}
               </select>
             `}
             <select id="filter-rarity" aria-label="依稀有度篩選">
@@ -833,6 +855,12 @@ export function renderSources() {
 export function buildCardDetailModal(card) {
   const variants = findVariantsForCard(card);
   const owned = state.collection[card.id] || 0;
+  const pokeCats = card.type === 'pokemon'
+    ? (card._pokeCats || getPokemonCategories(card)).filter((id) => id !== 'non_ex')
+    : [];
+  const pokeTagsHtml = pokeCats.length
+    ? `<div class="card-cat-tags">${pokeCats.map((id) => `<span class="card-cat-pill ${id === 'ultra_beast' || id === 'ancient' || id === 'future' || id === 'mega' ? 'is-special' : ''}">${esc(getPokemonCategoryLabel(id))}</span>`).join('')}</div>`
+    : '';
   const attacksHtml = (card.attacks || []).map((a) => `
     <div class="modal-move">
       <div class="modal-move-head">
@@ -854,6 +882,7 @@ export function buildCardDetailModal(card) {
       <div class="modal-card-preview">${renderCardFace(card, { showDeckAction: false, hiRes: true })}</div>
       <div class="modal-card-info">
         <p class="desc">系列：<b>${esc(card.set)} ${esc(card.setName || '')}</b> · 卡包：${esc(card.pack || '—')} · 稀有度：${esc(card.rarity || '—')}</p>
+        ${pokeTagsHtml}
         ${card.nameEn ? `<p class="desc">原名：${esc(card.nameEn)}</p>` : ''}
         ${abHtml}
         ${attacksHtml}

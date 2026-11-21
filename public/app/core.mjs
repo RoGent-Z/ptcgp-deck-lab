@@ -140,3 +140,138 @@ export function evaluateDeckOwnership(deck, collection, cardsById) {
   };
 }
 
+export const POKEMON_CATEGORY_GROUPS = [
+  {
+    group: '規則與稀有等級',
+    options: [
+      { id: 'ex', label: '寶可夢 ex（全部）', searchTerms: 'ex 寶可夢ex' },
+      { id: 'ex_regular', label: '一般 ex（不含超級進化）', searchTerms: '一般ex 普通ex' },
+      { id: 'mega', label: '超級進化（Mega）', searchTerms: '超級進化 mega 超級' },
+      { id: 'non_ex', label: '一般寶可夢（非 ex）', searchTerms: '非ex 一般寶可夢 普通寶可夢' },
+      { id: 'dual_type', label: '雙屬性寶可夢', searchTerms: '雙屬性 雙色' },
+      { id: 'shiny', label: '異色寶可夢', searchTerms: '異色 閃光' }
+    ]
+  },
+  {
+    group: '主題與陣營分類',
+    options: [
+      { id: 'ultra_beast', label: '究極異獸', searchTerms: '究極異獸 异兽 ultrabeast ub' },
+      { id: 'ancient', label: '古代寶可夢', searchTerms: '古代 古代寶可夢 悖謬 ancient' },
+      { id: 'future', label: '未來寶可夢', searchTerms: '未來 未來寶可夢 悖謬 future' },
+      { id: 'team_rocket', label: '火箭隊的寶可夢', searchTerms: '火箭隊 火箭隊的' }
+    ]
+  },
+  {
+    group: '形態與對戰特徵',
+    options: [
+      { id: 'regional', label: '地區形態（阿羅拉／伽勒爾／洗翠／帕底亞）', searchTerms: '地區形態 阿羅拉 伽勒爾 洗翠 帕底亞' },
+      { id: 'has_ability', label: '持有特性', searchTerms: '特性 持有特性 ability' },
+      { id: 'fossil_evo', label: '化石進化寶可夢', searchTerms: '化石 化石進化' }
+    ]
+  }
+];
+
+export const POKEMON_CATEGORY_OPTIONS = POKEMON_CATEGORY_GROUPS.flatMap((g) => g.options);
+const POKE_CATEGORY_BY_ID = new Map(POKEMON_CATEGORY_OPTIONS.map((o) => [o.id, o]));
+
+const ULTRA_BEAST_NAMES = new Set([
+  'Nihilego', 'Buzzwole', 'Pheromosa', 'Xurkitree', 'Celesteela',
+  'Kartana', 'Guzzlord', 'Poipole', 'Naganadel', 'Stakataka', 'Blacephalon',
+  'Necrozma', 'Dawn Wings Necrozma', 'Dusk Mane Necrozma', 'Ultra Necrozma'
+]);
+
+const ANCIENT_PARADOX_BASES = new Set([
+  'Great Tusk', 'Scream Tail', 'Brute Bonnet', 'Flutter Mane',
+  'Slither Wing', 'Sandy Shocks', 'Roaring Moon', 'Walking Wake',
+  'Gouging Fire', 'Raging Bolt', 'Koraidon'
+]);
+
+const FUTURE_PARADOX_BASES = new Set([
+  'Iron Treads', 'Iron Bundle', 'Iron Hands', 'Iron Jugulis',
+  'Iron Moth', 'Iron Thorns', 'Iron Valiant', 'Iron Leaves',
+  'Iron Boulder', 'Iron Crown', 'Miraidon'
+]);
+
+const FOSSIL_EVO_BASES = new Set([
+  'Omanyte', 'Omastar', 'Kabuto', 'Kabutops', 'Aerodactyl',
+  'Lileep', 'Cradily', 'Anorith', 'Armaldo',
+  'Cranidos', 'Rampardos', 'Shieldon', 'Bastiodon',
+  'Tirtouga', 'Carracosta', 'Archen', 'Archeops',
+  'Tyrunt', 'Tyrantrum', 'Amaura', 'Aurorus'
+]);
+
+function stripExSuffix(nameEn) {
+  return String(nameEn || '').replace(/\s+ex$/i, '').trim();
+}
+
+function isParadoxTaggedPrint(card) {
+  if (Array.isArray(card?.tags)) {
+    if (card.tags.includes('ancient') || card.tags.includes('future')) return true;
+  }
+  if (card?.set === 'B3a') return true;
+  const srcTitle = typeof card?.source === 'string' ? card.source : (card?.source?.title || '');
+  return srcTitle.endsWith('（B3a）') || srcTitle.endsWith('(B3a)') || srcTitle.endsWith('（B4b）');
+}
+
+export function getPokemonCategories(card) {
+  if (!card || card.type === 'trainer') return [];
+  const cats = [];
+  const name = String(card.name || '').trim();
+  const nameEn = String(card.limitName || card.nameEn || '').trim();
+  const baseEn = stripExSuffix(nameEn);
+  const existingTags = new Set(Array.isArray(card.tags) ? card.tags : []);
+
+  const isMega = existingTags.has('mega') || nameEn.startsWith('Mega ') || name.startsWith('超級');
+  const isEx = existingTags.has('ex') || /\sex$/i.test(nameEn) || name.endsWith('ex');
+
+  if (isEx) cats.push('ex');
+  if (isEx && !isMega) cats.push('ex_regular');
+  if (isMega) cats.push('mega');
+  if (!isEx && !isMega) cats.push('non_ex');
+  if (Array.isArray(card.types) && card.types.length > 1) cats.push('dual_type');
+  if (card.rarity === '✦' || card.rarity === '✦✦' || card.rarityCode === 'S' || card.rarityCode === 'SSR') {
+    cats.push('shiny');
+  }
+
+  if (existingTags.has('ultra_beast') || ULTRA_BEAST_NAMES.has(baseEn)) {
+    cats.push('ultra_beast');
+  }
+  const paradoxPrint = isParadoxTaggedPrint(card);
+  if (existingTags.has('ancient') || (paradoxPrint && ANCIENT_PARADOX_BASES.has(baseEn))) {
+    cats.push('ancient');
+  }
+  if (existingTags.has('future') || (paradoxPrint && FUTURE_PARADOX_BASES.has(baseEn))) {
+    cats.push('future');
+  }
+  if (existingTags.has('team_rocket') || name.startsWith('火箭隊的') || /^Team Rocket['’]s\s/i.test(nameEn)) {
+    cats.push('team_rocket');
+  }
+  if (
+    existingTags.has('regional') ||
+    /^(阿羅拉|伽勒爾|洗翠|帕底亞)/.test(name) ||
+    /^(Alolan|Galarian|Hisuian|Paldean)\s/i.test(nameEn)
+  ) {
+    cats.push('regional');
+  }
+  if (Array.isArray(card.abilities) && card.abilities.length > 0) {
+    cats.push('has_ability');
+  }
+  if (
+    existingTags.has('fossil_evo') ||
+    /Fossil|Old Amber/i.test(String(card.evolvesFrom || '')) ||
+    FOSSIL_EVO_BASES.has(baseEn)
+  ) {
+    cats.push('fossil_evo');
+  }
+  return cats;
+}
+
+export function getPokemonCategoryLabel(id) {
+  return POKE_CATEGORY_BY_ID.get(id)?.label || id;
+}
+
+export function getPokemonCategorySearchTerms(id) {
+  return POKE_CATEGORY_BY_ID.get(id)?.searchTerms || '';
+}
+
+

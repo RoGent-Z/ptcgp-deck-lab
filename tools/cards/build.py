@@ -338,7 +338,7 @@ def ensure_raw_sources(skip_download: bool = False, refresh_archive: bool = Fals
                     subprocess.run(["unzip", "-o", "-P", WIKI_PASS, str(zip_path), "-d", str(RAW_DIR)], check=True)
                 else:
                     subprocess.run(["tar", "--passphrase", WIKI_PASS, "-xf", str(zip_path), "-C", str(RAW_DIR)], check=True)
-                xml_gz = next(sorted(RAW_DIR.glob("52poke-*.xml.gz"))[-1:] or [None])
+                xml_gz = (sorted(RAW_DIR.glob("52poke-*.xml.gz")) or [None])[-1]
             extract_pages_from_xml(xml_gz, pages_path)
 
     return RAW_DIR / "cards.extra.json", RAW_DIR / "pages.ndjson"

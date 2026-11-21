@@ -311,6 +311,7 @@ async function handleAction(el) {
     if (nextType === 'trainer') {
       if (uiState.catalog.kind === 'pokemon') uiState.catalog.kind = '';
       uiState.catalog.stage = '';
+      uiState.catalog.pokeTag = '';
     } else {
       if (nextType && uiState.catalog.kind === 'trainer') uiState.catalog.kind = '';
       if (uiState.catalog.kind !== 'trainer') uiState.catalog.subtype = '';
@@ -329,7 +330,7 @@ async function handleAction(el) {
   }
 
   if (action === 'reset-catalog-filters') {
-    uiState.catalog = { ...uiState.catalog, q: '', set: '', type: '', kind: '', subtype: '', stage: '', rarity: '', owned: '', page: 1 };
+    uiState.catalog = { ...uiState.catalog, q: '', set: '', type: '', kind: '', subtype: '', pokeTag: '', stage: '', rarity: '', owned: '', page: 1 };
     renderRoute();
     return;
   }
@@ -774,6 +775,7 @@ document.addEventListener('change', async (e) => {
     uiState.catalog.kind = t.value;
     if (t.value === 'trainer') {
       uiState.catalog.stage = '';
+      uiState.catalog.pokeTag = '';
       if (uiState.catalog.type && uiState.catalog.type !== 'trainer') uiState.catalog.type = '';
     } else if (t.value === 'pokemon') {
       if (uiState.catalog.type === 'trainer') uiState.catalog.type = '';
@@ -785,6 +787,7 @@ document.addEventListener('change', async (e) => {
     renderRoute();
   }
   else if (t.id === 'filter-subtype') { uiState.catalog.subtype = t.value; uiState.catalog.page = 1; renderRoute(); }
+  else if (t.id === 'filter-poke-tag') { uiState.catalog.pokeTag = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-stage') { uiState.catalog.stage = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-rarity') { uiState.catalog.rarity = t.value; uiState.catalog.page = 1; renderRoute(); }
   else if (t.id === 'filter-owned') { uiState.catalog.owned = t.value; uiState.catalog.page = 1; renderRoute(); }
