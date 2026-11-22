@@ -1,0 +1,700 @@
+{
+  "cardPoolEvaluated": {
+    "minDecisionsPerCard": 2400,
+    "minGamesPerCard": 1200,
+    "totalCardDecisionEvaluations": 10984800,
+    "totalCardEvaluationGames": 5492400,
+    "totalDistinctCards": 4577
+  },
+  "cumulativeTrainingGames": 11737640,
+  "elapsedSeconds": 24.1227507,
+  "generations": [
+    {
+      "bestCandidateIndex": 0,
+      "bestTraining": {
+        "draws": 1435,
+        "games": 4000,
+        "losses": 1531,
+        "score": 0.437875,
+        "wins": 1034
+      },
+      "cumulativeGamesWithPhase1": 5620400,
+      "games": 128000,
+      "round": 1,
+      "totalPhase2Games": 128000
+    },
+    {
+      "bestCandidateIndex": 7,
+      "bestTraining": {
+        "draws": 1436,
+        "games": 4000,
+        "losses": 1568,
+        "score": 0.4285,
+        "wins": 996
+      },
+      "cumulativeGamesWithPhase1": 5748400,
+      "games": 128000,
+      "round": 2,
+      "totalPhase2Games": 256000
+    },
+    {
+      "bestCandidateIndex": 10,
+      "bestTraining": {
+        "draws": 1427,
+        "games": 4000,
+        "losses": 1507,
+        "score": 0.444875,
+        "wins": 1066
+      },
+      "cumulativeGamesWithPhase1": 5876400,
+      "games": 128000,
+      "round": 3,
+      "totalPhase2Games": 384000
+    },
+    {
+      "bestCandidateIndex": 20,
+      "bestTraining": {
+        "draws": 1444,
+        "games": 4000,
+        "losses": 1536,
+        "score": 0.4355,
+        "wins": 1020
+      },
+      "cumulativeGamesWithPhase1": 6004400,
+      "games": 128000,
+      "round": 4,
+      "totalPhase2Games": 512000
+    },
+    {
+      "bestCandidateIndex": 5,
+      "bestTraining": {
+        "draws": 1431,
+        "games": 4000,
+        "losses": 1529,
+        "score": 0.438875,
+        "wins": 1040
+      },
+      "cumulativeGamesWithPhase1": 6132400,
+      "games": 128000,
+      "round": 5,
+      "totalPhase2Games": 640000
+    },
+    {
+      "bestCandidateIndex": 25,
+      "bestTraining": {
+        "draws": 1400,
+        "games": 4000,
+        "losses": 1575,
+        "score": 0.43125,
+        "wins": 1025
+      },
+      "cumulativeGamesWithPhase1": 6260400,
+      "games": 128000,
+      "round": 6,
+      "totalPhase2Games": 768000
+    },
+    {
+      "bestCandidateIndex": 18,
+      "bestTraining": {
+        "draws": 1440,
+        "games": 4000,
+        "losses": 1529,
+        "score": 0.43775,
+        "wins": 1031
+      },
+      "cumulativeGamesWithPhase1": 6388400,
+      "games": 128000,
+      "round": 7,
+      "totalPhase2Games": 896000
+    },
+    {
+      "bestCandidateIndex": 9,
+      "bestTraining": {
+        "draws": 1412,
+        "games": 4000,
+        "losses": 1552,
+        "score": 0.4355,
+        "wins": 1036
+      },
+      "cumulativeGamesWithPhase1": 6516400,
+      "games": 128000,
+      "round": 8,
+      "totalPhase2Games": 1024000
+    },
+    {
+      "bestCandidateIndex": 24,
+      "bestTraining": {
+        "draws": 1407,
+        "games": 4000,
+        "losses": 1520,
+        "score": 0.444125,
+        "wins": 1073
+      },
+      "cumulativeGamesWithPhase1": 6644400,
+      "games": 128000,
+      "round": 9,
+      "totalPhase2Games": 1152000
+    },
+    {
+      "bestCandidateIndex": 26,
+      "bestTraining": {
+        "draws": 1389,
+        "games": 4000,
+        "losses": 1554,
+        "score": 0.437875,
+        "wins": 1057
+      },
+      "cumulativeGamesWithPhase1": 6772400,
+      "games": 128000,
+      "round": 10,
+      "totalPhase2Games": 1280000
+    },
+    {
+      "bestCandidateIndex": 17,
+      "bestTraining": {
+        "draws": 1423,
+        "games": 4000,
+        "losses": 1517,
+        "score": 0.442875,
+        "wins": 1060
+      },
+      "cumulativeGamesWithPhase1": 6900400,
+      "games": 128000,
+      "round": 11,
+      "totalPhase2Games": 1408000
+    },
+    {
+      "bestCandidateIndex": 25,
+      "bestTraining": {
+        "draws": 1476,
+        "games": 4000,
+        "losses": 1510,
+        "score": 0.438,
+        "wins": 1014
+      },
+      "cumulativeGamesWithPhase1": 7028400,
+      "games": 128000,
+      "round": 12,
+      "totalPhase2Games": 1536000
+    },
+    {
+      "bestCandidateIndex": 23,
+      "bestTraining": {
+        "draws": 1391,
+        "games": 4000,
+        "losses": 1514,
+        "score": 0.447625,
+        "wins": 1095
+      },
+      "cumulativeGamesWithPhase1": 7156400,
+      "games": 128000,
+      "round": 13,
+      "totalPhase2Games": 1664000
+    },
+    {
+      "bestCandidateIndex": 3,
+      "bestTraining": {
+        "draws": 1497,
+        "games": 4000,
+        "losses": 1497,
+        "score": 0.438625,
+        "wins": 1006
+      },
+      "cumulativeGamesWithPhase1": 7284400,
+      "games": 128000,
+      "round": 14,
+      "totalPhase2Games": 1792000
+    },
+    {
+      "bestCandidateIndex": 4,
+      "bestTraining": {
+        "draws": 1442,
+        "games": 4000,
+        "losses": 1498,
+        "score": 0.44525,
+        "wins": 1060
+      },
+      "cumulativeGamesWithPhase1": 7412400,
+      "games": 128000,
+      "round": 15,
+      "totalPhase2Games": 1920000
+    },
+    {
+      "bestCandidateIndex": 17,
+      "bestTraining": {
+        "draws": 1422,
+        "games": 4000,
+        "losses": 1536,
+        "score": 0.43825,
+        "wins": 1042
+      },
+      "cumulativeGamesWithPhase1": 7540400,
+      "games": 128000,
+      "round": 16,
+      "totalPhase2Games": 2048000
+    },
+    {
+      "bestCandidateIndex": 19,
+      "bestTraining": {
+        "draws": 1436,
+        "games": 4000,
+        "losses": 1505,
+        "score": 0.44425,
+        "wins": 1059
+      },
+      "cumulativeGamesWithPhase1": 7668400,
+      "games": 128000,
+      "round": 17,
+      "totalPhase2Games": 2176000
+    },
+    {
+      "bestCandidateIndex": 6,
+      "bestTraining": {
+        "draws": 1435,
+        "games": 4000,
+        "losses": 1539,
+        "score": 0.435875,
+        "wins": 1026
+      },
+      "cumulativeGamesWithPhase1": 7796400,
+      "games": 128000,
+      "round": 18,
+      "totalPhase2Games": 2304000
+    },
+    {
+      "bestCandidateIndex": 7,
+      "bestTraining": {
+        "draws": 1446,
+        "games": 4000,
+        "losses": 1509,
+        "score": 0.442,
+        "wins": 1045
+      },
+      "cumulativeGamesWithPhase1": 7924400,
+      "games": 128000,
+      "round": 19,
+      "totalPhase2Games": 2432000
+    },
+    {
+      "bestCandidateIndex": 20,
+      "bestTraining": {
+        "draws": 1479,
+        "games": 4000,
+        "losses": 1501,
+        "score": 0.439875,
+        "wins": 1020
+      },
+      "cumulativeGamesWithPhase1": 8052400,
+      "games": 128000,
+      "round": 20,
+      "totalPhase2Games": 2560000
+    },
+    {
+      "bestCandidateIndex": 16,
+      "bestTraining": {
+        "draws": 1421,
+        "games": 4000,
+        "losses": 1520,
+        "score": 0.442375,
+        "wins": 1059
+      },
+      "cumulativeGamesWithPhase1": 8180400,
+      "games": 128000,
+      "round": 21,
+      "totalPhase2Games": 2688000
+    },
+    {
+      "bestCandidateIndex": 22,
+      "bestTraining": {
+        "draws": 1384,
+        "games": 4000,
+        "losses": 1527,
+        "score": 0.44525,
+        "wins": 1089
+      },
+      "cumulativeGamesWithPhase1": 8308400,
+      "games": 128000,
+      "round": 22,
+      "totalPhase2Games": 2816000
+    },
+    {
+      "bestCandidateIndex": 20,
+      "bestTraining": {
+        "draws": 1476,
+        "games": 4000,
+        "losses": 1475,
+        "score": 0.44675,
+        "wins": 1049
+      },
+      "cumulativeGamesWithPhase1": 8436400,
+      "games": 128000,
+      "round": 23,
+      "totalPhase2Games": 2944000
+    },
+    {
+      "bestCandidateIndex": 11,
+      "bestTraining": {
+        "draws": 1408,
+        "games": 4000,
+        "losses": 1502,
+        "score": 0.4485,
+        "wins": 1090
+      },
+      "cumulativeGamesWithPhase1": 8564400,
+      "games": 128000,
+      "round": 24,
+      "totalPhase2Games": 3072000
+    },
+    {
+      "bestCandidateIndex": 9,
+      "bestTraining": {
+        "draws": 1443,
+        "games": 4000,
+        "losses": 1511,
+        "score": 0.441875,
+        "wins": 1046
+      },
+      "cumulativeGamesWithPhase1": 8692400,
+      "games": 128000,
+      "round": 25,
+      "totalPhase2Games": 3200000
+    },
+    {
+      "bestCandidateIndex": 4,
+      "bestTraining": {
+        "draws": 1428,
+        "games": 4000,
+        "losses": 1531,
+        "score": 0.43875,
+        "wins": 1041
+      },
+      "cumulativeGamesWithPhase1": 8820400,
+      "games": 128000,
+      "round": 26,
+      "totalPhase2Games": 3328000
+    },
+    {
+      "bestCandidateIndex": 25,
+      "bestTraining": {
+        "draws": 1433,
+        "games": 4000,
+        "losses": 1504,
+        "score": 0.444875,
+        "wins": 1063
+      },
+      "cumulativeGamesWithPhase1": 8948400,
+      "games": 128000,
+      "round": 27,
+      "totalPhase2Games": 3456000
+    },
+    {
+      "bestCandidateIndex": 30,
+      "bestTraining": {
+        "draws": 1428,
+        "games": 4000,
+        "losses": 1496,
+        "score": 0.4475,
+        "wins": 1076
+      },
+      "cumulativeGamesWithPhase1": 9076400,
+      "games": 128000,
+      "round": 28,
+      "totalPhase2Games": 3584000
+    },
+    {
+      "bestCandidateIndex": 3,
+      "bestTraining": {
+        "draws": 1396,
+        "games": 4000,
+        "losses": 1520,
+        "score": 0.4455,
+        "wins": 1084
+      },
+      "cumulativeGamesWithPhase1": 9204400,
+      "games": 128000,
+      "round": 29,
+      "totalPhase2Games": 3712000
+    },
+    {
+      "bestCandidateIndex": 3,
+      "bestTraining": {
+        "draws": 1393,
+        "games": 4000,
+        "losses": 1562,
+        "score": 0.435375,
+        "wins": 1045
+      },
+      "cumulativeGamesWithPhase1": 9332400,
+      "games": 128000,
+      "round": 30,
+      "totalPhase2Games": 3840000
+    },
+    {
+      "bestCandidateIndex": 31,
+      "bestTraining": {
+        "draws": 1437,
+        "games": 4000,
+        "losses": 1504,
+        "score": 0.444375,
+        "wins": 1059
+      },
+      "cumulativeGamesWithPhase1": 9460400,
+      "games": 128000,
+      "round": 31,
+      "totalPhase2Games": 3968000
+    },
+    {
+      "bestCandidateIndex": 6,
+      "bestTraining": {
+        "draws": 1410,
+        "games": 4000,
+        "losses": 1545,
+        "score": 0.4375,
+        "wins": 1045
+      },
+      "cumulativeGamesWithPhase1": 9588400,
+      "games": 128000,
+      "round": 32,
+      "totalPhase2Games": 4096000
+    },
+    {
+      "bestCandidateIndex": 7,
+      "bestTraining": {
+        "draws": 1434,
+        "games": 4000,
+        "losses": 1509,
+        "score": 0.4435,
+        "wins": 1057
+      },
+      "cumulativeGamesWithPhase1": 9716400,
+      "games": 128000,
+      "round": 33,
+      "totalPhase2Games": 4224000
+    },
+    {
+      "bestCandidateIndex": 16,
+      "bestTraining": {
+        "draws": 1434,
+        "games": 4000,
+        "losses": 1513,
+        "score": 0.4425,
+        "wins": 1053
+      },
+      "cumulativeGamesWithPhase1": 9844400,
+      "games": 128000,
+      "round": 34,
+      "totalPhase2Games": 4352000
+    },
+    {
+      "bestCandidateIndex": 27,
+      "bestTraining": {
+        "draws": 1405,
+        "games": 4000,
+        "losses": 1492,
+        "score": 0.451375,
+        "wins": 1103
+      },
+      "cumulativeGamesWithPhase1": 9972400,
+      "games": 128000,
+      "round": 35,
+      "totalPhase2Games": 4480000
+    },
+    {
+      "bestCandidateIndex": 4,
+      "bestTraining": {
+        "draws": 1410,
+        "games": 4000,
+        "losses": 1517,
+        "score": 0.4445,
+        "wins": 1073
+      },
+      "cumulativeGamesWithPhase1": 10100400,
+      "games": 128000,
+      "round": 36,
+      "totalPhase2Games": 4608000
+    },
+    {
+      "bestCandidateIndex": 20,
+      "bestTraining": {
+        "draws": 1423,
+        "games": 4000,
+        "losses": 1492,
+        "score": 0.449125,
+        "wins": 1085
+      },
+      "cumulativeGamesWithPhase1": 10228400,
+      "games": 128000,
+      "round": 37,
+      "totalPhase2Games": 4736000
+    },
+    {
+      "bestCandidateIndex": 23,
+      "bestTraining": {
+        "draws": 1380,
+        "games": 4000,
+        "losses": 1567,
+        "score": 0.43575,
+        "wins": 1053
+      },
+      "cumulativeGamesWithPhase1": 10356400,
+      "games": 128000,
+      "round": 38,
+      "totalPhase2Games": 4864000
+    },
+    {
+      "bestCandidateIndex": 21,
+      "bestTraining": {
+        "draws": 1431,
+        "games": 4000,
+        "losses": 1503,
+        "score": 0.445375,
+        "wins": 1066
+      },
+      "cumulativeGamesWithPhase1": 10484400,
+      "games": 128000,
+      "round": 39,
+      "totalPhase2Games": 4992000
+    },
+    {
+      "bestCandidateIndex": 20,
+      "bestTraining": {
+        "draws": 1429,
+        "games": 4000,
+        "losses": 1546,
+        "score": 0.434875,
+        "wins": 1025
+      },
+      "cumulativeGamesWithPhase1": 10612400,
+      "games": 128000,
+      "round": 40,
+      "totalPhase2Games": 5120000
+    },
+    {
+      "bestCandidateIndex": 29,
+      "bestTraining": {
+        "draws": 1443,
+        "games": 4000,
+        "losses": 1495,
+        "score": 0.445875,
+        "wins": 1062
+      },
+      "cumulativeGamesWithPhase1": 10740400,
+      "games": 128000,
+      "round": 41,
+      "totalPhase2Games": 5248000
+    },
+    {
+      "bestCandidateIndex": 26,
+      "bestTraining": {
+        "draws": 1421,
+        "games": 4000,
+        "losses": 1536,
+        "score": 0.438375,
+        "wins": 1043
+      },
+      "cumulativeGamesWithPhase1": 10868400,
+      "games": 128000,
+      "round": 42,
+      "totalPhase2Games": 5376000
+    },
+    {
+      "bestCandidateIndex": 14,
+      "bestTraining": {
+        "draws": 1443,
+        "games": 4000,
+        "losses": 1489,
+        "score": 0.447375,
+        "wins": 1068
+      },
+      "cumulativeGamesWithPhase1": 10996400,
+      "games": 128000,
+      "round": 43,
+      "totalPhase2Games": 5504000
+    },
+    {
+      "bestCandidateIndex": 10,
+      "bestTraining": {
+        "draws": 1411,
+        "games": 4000,
+        "losses": 1522,
+        "score": 0.443125,
+        "wins": 1067
+      },
+      "cumulativeGamesWithPhase1": 11124400,
+      "games": 128000,
+      "round": 44,
+      "totalPhase2Games": 5632000
+    },
+    {
+      "bestCandidateIndex": 24,
+      "bestTraining": {
+        "draws": 1435,
+        "games": 4000,
+        "losses": 1513,
+        "score": 0.442375,
+        "wins": 1052
+      },
+      "cumulativeGamesWithPhase1": 11252400,
+      "games": 128000,
+      "round": 45,
+      "totalPhase2Games": 5760000
+    },
+    {
+      "bestCandidateIndex": 25,
+      "bestTraining": {
+        "draws": 1446,
+        "games": 4000,
+        "losses": 1507,
+        "score": 0.4425,
+        "wins": 1047
+      },
+      "cumulativeGamesWithPhase1": 11380400,
+      "games": 128000,
+      "round": 46,
+      "totalPhase2Games": 5888000
+    },
+    {
+      "bestCandidateIndex": 24,
+      "bestTraining": {
+        "draws": 1416,
+        "games": 4000,
+        "losses": 1509,
+        "score": 0.44575,
+        "wins": 1075
+      },
+      "cumulativeGamesWithPhase1": 11508400,
+      "games": 128000,
+      "round": 47,
+      "totalPhase2Games": 6016000
+    },
+    {
+      "bestCandidateIndex": 17,
+      "bestTraining": {
+        "draws": 1434,
+        "games": 4000,
+        "losses": 1526,
+        "score": 0.43925,
+        "wins": 1040
+      },
+      "cumulativeGamesWithPhase1": 11636400,
+      "games": 128000,
+      "round": 48,
+      "totalPhase2Games": 6144000
+    }
+  ],
+  "parentTrainedGames": 92160,
+  "phaseBreakdown": {
+    "phase1CardPoolGames": 5492400,
+    "phase2CemLeagueGames": 6144000,
+    "phase3ExactDeckGymGames": 9080
+  },
+  "schemaVersion": 3,
+  "source": {
+    "asOf": "2026-11-19T07:28:52.724Z",
+    "hash": "4a9ea59f3c873b7caf103358b1af0807eaa1bccf9e3198c0b3bc3287370ec370",
+    "season": "C1",
+    "sha256": "c57085f378c0f103df3e02a650962db06dae442c6aaad853c131035d465f4c56"
+  },
+  "trainedGames": 11645480,
+  "version": "selfplay-cem-v3"
+}

@@ -38,6 +38,7 @@ export const state = {
   modelInfo: null,
   modelManifest: null,
   modelsById: new Map(),
+  cardPriors: null,
   coverageMap: null,
   cloudSession: null,
   lastSyncedUserId: null,
@@ -87,7 +88,7 @@ function indexMetaEntries(meta, foldMap) {
 export async function loadInitialData(forceRefresh = false) {
   const prevHash = state.meta?.hash;
 
-  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, spritesData] = await Promise.all([
+  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, cardPriorsData, spritesData] = await Promise.all([
     Object.keys(state.foldMap).length
       ? Promise.resolve(state.foldMap)
       : fetchJsonOptional('assets/han-fold.json').catch(() => ({})),
@@ -100,11 +101,13 @@ export async function loadInitialData(forceRefresh = false) {
     fetchJsonOptional('battle/models/current.json', forceRefresh)
       .then((d) => d || fetchJsonOptional('battle/models/baseline-v0.json', forceRefresh))
       .catch(() => null),
+    fetchJsonOptional('battle/models/card-priors.json', forceRefresh).catch(() => null),
     fetchJsonOptional('data/sprites.json', forceRefresh).catch(() => null)
   ]);
 
   state.foldMap = fold || {};
   state.spriteMap = spritesData?.byNameEn || {};
+  state.cardPriors = cardPriorsData || null;
   state.lastCheckedAt = new Date().toISOString();
 
   if (metaTop) {
@@ -125,7 +128,7 @@ export async function loadInitialData(forceRefresh = false) {
       if (pair) state.modelsById.set(pair[0], pair[1]);
     }
   }
-  const defaultId = modelManifestData?.defaultModelId || 'v1';
+  const defaultId = modelManifestData?.defaultModelId || 'v3';
   state.modelInfo = state.modelsById.get(defaultId) || fallbackModelData || null;
   if (state.modelInfo && !state.modelsById.has(defaultId)) {
     state.modelsById.set(defaultId, state.modelInfo);

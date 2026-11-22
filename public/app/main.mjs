@@ -1,4 +1,4 @@
-import { normalizeFeaturedPokemon, titleCase } from './core.mjs';
+import { GAMES_PER_OPPONENT, normalizeFeaturedPokemon, titleCase, TOTAL_BATCH_GAMES } from './core.mjs';
 import {
   bindCardImageFallback,
   bindFoilEffects,
@@ -34,6 +34,7 @@ import {
 } from './data.mjs';
 import { icon } from './icons.mjs';
 import {
+  buildFullGameFlowModal,
   ensureCardCoverage,
   executeBattleBatch,
   executeFixturePreviewBatch,
@@ -133,11 +134,11 @@ function applySwissSelectValue(selectId, value) {
 }
 
 function getSelectedBattleModel() {
-  const id = uiState.battle.modelId || state.modelManifest?.defaultModelId || 'v1';
+  const id = uiState.battle.modelId || state.modelManifest?.defaultModelId || 'v3';
   const model = state.modelsById.get(id) || state.modelInfo;
   return {
     id,
-    version: model?.version || 'baseline-v0',
+    version: model?.version || 'selfplay-cem-v3',
     weights: model?.weights || Array(22).fill(0)
   };
 }
@@ -784,8 +785,9 @@ async function handleAction(el) {
     return;
   }
 
-  if (action === 'start-real-battle' || action === 'run-fixture-preview') {
+  if (action === 'start-real-battle' || action === 'run-fixture-preview' || action === 'run-single-opponent') {
     const isDemo = action === 'run-fixture-preview';
+    const onlyOpponentId = action === 'run-single-opponent' ? (el.dataset.opp || null) : null;
     const deck = state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0];
     if (!deck) { showNotice('請先選擇或建立一套牌組'); return; }
 
@@ -804,7 +806,7 @@ async function handleAction(el) {
     const targetVersion = isDemo ? '展示樣板' : model.version;
 
     let run = state.runs.find((r) => r.runId === uiState.battle.activeRunId && r.deckId === deck.id && (r.isDemo || r.modelVersion === targetVersion))
-      || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.modelVersion === targetVersion && r.events.length < 500);
+      || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.modelVersion === targetVersion && r.events.length < TOTAL_BATCH_GAMES);
 
     if (!run) {
       run = {
@@ -834,10 +836,18 @@ async function handleAction(el) {
       if (isDemo) {
         await executeFixturePreviewBatch({ run, lineup, onTick: updateView, signal: uiState.battle.abortCtrl.signal });
       } else {
-        await executeBattleBatch({ run, deck, lineup, weights: model.weights, onTick: updateView, signal: uiState.battle.abortCtrl.signal });
+        await executeBattleBatch({
+          run,
+          deck,
+          lineup,
+          weights: model.weights,
+          onTick: updateView,
+          signal: uiState.battle.abortCtrl.signal,
+          onlyOpponentId
+        });
       }
       if (!uiState.battle.abortCtrl.signal.aborted) {
-        showNotice('500 局模擬已完成');
+        showNotice(onlyOpponentId ? `已完成此對手 ${GAMES_PER_OPPONENT} 局完整對局模擬` : `全部 10 對手 × ${GAMES_PER_OPPONENT} 局（共 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 局）模擬已完成`);
       }
     } catch (err) {
       showNotice(err?.message || '模擬中斷');
@@ -884,27 +894,11 @@ async function handleAction(el) {
     const oppId = el.dataset.opp;
     const idx = Number(el.dataset.idx);
     const run = state.runs.find((r) => r.runId === uiState.battle.activeRunId) || state.runs[0];
-    const ev = run?.events?.find((e) => e.opponentId === oppId && e.index === idx);
     const opp = (state.meta?.entries || []).find((e) => e.id === oppId);
-    const seed = ev?.seed ?? fnv1a32(`${run?.runId || 'demo'}:${oppId}:${idx}`);
-    let logText = '';
-    if (state.engineReady && state.runtimeFn && opp?.representative) {
-      const deck = state.decks.find((d) => d.id === run.deckId);
-      const weights = getWeightsForVersion(run?.modelVersion);
-      const replay = state.runtimeFn({
-        op: 'game',
-        deck: { cards: deck.cards, energy: deck.energy },
-        enemy: { cards: opp.representative.cards, energy: opp.representative.energy },
-        weights,
-        seed,
-        first: idx < 25 ? 0 : 1,
-        replay: true
-      });
-      logText = (replay.replay || []).map((s) => `第${s.turn}回合 [玩家${s.actor + 1}] ${s.action}  (分數 ${s.points?.join('-')})`).join('\n');
-    } else {
-      logText = `對局種子：0x${seed.toString(16).toUpperCase()}\n先後攻：${idx < 25 ? '我方先攻' : '我方後攻'}\n結果：${ev?.outcome === 'win' ? '勝' : ev?.outcome === 'loss' ? '敗' : ev?.outcome === 'draw' ? '和' : '—'}（${ev?.turns || '—'} 回合）\n\n對戰模擬引擎尚未載入，暫無法顯示逐回合詳情。`;
-    }
-    openModal(`重播計算 · 對陣 ${opp?.name || oppId} 第 ${idx + 1} 局`, `<pre class="detail-log">${esc(logText)}</pre>`);
+    const deck = state.decks.find((d) => d.id === run?.deckId) || state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0];
+    const weights = getWeightsForVersion(run?.modelVersion);
+    const html = buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights });
+    openModal(`完整對局流程 · 對陣 ${opp?.name || oppId}（第 ${idx + 1} / ${GAMES_PER_OPPONENT} 局）`, html, { wide: true });
   }
 }
 

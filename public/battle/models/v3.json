@@ -1,0 +1,357 @@
+{
+  "cardPoolEvaluated": {
+    "minDecisionsPerCard": 2400,
+    "minGamesPerCard": 1200,
+    "totalCardDecisionEvaluations": 10984800,
+    "totalCardEvaluationGames": 5492400,
+    "totalDistinctCards": 4577
+  },
+  "createdAt": "2026-11-22T11:30:00.000Z",
+  "cumulativeTrainingGames": 11737640,
+  "engineCommit": "a0f9d14bf2dd2a342e53cd7057486d7ce96ea545",
+  "eval": {
+    "draws": 32,
+    "games": 2160,
+    "losses": 814,
+    "opponent": "baseline-v0",
+    "score": 0.6157407407407407,
+    "winRate": 0.6083333333333333,
+    "wins": 1314
+  },
+  "featureNames": [
+    "endTurn",
+    "noop",
+    "place",
+    "activePower",
+    "evolve",
+    "evolutionPower",
+    "abilityOrStadium",
+    "trainer",
+    "drawAtLowHand",
+    "attack",
+    "baseDamage",
+    "estimatedKnockout",
+    "attackEffect",
+    "attach",
+    "attachActive",
+    "energyDemand",
+    "attachTargetPower",
+    "retreat",
+    "protectEndangeredActive",
+    "activationTarget",
+    "toolOrHeal",
+    "targetedDamage"
+  ],
+  "features": 22,
+  "mirror5000": {
+    "byRank": [
+      {
+        "draws": 51,
+        "first": {
+          "draws": 28,
+          "losses": 79,
+          "total": 250,
+          "winRate": 0.572,
+          "wins": 143
+        },
+        "id": "mega-charizard-y-ex-b1a-entei-ex-a4a",
+        "losses": 237,
+        "name": "超級噴火龍Yex · 炎帝ex",
+        "rank": 1,
+        "score": 0.475,
+        "second": {
+          "draws": 23,
+          "losses": 158,
+          "total": 250,
+          "winRate": 0.276,
+          "wins": 69
+        },
+        "total": 500,
+        "winRate": 0.424,
+        "wins": 212
+      },
+      {
+        "draws": 15,
+        "first": {
+          "draws": 9,
+          "losses": 144,
+          "total": 250,
+          "winRate": 0.388,
+          "wins": 97
+        },
+        "id": "suicune-ex-a4a-baxcalibur-b2a",
+        "losses": 293,
+        "name": "水君ex · 戟脊龍",
+        "rank": 2,
+        "score": 0.399,
+        "second": {
+          "draws": 6,
+          "losses": 149,
+          "total": 250,
+          "winRate": 0.38,
+          "wins": 95
+        },
+        "total": 500,
+        "winRate": 0.384,
+        "wins": 192
+      },
+      {
+        "draws": 39,
+        "first": {
+          "draws": 22,
+          "losses": 120,
+          "total": 250,
+          "winRate": 0.432,
+          "wins": 108
+        },
+        "id": "umbreon-c1-hydreigon-b1",
+        "losses": 237,
+        "name": "月亮伊布 · 三首惡龍",
+        "rank": 3,
+        "score": 0.487,
+        "second": {
+          "draws": 17,
+          "losses": 117,
+          "total": 250,
+          "winRate": 0.464,
+          "wins": 116
+        },
+        "total": 500,
+        "winRate": 0.448,
+        "wins": 224
+      },
+      {
+        "draws": 13,
+        "first": {
+          "draws": 7,
+          "losses": 101,
+          "total": 250,
+          "winRate": 0.568,
+          "wins": 142
+        },
+        "id": "hoopa-ex-b4-mega-absol-ex-b1",
+        "losses": 196,
+        "name": "胡帕ex · 超級阿勃梭魯ex",
+        "rank": 4,
+        "score": 0.595,
+        "second": {
+          "draws": 6,
+          "losses": 95,
+          "total": 250,
+          "winRate": 0.596,
+          "wins": 149
+        },
+        "total": 500,
+        "winRate": 0.582,
+        "wins": 291
+      },
+      {
+        "draws": 18,
+        "first": {
+          "draws": 7,
+          "losses": 140,
+          "total": 250,
+          "winRate": 0.412,
+          "wins": 103
+        },
+        "id": "mega-greninja-ex-c1-greninja-ex-b1",
+        "losses": 273,
+        "name": "超級甲賀忍蛙ex · 甲賀忍蛙ex",
+        "rank": 5,
+        "score": 0.436,
+        "second": {
+          "draws": 11,
+          "losses": 133,
+          "total": 250,
+          "winRate": 0.424,
+          "wins": 106
+        },
+        "total": 500,
+        "winRate": 0.418,
+        "wins": 209
+      },
+      {
+        "draws": 20,
+        "first": {
+          "draws": 11,
+          "losses": 61,
+          "total": 250,
+          "winRate": 0.712,
+          "wins": 178
+        },
+        "id": "mega-altaria-ex-b1-greninja-a1",
+        "losses": 158,
+        "name": "超級七夕青鳥ex · 甲賀忍蛙",
+        "rank": 6,
+        "score": 0.664,
+        "second": {
+          "draws": 9,
+          "losses": 97,
+          "total": 250,
+          "winRate": 0.576,
+          "wins": 144
+        },
+        "total": 500,
+        "winRate": 0.644,
+        "wins": 322
+      },
+      {
+        "draws": 20,
+        "first": {
+          "draws": 11,
+          "losses": 105,
+          "total": 250,
+          "winRate": 0.536,
+          "wins": 134
+        },
+        "id": "mega-altaria-ex-b1-espeon-b3a",
+        "losses": 207,
+        "name": "超級七夕青鳥ex · 太陽伊布",
+        "rank": 7,
+        "score": 0.566,
+        "second": {
+          "draws": 9,
+          "losses": 102,
+          "total": 250,
+          "winRate": 0.556,
+          "wins": 139
+        },
+        "total": 500,
+        "winRate": 0.546,
+        "wins": 273
+      },
+      {
+        "draws": 8,
+        "first": {
+          "draws": 2,
+          "losses": 136,
+          "total": 250,
+          "winRate": 0.448,
+          "wins": 112
+        },
+        "id": "magnezone-b1a-miraidon-ex-b3a",
+        "losses": 270,
+        "name": "自爆磁怪 · 密勒頓ex",
+        "rank": 8,
+        "score": 0.452,
+        "second": {
+          "draws": 6,
+          "losses": 134,
+          "total": 250,
+          "winRate": 0.44,
+          "wins": 110
+        },
+        "total": 500,
+        "winRate": 0.444,
+        "wins": 222
+      },
+      {
+        "draws": 29,
+        "first": {
+          "draws": 16,
+          "losses": 86,
+          "total": 250,
+          "winRate": 0.592,
+          "wins": 148
+        },
+        "id": "giratina-ex-c1-dragonair-b4",
+        "losses": 161,
+        "name": "騎拉帝納ex · 哈克龍",
+        "rank": 9,
+        "score": 0.649,
+        "second": {
+          "draws": 13,
+          "losses": 75,
+          "total": 250,
+          "winRate": 0.648,
+          "wins": 162
+        },
+        "total": 500,
+        "winRate": 0.62,
+        "wins": 310
+      },
+      {
+        "draws": 17,
+        "first": {
+          "draws": 9,
+          "losses": 111,
+          "total": 250,
+          "winRate": 0.52,
+          "wins": 130
+        },
+        "id": "greninja-ex-b1-mega-greninja-ex-c1",
+        "losses": 232,
+        "name": "甲賀忍蛙ex · 超級甲賀忍蛙ex",
+        "rank": 10,
+        "score": 0.519,
+        "second": {
+          "draws": 8,
+          "losses": 121,
+          "total": 250,
+          "winRate": 0.484,
+          "wins": 121
+        },
+        "total": 500,
+        "winRate": 0.502,
+        "wins": 251
+      }
+    ],
+    "draws": 230,
+    "firstSeatPerOpponent": 250,
+    "gamesPerOpponent": 500,
+    "losses": 2264,
+    "score": 0.5242,
+    "secondSeatPerOpponent": 250,
+    "total": 5000,
+    "winRate": 0.5012,
+    "wins": 2506
+  },
+  "parentTrainedGames": 92160,
+  "phaseBreakdown": {
+    "phase1CardPoolGames": 5492400,
+    "phase2CemLeagueGames": 6144000,
+    "phase3ExactDeckGymGames": 9080
+  },
+  "selection": {
+    "exactDeckGymValidation": {
+      "draws": 6,
+      "games": 240,
+      "losses": 122,
+      "score": 0.4791666666666667,
+      "wins": 112
+    },
+    "round": 48
+  },
+  "source": {
+    "asOf": "2026-11-19T07:28:52.724Z",
+    "hash": "4a9ea59f3c873b7caf103358b1af0807eaa1bccf9e3198c0b3bc3287370ec370",
+    "season": "C1",
+    "sha256": "c57085f378c0f103df3e02a650962db06dae442c6aaad853c131035d465f4c56"
+  },
+  "trainedGames": 11645480,
+  "version": "selfplay-cem-v3",
+  "weights": [
+    -1.540725,
+    -0.840933,
+    2.275161,
+    0.516226,
+    2.66576,
+    1.49103,
+    2.598589,
+    0.87904,
+    2.06679,
+    0.76325,
+    0.315584,
+    0.775773,
+    -0.272771,
+    3.165661,
+    0.369721,
+    0.698128,
+    0.293802,
+    -1.739958,
+    1.841024,
+    1.027907,
+    1.50236,
+    2.175203
+  ]
+}

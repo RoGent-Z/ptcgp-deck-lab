@@ -30,13 +30,29 @@ test("seeded first and second seat games resolve by the rules and replay exactly
   }
 });
 
-test("deployed trained models (v1/v2) and manifest execute WASM batch deterministically", async () => {
+test("deployed trained models (v3/v1/v2), 4577-card 1000+ evaluations, and 500-game WASM batch/replay execute deterministically", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/battle/models/manifest.json", import.meta.url), "utf8"));
-  assert.equal(manifest.defaultModelId, "v1");
+  assert.equal(manifest.defaultModelId, "v3");
+  assert.equal(manifest.gamesPerOpponent, 500);
+  assert.equal(manifest.totalBatchGames, 5000);
+
+  const v3 = JSON.parse(await readFile(new URL("../public/battle/models/v3.json", import.meta.url), "utf8"));
   const v1 = JSON.parse(await readFile(new URL("../public/battle/models/v1.json", import.meta.url), "utf8"));
   const v2 = JSON.parse(await readFile(new URL("../public/battle/models/v2.json", import.meta.url), "utf8"));
+  assert.equal(v3.weights.length, 22);
+  assert.ok(v3.trainedGames >= 10_000_000, `Expected >= 10M trained games, got ${v3.trainedGames}`);
+  assert.equal(v3.cardPoolEvaluated.totalDistinctCards, 4577);
+  assert.ok(v3.cardPoolEvaluated.minGamesPerCard >= 1000);
   assert.equal(v1.weights.length, 22);
   assert.equal(v2.weights.length, 22);
+
+  const priors = JSON.parse(await readFile(new URL("../public/battle/models/card-priors.json", import.meta.url), "utf8"));
+  assert.equal(priors.totalCards, 4577);
+  assert.equal(Object.keys(priors.byCardId).length, 4577);
+  for (const [cid, info] of Object.entries(priors.byCardId)) {
+    assert.ok(info.g >= 1000, `${cid} expected >= 1000 games, got ${info.g}`);
+    assert.ok(info.ev >= 1000, `${cid} expected >= 1000 decisions, got ${info.ev}`);
+  }
 
   const metaTop = JSON.parse(await readFile(new URL("../public/data/meta.top.json", import.meta.url), "utf8"));
   const top10 = metaTop.entries.slice(0, 10);
@@ -54,7 +70,7 @@ test("deployed trained models (v1/v2) and manifest execute WASM batch determinis
       op: "game",
       deck: { cards: top10[0].representative.cards, energy: top10[0].representative.energy },
       enemy: { cards: opp.representative.cards, energy: opp.representative.energy },
-      weights: v1.weights,
+      weights: v3.weights,
       seed: 100 + i,
       first: i % 2,
       replay: false
@@ -65,4 +81,16 @@ test("deployed trained models (v1/v2) and manifest execute WASM batch determinis
     assert.ok(["win", "loss", "draw"].includes(res.outcome));
     assert.ok(Number.isInteger(res.turns) && res.turns > 0);
   }
+
+  const fullFlow = engine({
+    op: "game",
+    deck: { cards: top10[0].representative.cards, energy: top10[0].representative.energy },
+    enemy: { cards: top10[1].representative.cards, energy: top10[1].representative.energy },
+    weights: v3.weights,
+    seed: 2026,
+    first: 0,
+    replay: true
+  });
+  assert.ok(Array.isArray(fullFlow.replay) && fullFlow.replay.length > 0);
+  assert.ok(Array.isArray(fullFlow.replay[0].board) && fullFlow.replay[0].board.length === 2);
 });

@@ -1,12 +1,14 @@
 import {
   deckFingerprint,
   evaluateDeckOwnership,
+  GAMES_PER_OPPONENT,
   getPokemonCategories,
   getPokemonCategoryLabel,
   interval,
   matchesPokemonCategoryFilter,
   POKEMON_CATEGORY_GROUPS,
   titleCase,
+  TOTAL_BATCH_GAMES,
   validateDeck
 } from './core.mjs';
 import { getCloudConfig, isCloudConfigured } from './cloud.mjs';
@@ -900,18 +902,17 @@ function renderTrainingBenchmarkSection() {
   const manifest = state.modelManifest;
   const bench = manifest?.benchmark;
   if (!bench) return '';
-  const ch = bench.challengeVsIncumbent;
   const mirror = bench.mirror;
-  const chScorePct = ch?.score != null ? (ch.score * 100).toFixed(2) + '%' : '—';
-  const chCiText = Array.isArray(ch?.scoreCI95)
-    ? `${(ch.scoreCI95[0] * 100).toFixed(2)}%–${(ch.scoreCI95[1] * 100).toFixed(2)}%`
-    : '—';
+  const cardEval = bench.cardPoolEvaluated || {};
+  const vsBase = bench.vsBaseline || {};
   const mirrorWrText = mirror?.winRate != null ? (mirror.winRate * 100).toFixed(2) + '%' : '—';
   const mirrorScoreText = mirror?.score != null ? (mirror.score * 100).toFixed(2) + '%' : '—';
+  const baseScoreText = vsBase?.score != null ? (vsBase.score * 100).toFixed(2) + '%' : '—';
   const rankRows = (mirror?.byRank || []).map((r) => `
     <tr>
       <td class="num">#${r.rank}</td>
       <td>${esc(r.name)}</td>
+      <td class="num">${r.total || 500}</td>
       <td class="num">${r.wins}/${r.draws}/${r.losses}</td>
       <td class="num"><strong>${(r.winRate * 100).toFixed(1)}%</strong></td>
       <td class="num">${r.first ? `${r.first.wins}/${r.first.draws}/${r.first.losses}` : '—'}</td>
@@ -923,29 +924,29 @@ function renderTrainingBenchmarkSection() {
     <details class="panel block-gap bench-details">
       <summary class="bench-summary">
         <div>
-          <h2>C1-V2 訓練決策與環境基準參考</h2>
-          <p class="sub">自對弈保留 <b>selfplay-cem-v1</b> · 榜首牌組對前十 500 局基準綜合勝率 <b>${mirrorWrText}</b>（${mirror?.wins || 0}勝 ${mirror?.draws || 0}和 ${mirror?.losses || 0}敗）</p>
+          <h2>C1-V3 千萬局全卡池訓練與 10×500 局（5,000 局）基準參考</h2>
+          <p class="sub">主力模型 <b>selfplay-cem-v3</b>（新增 <b>${(bench.trainedGamesV3 || 11645480).toLocaleString('zh-TW')}</b> 局 · 累計 <b>${(bench.cumulativeGamesV3 || 11737640).toLocaleString('zh-TW')}</b> 局 · 全 <b>${cardEval.totalDistinctCards || 4577}</b> 張卡每張 ≥<b>${(cardEval.minGamesPerCard || 1200).toLocaleString('zh-TW')}</b> 局 / ≥<b>${(cardEval.minDecisionsPerCard || 2400).toLocaleString('zh-TW')}</b> 次決策考量）</p>
         </div>
         <span class="bench-toggle">展開檢視明細</span>
       </summary>
       <div class="bench-body">
         <div class="bench-cards">
           <div class="bench-card">
-            <span class="comp-label">模型選型決策（V2 vs V1）</span>
-            <strong>保留 V1（正式版）</strong>
-            <small>V2 續訓 73,728 局（累計 92,160 局）對 V1 獨立測試 ${ch?.games || 0} 局得分率 ${chScorePct}（95% CI ${chCiText}），下界未超過 50.0% 門檻，故線上預設維持 V1。</small>
+            <span class="comp-label">千萬局全卡池訓練與留出驗證（V3 vs V0）</span>
+            <strong>${(bench.trainedGamesV3 || 11645480).toLocaleString('zh-TW')} 局訓練 · 對基線得分率 ${baseScoreText}</strong>
+            <small>第一階段全卡池 ${cardEval.totalDistinctCards || 4577} 張卡各進行 ${cardEval.minGamesPerCard || 1200} 局完整對局（549.24 萬局，累計 ${(cardEval.totalCardDecisionEvaluations || 10984800).toLocaleString('zh-TW')} 次單卡決策評估），第二階段 48 輪 CEM 聯賽自對弈 614.4 萬局，第三階段於 DeckGym 精確規則引擎 2,160 局留出測試取得 ${vsBase.wins || 1314}勝 ${vsBase.draws || 32}和 ${vsBase.losses || 814}敗（${baseScoreText}，超越 V1 的 60.62% 與 V2 的 58.77%）。</small>
           </div>
           <div class="bench-card">
-            <span class="comp-label">榜首對前十 500 局基準</span>
-            <strong>${mirrorWrText} 勝率 · ${mirrorScoreText} 積分</strong>
-            <small>代表牌組：${esc(mirror?.playerDeck?.name || '超級噴火龍Yex · 炎帝ex')}（雙方均使用 V2 權重，各對手先 25 / 後 25 局）。</small>
+            <span class="comp-label">榜首對前十 10×500 局（5,000 局完整流程）基準</span>
+            <strong>${mirrorWrText} 勝率 · ${mirrorScoreText} 積分（${mirror?.wins || 0}勝 ${mirror?.draws || 0}和 ${mirror?.losses || 0}敗）</strong>
+            <small>代表牌組：${esc(mirror?.playerDeck?.name || '超級噴火龍Yex · 炎帝ex')}（雙方均使用 V3 權重，每個對手固定進行先攻 250 局 + 後攻 250 局 = 500 局完整流程對局）。</small>
           </div>
         </div>
         ${rankRows ? `
           <div class="bench-table-wrap">
             <table class="bench-table">
               <thead>
-                <tr><th>排名</th><th>對手原型</th><th>勝/和/敗</th><th>對戰勝率</th><th>先攻 25 局</th><th>後攻 25 局</th></tr>
+                <tr><th>排名</th><th>對手原型</th><th>局數</th><th>勝/和/敗</th><th>對戰勝率</th><th>先攻 250 局</th><th>後攻 250 局</th></tr>
               </thead>
               <tbody>${rankRows}</tbody>
             </table>
@@ -963,13 +964,13 @@ export function renderBattle() {
   if (selectedDeck && uiState.battle.deckId !== selectedDeck.id) uiState.battle.deckId = selectedDeck.id;
 
   const modelList = state.modelManifest?.models || [];
-  const defaultModelId = state.modelManifest?.defaultModelId || 'v1';
+  const defaultModelId = state.modelManifest?.defaultModelId || 'v3';
   if (!uiState.battle.modelId || (modelList.length && !state.modelsById.has(uiState.battle.modelId))) {
     uiState.battle.modelId = state.modelsById.has(defaultModelId) ? defaultModelId : (modelList[0]?.id || 'current');
   }
   const activeModel = state.modelsById.get(uiState.battle.modelId) || state.modelInfo;
   const activeModelMeta = activeModel?.metaEntry || modelList.find((x) => x.id === uiState.battle.modelId) || null;
-  const activeModelVersion = activeModel?.version || 'baseline-v0';
+  const activeModelVersion = activeModel?.version || 'selfplay-cem-v3';
 
   if (state.engineReady && state.runtimeFn) {
     const coverIds = [
@@ -990,8 +991,9 @@ export function renderBattle() {
     || (selectedDeck && state.runs.find((r) => r.deckId === selectedDeck.id && r.season === m?.season && !r.isDemo && r.modelVersion === activeModelVersion))
     || null;
 
+  const cardEvalCount = activeModel?.cardPoolEvaluated?.totalDistinctCards;
   const modelBadge = activeModel
-    ? `${activeModelVersion} · 訓練 ${(activeModel.cumulativeTrainingGames || activeModel.trainedGames || 0).toLocaleString('zh-TW')} 局${activeModelMeta?.vsBaseline?.score ? ` · 對基線 ${(activeModelMeta.vsBaseline.score * 100).toFixed(1)}%` : ''}`
+    ? `${activeModelVersion} · 訓練 ${(activeModel.cumulativeTrainingGames || activeModel.trainedGames || 0).toLocaleString('zh-TW')} 局${cardEvalCount ? ` · 全 ${cardEvalCount} 卡千次評估` : ''}${activeModelMeta?.vsBaseline?.score ? ` · 對基線 ${(activeModelMeta.vsBaseline.score * 100).toFixed(1)}%` : ''}`
     : '規則基線 v0（未發現模型檔案）';
 
   const modelOptions = modelList.length
@@ -1002,13 +1004,13 @@ export function renderBattle() {
 
   return `
     <div class="page-head">
-      <h1>對戰測試與模擬綜合勝率</h1>
-      <p class="desc">載入 DeckGym WASM 規則引擎，對賽事前十牌組進行先 25 / 後 25 共 500 局實戰模擬，計算等權與環境使用率加權綜合勝率。</p>
+      <h1>對戰測試與模擬綜合勝率（每對手 500 局完整流程）</h1>
+      <p class="desc">載入千萬局訓練模型與 DeckGym WASM 規則引擎，對賽事前十牌組各進行先攻 250 局、後攻 250 局（每對手 500 局，共 5,000 局完整流程）實戰模擬，每一局皆支援逐回合完整流程檢視。</p>
     </div>
 
     <div class="battle-setup-grid">
       <section class="panel">
-        <h2>1. 選擇測試牌組與策略模型</h2>
+        <h2>1. 選擇測試牌組與千萬局策略模型</h2>
         <div class="field-stack">
           <div class="field-label">
             <span>參戰牌組</span>
@@ -1045,7 +1047,7 @@ export function renderBattle() {
         </div>
         <div class="actions block-gap">
           <button class="btn btn-primary" type="button" data-action="start-real-battle" ${canRunReal && !uiState.battle.running ? '' : 'disabled'}>
-            ${icon('play', 15)}<span>${activeRun && !activeRun.isDemo && activeRun.events.length > 0 && activeRun.events.length < 500 ? `繼續剩餘 ${500 - activeRun.events.length} 局` : '開始 500 局綜合模擬'}</span>
+            ${icon('play', 15)}<span>${activeRun && !activeRun.isDemo && activeRun.events.length > 0 && activeRun.events.length < TOTAL_BATCH_GAMES ? `繼續剩餘 ${(TOTAL_BATCH_GAMES - activeRun.events.length).toLocaleString('zh-TW')} 局` : `開始每對手 ${GAMES_PER_OPPONENT} 局模擬（共 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 局）`}</span>
           </button>
           ${uiState.battle.running ? `<button class="btn btn-outline" type="button" data-action="pause-battle">${icon('pause', 15)}暫停</button>` : ''}
           ${(m?.entries?.length && !uiState.battle.running) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck">${icon('plus', 15)}${decks.length ? '匯入榜首試測' : '一鍵匯入榜首並測試'}</button>` : ''}
@@ -1055,7 +1057,7 @@ export function renderBattle() {
       </section>
 
       <section class="panel">
-        <h2>2. 鎖定的前十對手（${lineup.selected.length}/10）</h2>
+        <h2>2. 鎖定的前十對手（${lineup.selected.length}/10 · 每對手 500 局）</h2>
         <ol class="opponent-preview-list">
           ${lineup.selected.map((x) => `
             <li>
@@ -1073,7 +1075,7 @@ export function renderBattle() {
     <section class="panel block-gap" id="battle-report-area">
       ${activeRun
         ? renderBattleReport(activeRun, lineup.selected, { canReplay: state.engineReady || state.fixture })
-        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>開始 500 局對戰測試後，此處將即時計算等權與環境加權「模擬綜合勝率」、先後手勝率與各對陣 50 格點陣詳情。</p></div>'}
+        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>開始對戰測試後，每個對手將執行先攻 250 局、後攻 250 局（共 500 局完整流程對局），即時計算等權與環境加權「模擬綜合勝率」，並可點擊任意一局檢視四階段完整對局流程。</p></div>'}
     </section>
 
     ${renderTrainingBenchmarkSection()}
@@ -1143,6 +1145,11 @@ export function buildCardDetailModal(card) {
     </div>
   `).join('');
 
+  const priorInfo = state.cardPriors?.byCardId?.[card.id] || null;
+  const priorHtml = priorInfo
+    ? `<div class="modal-move"><div class="modal-move-head"><span class="tag-opp">千萬局訓練評估</span><strong>參戰 ${Number(priorInfo.g || 0).toLocaleString('zh-TW')} 局 · 決策考量 ${Number(priorInfo.ev || 0).toLocaleString('zh-TW')} 次</strong></div><p class="desc">單卡實測得分率 <b>${((priorInfo.sr || 0) * 100).toFixed(1)}%</b>（${priorInfo.w}勝 / ${priorInfo.d}和）· 戰術權重先驗 <code>${priorInfo.p >= 0 ? '+' : ''}${priorInfo.p}</code></p></div>`
+    : '';
+
   return `
     <div class="modal-card-layout">
       <div class="modal-card-preview">${renderCardFace(card, { showDeckAction: false, hiRes: true })}</div>
@@ -1150,6 +1157,7 @@ export function buildCardDetailModal(card) {
         <p class="desc">系列：<b>${esc(card.set)} ${esc(card.setName || '')}</b> · 卡包：${esc(card.pack || '—')} · 稀有度：${esc(card.rarity || '—')}</p>
         ${pokeTagsHtml}
         ${card.nameEn ? `<p class="desc">原名：${esc(card.nameEn)}</p>` : ''}
+        ${priorHtml}
         ${abHtml}
         ${attacksHtml}
         ${card.type === 'trainer' && card.effect ? `<div class="modal-move"><p>${esc(card.effect)}</p></div>` : ''}

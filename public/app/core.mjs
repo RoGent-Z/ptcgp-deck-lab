@@ -55,34 +55,40 @@ export function validateDeck(deck, byId) {
 export function normalizeSearch(text, map={}) {
   return Array.from(String(text||'').normalize('NFKC').toLowerCase()).map(ch=>map[ch]||ch).join('').replace(/[\s·•・－-]/g,'');
 }
-export function validOutcomes(events,ids){
-  const allowed=new Set(ids), repeated=new Set(), valid=[];
-  for(const event of events){
-    const key=event.opponentId+'#'+event.index;
-    if(!allowed.has(event.opponentId)||!Number.isInteger(event.index)||event.index<0||event.index>=50||!['win','loss','draw'].includes(event.outcome)||repeated.has(key)) continue;
-    repeated.add(key); valid.push(event);
+export const GAMES_PER_OPPONENT = 500;
+export const FIRST_SEAT_GAMES = 250;
+export const TOTAL_BATCH_GAMES = 5000;
+
+export function validOutcomes(events, ids, gamesPerOpponent = GAMES_PER_OPPONENT) {
+  const allowed = new Set(ids), repeated = new Set(), valid = [];
+  for (const event of events) {
+    const key = event.opponentId + '#' + event.index;
+    if (!allowed.has(event.opponentId) || !Number.isInteger(event.index) || event.index < 0 || event.index >= gamesPerOpponent || !['win', 'loss', 'draw'].includes(event.outcome) || repeated.has(key)) continue;
+    repeated.add(key);
+    valid.push(event);
   }
   return valid;
 }
-export const resultsFor=(events,id)=>events.filter(e=>e.opponentId===id);
-export function aggregate(events){
-  const tally={wins:0,draws:0,losses:0,total:events.length};
-  for(const e of events)tally[{win:'wins',draw:'draws',loss:'losses'}[e.outcome]]++;
+export const resultsFor = (events, id) => events.filter(e => e.opponentId === id);
+export function aggregate(events) {
+  const tally = { wins: 0, draws: 0, losses: 0, total: events.length };
+  for (const e of events) tally[{ win: 'wins', draw: 'draws', loss: 'losses' }[e.outcome]]++;
   return tally;
 }
-export function summarizeBatch(events,ids){
-  const clean=validOutcomes(events,ids);
-  return {...aggregate(clean),complete:ids.length===10 && clean.length===500};
+export function summarizeBatch(events, ids, gamesPerOpponent = GAMES_PER_OPPONENT) {
+  const clean = validOutcomes(events, ids, gamesPerOpponent);
+  return { ...aggregate(clean), complete: ids.length === 10 && clean.length === 10 * gamesPerOpponent };
 }
 export function isEngineImplementedStatus(status) {
   return status === 'Fully implemented' || status === 'Implemented' || status === 'Complete' || status === 'ok';
 }
-export function computeCompositeWinRate(events, lineup = []) {
+export function computeCompositeWinRate(events, lineup = [], gamesPerOpponent = GAMES_PER_OPPONENT) {
   const oppIds = lineup.map((x) => x.entry?.id || x.id).filter(Boolean);
-  const clean = validOutcomes(events || [], oppIds);
+  const clean = validOutcomes(events || [], oppIds, gamesPerOpponent);
   const overall = aggregate(clean);
-  const firstEvents = clean.filter((e) => e.index < 25);
-  const secondEvents = clean.filter((e) => e.index >= 25);
+  const half = Math.floor(gamesPerOpponent / 2);
+  const firstEvents = clean.filter((e) => (e.first != null ? e.first === 0 : e.index < half));
+  const secondEvents = clean.filter((e) => (e.first != null ? e.first === 1 : e.index >= half));
   const firstTally = aggregate(firstEvents);
   const secondTally = aggregate(secondEvents);
 
@@ -131,7 +137,9 @@ export function computeCompositeWinRate(events, lineup = []) {
 
   return {
     ...overall,
-    complete: oppIds.length === 10 && clean.length === 500,
+    gamesPerOpponent,
+    totalTargetGames: oppIds.length * gamesPerOpponent,
+    complete: oppIds.length === 10 && clean.length === 10 * gamesPerOpponent,
     equalWinRate: overall.total ? overall.wins / overall.total : null,
     equalScoreRate: overall.total ? (overall.wins + 0.5 * overall.draws) / overall.total : null,
     equalCI95: interval(overall.wins, overall.total),
