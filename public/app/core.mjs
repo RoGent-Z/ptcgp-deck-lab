@@ -55,12 +55,14 @@ export function validateDeck(deck, byId) {
 export function normalizeSearch(text, map={}) {
   return Array.from(String(text||'').normalize('NFKC').toLowerCase()).map(ch=>map[ch]||ch).join('').replace(/[\s·•・－-]/g,'');
 }
-export const EXPLORE_TOTAL_GAMES = 1000;
-export const EXPLORE_GAMES_PER_OPPONENT = 100;
-export const GAMES_PER_OPPONENT = 50;
-export const FIRST_SEAT_GAMES = 25;
-export const TOTAL_BATCH_GAMES = 500;
-export const DEEP_GAMES_PER_OPPONENT = 500;
+export const EXPLORE_TOTAL_GAMES = 100000;
+export const EXPLORE_GAMES_PER_OPPONENT = 10000;
+export const EXPLORE_CANDIDATE_COUNT = 20;
+export const GAMES_PER_OPPONENT = 500;
+export const FIRST_SEAT_GAMES = 250;
+export const TOTAL_BATCH_GAMES = 5000;
+export const DEEP_EXPLORE_GAMES = 100000;
+export const DEEP_GAMES_PER_OPPONENT = 5000;
 
 export const FEATURE_NAMES_22 = [
   'endTurn', 'noop', 'place', 'activePower', 'evolve', 'evolutionPower',
@@ -301,6 +303,233 @@ export function synthesizeWinningStrategy(exploreEvents = [], baseWeights = [], 
     baseExploreWinRate,
     bestCandidateWinRate: rankedCands[0]?.winRate ?? 0,
     exploreScoreRate: total ? (winGames.length + 0.5 * drawGames.length) / total : 0,
+    weights: overallWeights,
+    byOpponent,
+    topAdjustments: adjustments.slice(0, 6),
+    allAdjustments: adjustments
+  };
+}
+
+// 100,000 局探索充分統計量（可跨多執行緒 Worker 分塊累加，記憶體與 IndexedDB 僅佔 ~20KB）
+export function createEmptyExploreStats(opponentIds = [], candidateCount = EXPLORE_CANDIDATE_COUNT) {
+  return {
+    completed: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    turnsSum: 0,
+    completedChunks: [],
+    byCandidate: Array.from({ length: candidateCount }, () => ({
+      games: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      winFeatSum: Array(22).fill(0),
+      winFeatCount: 0,
+      lossFeatSum: Array(22).fill(0),
+      lossFeatCount: 0
+    })),
+    byOpponent: opponentIds.map((id) => ({
+      id,
+      games: 0,
+      wins: 0,
+      draws: 0,
+      losses: 0,
+      byCandidate: Array.from({ length: candidateCount }, () => ({
+        games: 0,
+        wins: 0,
+        draws: 0,
+        losses: 0
+      })),
+      winFeatSum: Array(22).fill(0),
+      winFeatCount: 0,
+      lossFeatSum: Array(22).fill(0),
+      lossFeatCount: 0
+    }))
+  };
+}
+
+export function mergeExploreChunkStats(acc, chunk) {
+  if (!acc || !chunk) return acc;
+  acc.completed += chunk.completed || 0;
+  acc.wins += chunk.wins || 0;
+  acc.draws += chunk.draws || 0;
+  acc.losses += chunk.losses || 0;
+  acc.turnsSum += chunk.turnsSum || 0;
+  if (Number.isInteger(chunk.startGame) && !acc.completedChunks.includes(chunk.startGame)) {
+    acc.completedChunks.push(chunk.startGame);
+  }
+  const cList = chunk.byCandidate || [];
+  for (let c = 0; c < Math.min(acc.byCandidate.length, cList.length); c++) {
+    const dst = acc.byCandidate[c];
+    const src = cList[c];
+    dst.games += src.games || 0;
+    dst.wins += src.wins || 0;
+    dst.draws += src.draws || 0;
+    dst.losses += src.losses || 0;
+    dst.winFeatCount += src.winFeatCount || 0;
+    dst.lossFeatCount += src.lossFeatCount || 0;
+    for (let k = 0; k < 22; k++) {
+      dst.winFeatSum[k] += src.winFeatSum?.[k] || 0;
+      dst.lossFeatSum[k] += src.lossFeatSum?.[k] || 0;
+    }
+  }
+  const oppById = new Map(acc.byOpponent.map((o) => [o.id, o]));
+  for (const srcOpp of chunk.byOpponent || []) {
+    const dstOpp = oppById.get(srcOpp.id);
+    if (!dstOpp) continue;
+    dstOpp.games += srcOpp.games || 0;
+    dstOpp.wins += srcOpp.wins || 0;
+    dstOpp.draws += srcOpp.draws || 0;
+    dstOpp.losses += srcOpp.losses || 0;
+    dstOpp.winFeatCount += srcOpp.winFeatCount || 0;
+    dstOpp.lossFeatCount += srcOpp.lossFeatCount || 0;
+    for (let k = 0; k < 22; k++) {
+      dstOpp.winFeatSum[k] += srcOpp.winFeatSum?.[k] || 0;
+      dstOpp.lossFeatSum[k] += srcOpp.lossFeatSum?.[k] || 0;
+    }
+    const sc = srcOpp.byCandidate || [];
+    for (let c = 0; c < Math.min(dstOpp.byCandidate.length, sc.length); c++) {
+      dstOpp.byCandidate[c].games += sc[c].games || 0;
+      dstOpp.byCandidate[c].wins += sc[c].wins || 0;
+      dstOpp.byCandidate[c].draws += sc[c].draws || 0;
+      dstOpp.byCandidate[c].losses += sc[c].losses || 0;
+    }
+  }
+  return acc;
+}
+
+// 從 100,000 局充分統計量中提取「勝利對局」綜合歸納出 22 維獲勝策略（全局 + 單對手專屬）
+export function synthesizeWinningStrategyFromStats(stats, baseWeights = [], candidates = []) {
+  const base = Array.isArray(baseWeights) && baseWeights.length === 22
+    ? baseWeights.map(Number)
+    : Array(22).fill(0);
+  const total = stats?.completed || 0;
+  const totalWins = stats?.wins || 0;
+  const totalDraws = stats?.draws || 0;
+  const totalLosses = stats?.losses || 0;
+  const candStats = (stats?.byCandidate || []).map((s, cid) => ({
+    cid,
+    games: s.games || 0,
+    wins: s.wins || 0,
+    draws: s.draws || 0,
+    losses: s.losses || 0,
+    winRate: s.games ? s.wins / s.games : 0,
+    scoreRate: s.games ? (s.wins + 0.5 * s.draws) / s.games : 0,
+    winFeatSum: s.winFeatSum || Array(22).fill(0),
+    winFeatCount: s.winFeatCount || 0,
+    lossFeatSum: s.lossFeatSum || Array(22).fill(0),
+    lossFeatCount: s.lossFeatCount || 0
+  }));
+  const activeCands = candStats.filter((s) => s.games > 0);
+  const rankedCands = [...activeCands].sort((a, b) => b.scoreRate - a.scoreRate || b.winRate - a.winRate);
+  const eliteCount = Math.min(3, Math.max(1, rankedCands.length));
+  const globalElites = rankedCands.slice(0, eliteCount);
+  const maxGlobalScore = rankedCands[0]?.scoreRate ?? 0.5;
+  const baseCandStat = candStats[0];
+  const baseExploreWinRate = baseCandStat && baseCandStat.games > 0
+    ? baseCandStat.wins / baseCandStat.games
+    : (total ? totalWins / total : 0);
+
+  // 全局勝局綜合權重（取 Top-3 高勝率精英候選之勝利對局加權 + 勝/敗實測決策特徵對比）
+  const computeWeights = (candRows, featWinSum, featWinCnt, featLossSum, featLossCnt) => {
+    const valid = candRows.filter((r) => r.games > 0);
+    if (!valid.length) return [...base];
+    const sorted = [...valid].sort((a, b) => b.scoreRate - a.scoreRate || b.winRate - a.winRate);
+    const elites = sorted.slice(0, Math.min(3, sorted.length));
+    const maxSr = sorted[0]?.scoreRate ?? 0.5;
+    const chosen = elites.some((e) => e.wins > 0) ? elites : sorted;
+
+    const accumW = Array(22).fill(0);
+    let wSum = 0;
+    for (const c of chosen) {
+      if (c.wins <= 0) continue;
+      const cw = candidates[c.cid] || base;
+      // 每個勝利對局依所屬候選的精英勝率權重貢獻
+      const imp = c.wins * Math.exp(22 * (c.scoreRate - maxSr));
+      for (let k = 0; k < 22; k++) accumW[k] += (cw[k] ?? base[k]) * imp;
+      wSum += imp;
+    }
+    return base.map((bVal, k) => {
+      const meanWinW = wSum > 0 ? accumW[k] / wSum : bVal;
+      const wAdv = featWinCnt > 0 ? featWinSum[k] / featWinCnt : 0;
+      const lAdv = featLossCnt > 0 ? featLossSum[k] / featLossCnt : 0;
+      const contrast = (wAdv - lAdv) * 0.28;
+      return roundW(meanWinW + contrast);
+    });
+  };
+
+  const gWinFeat = Array(22).fill(0);
+  let gWinCnt = 0;
+  const gLossFeat = Array(22).fill(0);
+  let gLossCnt = 0;
+  let eliteWinCount = 0;
+  for (const e of globalElites) {
+    eliteWinCount += e.wins;
+    gWinCnt += e.winFeatCount;
+    for (let k = 0; k < 22; k++) gWinFeat[k] += e.winFeatSum[k];
+  }
+  for (const s of activeCands) {
+    gLossCnt += s.lossFeatCount;
+    for (let k = 0; k < 22; k++) gLossFeat[k] += s.lossFeatSum[k];
+  }
+  if (eliteWinCount === 0) eliteWinCount = totalWins;
+
+  const overallWeights = computeWeights(activeCands, gWinFeat, gWinCnt, gLossFeat, gLossCnt);
+
+  const byOpponent = {};
+  for (const opp of stats?.byOpponent || []) {
+    const oppCands = (opp.byCandidate || []).map((s, cid) => ({
+      cid,
+      games: s.games || 0,
+      wins: s.wins || 0,
+      draws: s.draws || 0,
+      losses: s.losses || 0,
+      winRate: s.games ? s.wins / s.games : 0,
+      scoreRate: s.games ? (s.wins + 0.5 * s.draws) / s.games : 0
+    }));
+    const oppSpecific = computeWeights(
+      oppCands,
+      opp.winFeatSum || Array(22).fill(0),
+      opp.winFeatCount || 0,
+      opp.lossFeatSum || Array(22).fill(0),
+      opp.lossFeatCount || 0
+    );
+    // 單對手探索達 10,000 局（每候選 500 局），對位信號極穩定，以 65% 對位專屬 + 35% 全局穩健融合
+    const blended = oppSpecific.map((v, k) => roundW(0.65 * v + 0.35 * overallWeights[k]));
+    byOpponent[opp.id] = {
+      games: opp.games || 0,
+      wins: opp.wins || 0,
+      draws: opp.draws || 0,
+      losses: opp.losses || 0,
+      winRate: opp.games ? opp.wins / opp.games : 0,
+      weights: blended
+    };
+  }
+
+  const adjustments = FEATURE_NAMES_22.map((name, idx) => {
+    const b = base[idx] || 0;
+    const s = overallWeights[idx] || 0;
+    return {
+      index: idx,
+      name,
+      labelZh: FEATURE_LABELS_ZH[name] || name,
+      base: b,
+      synthesized: s,
+      delta: roundW(s - b)
+    };
+  }).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  return {
+    exploreTotal: total,
+    exploreWins: totalWins,
+    exploreDraws: totalDraws,
+    exploreLosses: totalLosses,
+    eliteWinsSelected: eliteWinCount,
+    exploreWinRate: total ? totalWins / total : 0,
+    baseExploreWinRate,
+    bestCandidateWinRate: rankedCands[0]?.winRate ?? 0,
+    exploreScoreRate: total ? (totalWins + 0.5 * totalDraws) / total : 0,
     weights: overallWeights,
     byOpponent,
     topAdjustments: adjustments.slice(0, 6),

@@ -1,4 +1,5 @@
 import {
+  DEEP_EXPLORE_GAMES,
   DEEP_GAMES_PER_OPPONENT,
   EXPLORE_TOTAL_GAMES,
   GAMES_PER_OPPONENT,
@@ -45,11 +46,12 @@ import {
   ensureCardCoverage,
   executeBattleBatch,
   executeFixturePreviewBatch,
-  executeSingleOpponent1000And500,
+  executeSingleOpponentDeep,
   fnv1a32,
   probeEngine,
   renderBattleReport,
   renderSingleOpponentDeepModal,
+  renderSingleOpponentDeepProgress,
   resolveOpponentLineup
 } from './battle.mjs';
 import {
@@ -814,7 +816,8 @@ async function handleAction(el) {
     const targetVersion = isDemo ? '展示樣板' : model.version;
 
     const isIncomplete = (r) =>
-      (r.exploreEvents?.length || 0) < EXPLORE_TOTAL_GAMES || (r.events?.length || 0) < TOTAL_BATCH_GAMES;
+      (r.exploreStats?.completed ?? r.winningStrategy?.exploreTotal ?? 0) < EXPLORE_TOTAL_GAMES
+      || (r.events?.length || 0) < TOTAL_BATCH_GAMES;
 
     let run = state.runs.find((r) => r.runId === uiState.battle.activeRunId && r.deckId === deck.id && (r.isDemo || r.modelVersion === targetVersion))
       || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.modelVersion === targetVersion && isIncomplete(r));
@@ -827,7 +830,7 @@ async function handleAction(el) {
         season: state.meta?.season || 'C1',
         modelVersion: targetVersion,
         isDemo,
-        exploreEvents: [],
+        exploreStats: null,
         winningStrategy: null,
         events: [],
         createdAt: new Date().toISOString()
@@ -877,26 +880,55 @@ async function handleAction(el) {
     if (!opp || !deck) { showNotice('找不到參戰牌組或目標對手'); return; }
     if (!state.engineReady) { showNotice('對戰模擬引擎尚未就緒'); return; }
     const model = getSelectedBattleModel();
-    showNotice(`正在對「${opp.name}」執行 1,000 次探索提煉獲勝策略 + ${DEEP_GAMES_PER_OPPONENT} 次正式測試…`);
-    await new Promise((r) => setTimeout(r, 20));
+    uiState.battle.deepAbortCtrl?.abort();
+    const ctrl = new AbortController();
+    uiState.battle.deepAbortCtrl = ctrl;
+
+    openModal(
+      `單組深度測試（${DEEP_EXPLORE_GAMES.toLocaleString('zh-TW')} 探索 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${opp.name}`,
+      renderSingleOpponentDeepProgress({ opp, phase: 'explore', done: 0, total: DEEP_EXPLORE_GAMES, wins: 0, gamesPerSec: 0, workers: Math.min(16, navigator.hardwareConcurrency || 4) }),
+      { wide: true }
+    );
+
     try {
-      const deepRes = executeSingleOpponent1000And500({ opp, deck, baseWeights: model.weights });
+      const deepRes = await executeSingleOpponentDeep({
+        opp,
+        deck,
+        baseWeights: model.weights,
+        signal: ctrl.signal,
+        onProgress: (info) => {
+          if (dialogEl.open && !ctrl.signal.aborted) {
+            dialogBodyEl.innerHTML = renderSingleOpponentDeepProgress({ opp, ...info });
+          }
+        }
+      });
+      if (!deepRes || ctrl.signal.aborted) {
+        showNotice('已中止單組深度測試');
+        return;
+      }
       uiState.battle.lastSingleDeep = deepRes;
       const html = renderSingleOpponentDeepModal(deepRes, 0);
-      openModal(`單組兩階段深度測試（1,000 探索 → ${DEEP_GAMES_PER_OPPONENT} 測試）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT} 局）`, html, { wide: true });
-      showNotice(`已完成對「${opp.name}」的 1,000 探索 + ${DEEP_GAMES_PER_OPPONENT} 測試`);
+      openModal(`單組深度測試（100,000 探索 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+      showNotice(`已完成對「${opp.name}」的 100,000 探索 + ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試`);
     } catch (err) {
       showNotice(err?.message || '單組深度測試失敗');
     }
     return;
   }
 
+  if (action === 'cancel-single-deep') {
+    uiState.battle.deepAbortCtrl?.abort();
+    dialogEl.close();
+    showNotice('已中止單組深度測試');
+    return;
+  }
+
   if (action === 'replay-single-deep') {
     const deepRes = uiState.battle.lastSingleDeep;
-    if (!deepRes) { showNotice('請先執行該對手的 1,000 探索 + 500 測試'); return; }
+    if (!deepRes) { showNotice('請先執行該對手的 100,000 探索 + 5,000 測試'); return; }
     const idx = Number(el.dataset.idx) || 0;
     const html = renderSingleOpponentDeepModal(deepRes, idx);
-    openModal(`單組兩階段深度測試（1,000 探索 → ${DEEP_GAMES_PER_OPPONENT} 測試）· 對陣 ${deepRes.opp.name}（第 ${idx + 1} / ${DEEP_GAMES_PER_OPPONENT} 局）`, html, { wide: true });
+    openModal(`單組深度測試（100,000 探索 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
     return;
   }
 
@@ -921,7 +953,7 @@ async function handleAction(el) {
         season: state.meta?.season || 'C1',
         modelVersion: model.version,
         isDemo: false,
-        exploreEvents: [],
+        exploreStats: null,
         winningStrategy: null,
         events: [],
         createdAt: new Date().toISOString()
@@ -1139,6 +1171,7 @@ importInputEl.addEventListener('change', async () => {
 document.getElementById('dialog-close')?.addEventListener('click', () => dialogEl.close());
 dialogEl?.addEventListener('click', (e) => { if (e.target === dialogEl) dialogEl.close(); });
 dialogEl?.addEventListener('close', () => {
+  uiState.battle.deepAbortCtrl?.abort();
   dialogEl.classList.remove('is-wide');
   dialogBodyEl.innerHTML = '';
 });

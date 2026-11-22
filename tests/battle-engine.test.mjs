@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { instantiateBattle } from "../public/battle/runtime.mjs";
-import { buildExplorationCandidates, synthesizeWinningStrategy } from "../public/app/core.mjs";
+import {
+  buildExplorationCandidates,
+  createEmptyExploreStats,
+  mergeExploreChunkStats,
+  synthesizeWinningStrategyFromStats
+} from "../public/app/core.mjs";
 
 const wasm = new URL("../public/battle/deckgym.wasm", import.meta.url);
 const weights = Array(22).fill(0);
@@ -31,13 +36,14 @@ test("seeded first and second seat games resolve by the rules and replay exactly
   }
 });
 
-test("deployed trained models (v3/v1/v2), 4577-card 1000+ evaluations, and two-stage 1000-explore + 500-test WASM pipeline execute deterministically", async () => {
+test("deployed trained models (v3/v1/v2), 4577-card 1000+ evaluations, and two-stage 100k-explore + 5k-test WASM pipeline execute deterministically", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/battle/models/manifest.json", import.meta.url), "utf8"));
   assert.equal(manifest.defaultModelId, "v3");
-  assert.equal(manifest.exploreTotalGames, 1000);
-  assert.equal(manifest.gamesPerOpponent, 50);
-  assert.equal(manifest.totalBatchGames, 500);
-  assert.equal(manifest.deepTestGamesPerOpponent, 500);
+  assert.equal(manifest.exploreTotalGames, 100000);
+  assert.equal(manifest.gamesPerOpponent, 500);
+  assert.equal(manifest.totalBatchGames, 5000);
+  assert.equal(manifest.deepExploreGames, 100000);
+  assert.equal(manifest.deepTestGamesPerOpponent, 5000);
 
   const v3 = JSON.parse(await readFile(new URL("../public/battle/models/v3.json", import.meta.url), "utf8"));
   const v1 = JSON.parse(await readFile(new URL("../public/battle/models/v1.json", import.meta.url), "utf8"));
@@ -97,46 +103,62 @@ test("deployed trained models (v3/v1/v2), 4577-card 1000+ evaluations, and two-s
   assert.ok(Array.isArray(fullFlow.replay) && fullFlow.replay.length > 0);
   assert.ok(Array.isArray(fullFlow.replay[0].board) && fullFlow.replay[0].board.length === 2);
 
-  // Verify Stage 1 track_features -> winning strategy synthesis -> Stage 2 test
-  const cands = buildExplorationCandidates(v3.weights, "engine-test", 10);
-  const expBatch = engine({
-    op: "batch",
-    games: Array.from({ length: 10 }, (_, i) => ({
-      op: "game",
-      deck: { cards: top10[0].representative.cards, energy: top10[0].representative.energy },
-      enemy: { cards: top10[1].representative.cards, energy: top10[1].representative.energy },
-      weights: cands[i],
-      enemy_weights: v3.weights,
-      seed: 900 + i,
-      first: i % 2,
-      track_features: true
-    }))
+  // Verify Stage 1 explore_chunk -> winning strategy synthesis -> Stage 2 test_chunk & exact replay seed parity
+  const cands = buildExplorationCandidates(v3.weights, "engine-test-100k", 20);
+  const expChunk = engine({
+    op: "explore_chunk",
+    deck: { cards: top10[0].representative.cards, energy: top10[0].representative.energy },
+    enemies: [
+      { id: top10[1].id, cards: top10[1].representative.cards, energy: top10[1].representative.energy }
+    ],
+    candidates: cands,
+    enemy_weights: v3.weights,
+    seed_prefix: "ut-exp",
+    games_per_opponent: 10000,
+    start_game: 0,
+    count: 40
   });
-  assert.equal(expBatch.results.length, 10);
-  for (const r of expBatch.results) {
-    assert.ok(Array.isArray(r.featureAdvantage) && r.featureAdvantage.length === 22);
-  }
-  const exploreEvents = expBatch.results.map((r, i) => ({
-    opponentId: top10[1].id,
-    index: i,
-    first: i % 2,
-    candidateIdx: i,
-    outcome: r.outcome,
-    turns: r.turns,
-    featureAdvantage: r.featureAdvantage
-  }));
-  const strategy = synthesizeWinningStrategy(exploreEvents, v3.weights, cands);
+  assert.equal(expChunk.completed, 40);
+  assert.equal(expChunk.wins + expChunk.draws + expChunk.losses, 40);
+  assert.equal(expChunk.byCandidate.length, 20);
+
+  const acc = createEmptyExploreStats([top10[1].id], 20);
+  mergeExploreChunkStats(acc, expChunk);
+  const strategy = synthesizeWinningStrategyFromStats(acc, v3.weights, cands);
   assert.equal(strategy.weights.length, 22);
-  const stage2Game = engine({
+
+  const testChunk = engine({
+    op: "test_chunk",
+    deck: { cards: top10[0].representative.cards, energy: top10[0].representative.energy },
+    enemy: { cards: top10[1].representative.cards, energy: top10[1].representative.energy },
+    opponent_id: top10[1].id,
+    weights: strategy.weights,
+    enemy_weights: v3.weights,
+    seed_prefix: "ut-test",
+    start_idx: 0,
+    count: 10,
+    total_per_opp: 500
+  });
+  assert.equal(testChunk.outcomes.length, 10);
+  assert.equal(testChunk.turns.length, 10);
+
+  // Confirm seed parity between test_chunk game #0 and replay:true game #0
+  const fnv1a32 = (s) => {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+    return h >>> 0;
+  };
+  const replay0 = engine({
     op: "game",
     deck: { cards: top10[0].representative.cards, energy: top10[0].representative.energy },
     enemy: { cards: top10[1].representative.cards, energy: top10[1].representative.energy },
     weights: strategy.weights,
     enemy_weights: v3.weights,
-    seed: 9999,
+    seed: fnv1a32(`ut-test:${top10[1].id}:0`),
     first: 0,
     replay: true
   });
-  assert.ok(["win", "loss", "draw"].includes(stage2Game.outcome));
-  assert.ok(Array.isArray(stage2Game.replay) && stage2Game.replay.length > 0);
+  const expectedChar = replay0.outcome === "win" ? "W" : replay0.outcome === "loss" ? "L" : "D";
+  assert.equal(testChunk.outcomes[0], expectedChar);
+  assert.ok(Array.isArray(replay0.replay) && replay0.replay.length > 0);
 });

@@ -1891,6 +1891,36 @@ button.dot-cell:hover { transform: scale(1.6); outline: 1.5px solid var(--line-s
   border-color: var(--line-strong);
   color: var(--text);
 }
+.strategy-head-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.strategy-perf-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: var(--r-ctrl);
+  font-family: var(--font-num);
+  font-size: 0.76rem;
+  font-weight: 700;
+  border: 1px solid var(--line-strong);
+  background: var(--grey-0);
+  color: var(--text);
+  max-width: 100%;
+}
+.deep-page-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.deep-page-tabs .mini.is-active {
+  background: var(--swiss-red);
+  border-color: var(--swiss-red);
+  color: #fff;
+}
 .progress-track.is-slim { height: 6px; }
 .strategy-weights-details {
   border-top: 1px dashed var(--line);
