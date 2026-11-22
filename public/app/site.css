@@ -304,9 +304,11 @@ main {
   font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
+  max-width: 100%;
   border: 1.5px solid var(--line-strong);
   transition: transform 0.08s, box-shadow 0.12s, background 0.12s;
 }
+.btn svg { flex-shrink: 0; }
 .btn:active:not(:disabled) { transform: translate(1px, 1px); box-shadow: none; }
 .btn-primary {
   background: var(--swiss-red);
@@ -1799,7 +1801,7 @@ button.dot-cell:hover { transform: scale(1.6); outline: 1.5px solid var(--line-s
 .dot-cell.is-draw { background: var(--draw); }
 @keyframes dotPop { from { transform: scale(0.5); } to { transform: scale(1); } }
 
-/* 單卡千次訓練評估橫幅與四階段完整對局流程彈窗 */
+/* 單卡千次訓練評估橫幅、兩階段獲勝策略提煉橫幅與四階段完整對局流程彈窗 */
 .card-prior-banner {
   margin-bottom: 14px;
   padding: 12px 14px;
@@ -1807,7 +1809,10 @@ button.dot-cell:hover { transform: scale(1.6); outline: 1.5px solid var(--line-s
   border: 1px solid var(--line-strong);
   background: var(--grey-0);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .card-prior-head {
   display: flex;
@@ -1818,7 +1823,7 @@ button.dot-cell:hover { transform: scale(1.6); outline: 1.5px solid var(--line-s
   font-size: 0.82rem;
 }
 .card-prior-head span { color: var(--text-mute); }
-.card-prior-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.card-prior-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
 .card-prior-chip {
   display: inline-flex;
   align-items: center;
@@ -1828,8 +1833,77 @@ button.dot-cell:hover { transform: scale(1.6); outline: 1.5px solid var(--line-s
   border: 1px solid var(--line);
   background: var(--paper);
   font-size: 0.76rem;
+  max-width: 100%;
 }
 .card-prior-chip small { color: var(--swiss-red); font-family: var(--font-num); font-weight: 700; }
+
+.strategy-synth-banner {
+  margin-bottom: 14px;
+  padding: 13px 15px;
+  border-radius: var(--r-ctrl);
+  border: 1.5px solid var(--line-strong);
+  border-left: 5px solid var(--swiss-red);
+  background: var(--paper);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+.strategy-synth-banner.is-complete {
+  background: var(--swiss-red-soft, #fff8f8);
+}
+.strategy-synth-banner.is-pending {
+  border-left-color: var(--line-strong);
+  background: var(--grey-0);
+}
+.strategy-synth-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.84rem;
+}
+.strategy-synth-head > div { min-width: 0; flex: 1 1 260px; }
+.strategy-synth-head p.sub { margin: 4px 0 0; line-height: 1.45; }
+.strategy-gain-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: var(--r-ctrl);
+  font-family: var(--font-num);
+  font-size: 0.8rem;
+  font-weight: 800;
+  border: 1.5px solid var(--line-strong);
+  background: var(--paper);
+  color: var(--text);
+  line-height: 1.35;
+  max-width: 100%;
+}
+.strategy-gain-pill.is-pos {
+  background: var(--win);
+  border-color: var(--win);
+  color: #fff;
+}
+.strategy-gain-pill.is-neg {
+  background: var(--grey-1, #ebebeb);
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+.progress-track.is-slim { height: 6px; }
+.strategy-weights-details {
+  border-top: 1px dashed var(--line);
+  padding-top: 8px;
+  min-width: 0;
+}
+.strategy-weights-details summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--swiss-red);
+}
+.strategy-weights-details[open] summary { margin-bottom: 8px; }
 
 .flow-modal { display: grid; gap: 12px; }
 .flow-nav-bar {
@@ -1861,7 +1935,10 @@ button.dot-cell:hover { transform: scale(1.6); outline: 1.5px solid var(--line-s
   border: 1px solid var(--line);
   background: var(--paper);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 .flow-stage-card h3 { font-size: 0.92rem; margin: 0; color: var(--text); }
 .flow-stage-card.is-end { border-color: var(--line-strong); background: var(--grey-0); }
@@ -2248,6 +2325,7 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.72); }
   .site-footer a:first-of-type { margin-left: 0; }
 
   .panel { padding: 14px; }
+  .btn { white-space: normal; text-align: center; line-height: 1.35; }
   .showcase-board { padding: 12px; }
   .hero-copy { padding: 20px 16px; }
   .hero-spec { padding: 14px 16px; }

@@ -3,10 +3,13 @@
   "season": "C1",
   "sourceAsOf": "2026-11-19T07:28:52.724Z",
   "defaultModelId": "v3",
-  "gamesPerOpponent": 500,
-  "firstSeatPerOpponent": 250,
-  "secondSeatPerOpponent": 250,
-  "totalBatchGames": 5000,
+  "exploreTotalGames": 1000,
+  "exploreGamesPerOpponent": 100,
+  "gamesPerOpponent": 50,
+  "firstSeatPerOpponent": 25,
+  "secondSeatPerOpponent": 25,
+  "totalBatchGames": 500,
+  "deepTestGamesPerOpponent": 500,
   "models": [
     {
       "id": "v3",

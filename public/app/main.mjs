@@ -1,4 +1,11 @@
-import { GAMES_PER_OPPONENT, normalizeFeaturedPokemon, titleCase, TOTAL_BATCH_GAMES } from './core.mjs';
+import {
+  DEEP_GAMES_PER_OPPONENT,
+  EXPLORE_TOTAL_GAMES,
+  GAMES_PER_OPPONENT,
+  normalizeFeaturedPokemon,
+  titleCase,
+  TOTAL_BATCH_GAMES
+} from './core.mjs';
 import {
   bindCardImageFallback,
   bindFoilEffects,
@@ -38,9 +45,11 @@ import {
   ensureCardCoverage,
   executeBattleBatch,
   executeFixturePreviewBatch,
+  executeSingleOpponent1000And500,
   fnv1a32,
   probeEngine,
   renderBattleReport,
+  renderSingleOpponentDeepModal,
   resolveOpponentLineup
 } from './battle.mjs';
 import {
@@ -785,9 +794,8 @@ async function handleAction(el) {
     return;
   }
 
-  if (action === 'start-real-battle' || action === 'run-fixture-preview' || action === 'run-single-opponent') {
+  if (action === 'start-real-battle' || action === 'run-fixture-preview') {
     const isDemo = action === 'run-fixture-preview';
-    const onlyOpponentId = action === 'run-single-opponent' ? (el.dataset.opp || null) : null;
     const deck = state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0];
     if (!deck) { showNotice('請先選擇或建立一套牌組'); return; }
 
@@ -805,8 +813,11 @@ async function handleAction(el) {
     const model = getSelectedBattleModel();
     const targetVersion = isDemo ? '展示樣板' : model.version;
 
+    const isIncomplete = (r) =>
+      (r.exploreEvents?.length || 0) < EXPLORE_TOTAL_GAMES || (r.events?.length || 0) < TOTAL_BATCH_GAMES;
+
     let run = state.runs.find((r) => r.runId === uiState.battle.activeRunId && r.deckId === deck.id && (r.isDemo || r.modelVersion === targetVersion))
-      || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.modelVersion === targetVersion && r.events.length < TOTAL_BATCH_GAMES);
+      || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.modelVersion === targetVersion && isIncomplete(r));
 
     if (!run) {
       run = {
@@ -816,6 +827,8 @@ async function handleAction(el) {
         season: state.meta?.season || 'C1',
         modelVersion: targetVersion,
         isDemo,
+        exploreEvents: [],
+        winningStrategy: null,
         events: [],
         createdAt: new Date().toISOString()
       };
@@ -842,12 +855,11 @@ async function handleAction(el) {
           lineup,
           weights: model.weights,
           onTick: updateView,
-          signal: uiState.battle.abortCtrl.signal,
-          onlyOpponentId
+          signal: uiState.battle.abortCtrl.signal
         });
       }
       if (!uiState.battle.abortCtrl.signal.aborted) {
-        showNotice(onlyOpponentId ? `已完成此對手 ${GAMES_PER_OPPONENT} 局完整對局模擬` : `全部 10 對手 × ${GAMES_PER_OPPONENT} 局（共 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 局）模擬已完成`);
+        showNotice(`已完成兩階段勝率測試：第 1 階段 ${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 局探索提煉獲勝策略 → 第 2 階段 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 局正式測試完成`);
       }
     } catch (err) {
       showNotice(err?.message || '模擬中斷');
@@ -855,6 +867,36 @@ async function handleAction(el) {
       uiState.battle.running = false;
       renderRoute();
     }
+    return;
+  }
+
+  if (action === 'run-single-opponent-deep') {
+    const oppId = el.dataset.opp;
+    const opp = (state.meta?.entries || []).find((e) => e.id === oppId);
+    const deck = state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0];
+    if (!opp || !deck) { showNotice('找不到參戰牌組或目標對手'); return; }
+    if (!state.engineReady) { showNotice('對戰模擬引擎尚未就緒'); return; }
+    const model = getSelectedBattleModel();
+    showNotice(`正在對「${opp.name}」執行 1,000 次探索提煉獲勝策略 + ${DEEP_GAMES_PER_OPPONENT} 次正式測試…`);
+    await new Promise((r) => setTimeout(r, 20));
+    try {
+      const deepRes = executeSingleOpponent1000And500({ opp, deck, baseWeights: model.weights });
+      uiState.battle.lastSingleDeep = deepRes;
+      const html = renderSingleOpponentDeepModal(deepRes, 0);
+      openModal(`單組兩階段深度測試（1,000 探索 → ${DEEP_GAMES_PER_OPPONENT} 測試）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT} 局）`, html, { wide: true });
+      showNotice(`已完成對「${opp.name}」的 1,000 探索 + ${DEEP_GAMES_PER_OPPONENT} 測試`);
+    } catch (err) {
+      showNotice(err?.message || '單組深度測試失敗');
+    }
+    return;
+  }
+
+  if (action === 'replay-single-deep') {
+    const deepRes = uiState.battle.lastSingleDeep;
+    if (!deepRes) { showNotice('請先執行該對手的 1,000 探索 + 500 測試'); return; }
+    const idx = Number(el.dataset.idx) || 0;
+    const html = renderSingleOpponentDeepModal(deepRes, idx);
+    openModal(`單組兩階段深度測試（1,000 探索 → ${DEEP_GAMES_PER_OPPONENT} 測試）· 對陣 ${deepRes.opp.name}（第 ${idx + 1} / ${DEEP_GAMES_PER_OPPONENT} 局）`, html, { wide: true });
     return;
   }
 
@@ -879,6 +921,8 @@ async function handleAction(el) {
         season: state.meta?.season || 'C1',
         modelVersion: model.version,
         isDemo: false,
+        exploreEvents: [],
+        winningStrategy: null,
         events: [],
         createdAt: new Date().toISOString()
       };

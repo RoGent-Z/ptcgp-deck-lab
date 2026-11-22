@@ -55,9 +55,258 @@ export function validateDeck(deck, byId) {
 export function normalizeSearch(text, map={}) {
   return Array.from(String(text||'').normalize('NFKC').toLowerCase()).map(ch=>map[ch]||ch).join('').replace(/[\s·•・－-]/g,'');
 }
-export const GAMES_PER_OPPONENT = 500;
-export const FIRST_SEAT_GAMES = 250;
-export const TOTAL_BATCH_GAMES = 5000;
+export const EXPLORE_TOTAL_GAMES = 1000;
+export const EXPLORE_GAMES_PER_OPPONENT = 100;
+export const GAMES_PER_OPPONENT = 50;
+export const FIRST_SEAT_GAMES = 25;
+export const TOTAL_BATCH_GAMES = 500;
+export const DEEP_GAMES_PER_OPPONENT = 500;
+
+export const FEATURE_NAMES_22 = [
+  'endTurn', 'noop', 'place', 'activePower', 'evolve', 'evolutionPower',
+  'abilityOrStadium', 'trainer', 'drawAtLowHand', 'attack', 'baseDamage',
+  'estimatedKnockout', 'attackEffect', 'attach', 'attachActive', 'energyDemand',
+  'attachTargetPower', 'retreat', 'protectEndangeredActive', 'activationTarget',
+  'toolOrHeal', 'targetedDamage'
+];
+
+export const FEATURE_LABELS_ZH = {
+  endTurn: '結束回合控制',
+  noop: '等待與保留動作',
+  place: '基礎寶可夢鋪場',
+  activePower: '戰鬥場戰力優先',
+  evolve: '進化節奏推進',
+  evolutionPower: '高戰力主力進化',
+  abilityOrStadium: '特性與競技場發動',
+  trainer: '訓練家卡施放',
+  drawAtLowHand: '低手牌濾牌抽濾',
+  attack: '積極進攻傾向',
+  baseDamage: '高基礎傷害優先',
+  estimatedKnockout: '精確擊倒 (KO) 判斷',
+  attackEffect: '招式附加效果利用',
+  attach: '能量區附能節奏',
+  attachActive: '戰鬥場優先附能',
+  energyDemand: '招式能量缺口補足',
+  attachTargetPower: '高輸出主力養能',
+  retreat: '主動撤退傾向',
+  protectEndangeredActive: '殘血主力撤退保護',
+  activationTarget: '技能目標價值評估',
+  toolOrHeal: '道具裝備與回血續航',
+  targetedDamage: '後排狙擊與點傷追擊'
+};
+
+function hashSeed32(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+function seededRandom(label) {
+  let st = hashSeed32(String(label));
+  return () => {
+    st = (st + 0x6d2b79f5) >>> 0;
+    let x = Math.imul(st ^ (st >>> 15), 1 | st);
+    x ^= x + Math.imul(x ^ (x >>> 7), 61 | x);
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function roundW(v) {
+  return Math.round(Math.max(-8, Math.min(8, v)) * 1e6) / 1e6;
+}
+
+// 產生探索階段候選策略集（保留原模型於 index 0，並展開多維度戰術變體）
+export function buildExplorationCandidates(baseWeights, seedLabel = 'explore', candidateCount = 25) {
+  const base = Array.isArray(baseWeights) && baseWeights.length === 22
+    ? baseWeights.map(Number)
+    : Array(22).fill(0);
+  const rand = seededRandom(seedLabel);
+  const list = [[...base]];
+
+  // 預設 6 組針對不同牌組型態的定向戰術強化模板
+  const templates = [
+    { name: '快攻搶分型', deltas: { place: 0.35, activePower: 0.3, attack: 0.4, baseDamage: 0.35, estimatedKnockout: 0.45, attachActive: 0.3 } },
+    { name: '進化養成型', deltas: { evolve: 0.5, evolutionPower: 0.45, drawAtLowHand: 0.35, energyDemand: 0.35, attachTargetPower: 0.3, protectEndangeredActive: 0.3 } },
+    { name: '特性與狙擊控制型', deltas: { abilityOrStadium: 0.45, targetedDamage: 0.5, activationTarget: 0.35, trainer: 0.3, estimatedKnockout: 0.35 } },
+    { name: '續航聯防反擊型', deltas: { protectEndangeredActive: 0.55, toolOrHeal: 0.45, retreat: 0.25, energyDemand: 0.3, evolutionPower: 0.3 } },
+    { name: '高速濾牌展開型', deltas: { trainer: 0.45, drawAtLowHand: 0.5, place: 0.4, attach: 0.35, evolve: 0.35 } },
+    { name: '高傷終結爆發型', deltas: { estimatedKnockout: 0.6, baseDamage: 0.45, attachTargetPower: 0.4, attackEffect: 0.3 } }
+  ];
+
+  for (const tpl of templates) {
+    if (list.length >= candidateCount) break;
+    const w = base.map((val, idx) => {
+      const fname = FEATURE_NAMES_22[idx];
+      return roundW(val + (tpl.deltas[fname] || 0));
+    });
+    list.push(w);
+  }
+
+  while (list.length < candidateCount) {
+    const w = base.map((val, idx) => {
+      const u1 = Math.max(1e-9, rand());
+      const u2 = rand();
+      const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+      const scale = idx <= 1 ? 0.12 : 0.28;
+      return roundW(val + z * scale);
+    });
+    list.push(w);
+  }
+  return list;
+}
+
+// 從 1,000 次探索對局中篩選「勝利的對局」綜合提煉為獲勝策略
+export function synthesizeWinningStrategy(exploreEvents = [], baseWeights = [], candidates = []) {
+  const base = Array.isArray(baseWeights) && baseWeights.length === 22
+    ? baseWeights.map(Number)
+    : Array(22).fill(0);
+  const total = exploreEvents.length;
+  const winGames = exploreEvents.filter((e) => e.outcome === 'win');
+  const drawGames = exploreEvents.filter((e) => e.outcome === 'draw');
+  const lossGames = exploreEvents.filter((e) => e.outcome === 'loss');
+
+  // 統計各候選策略在 1,000 局探索對局中的實測表現
+  const candStats = new Map();
+  for (const ev of exploreEvents) {
+    const cid = ev.candidateIdx ?? 0;
+    const cur = candStats.get(cid) || { cid, games: 0, wins: 0, draws: 0 };
+    cur.games++;
+    if (ev.outcome === 'win') cur.wins++;
+    else if (ev.outcome === 'draw') cur.draws++;
+    candStats.set(cid, cur);
+  }
+  const rankedCands = [...candStats.values()]
+    .map((s) => ({ ...s, winRate: s.wins / Math.max(1, s.games), scoreRate: (s.wins + 0.5 * s.draws) / Math.max(1, s.games) }))
+    .sort((a, b) => b.scoreRate - a.scoreRate || b.winRate - a.winRate);
+
+  const topEliteIds = new Set(rankedCands.slice(0, Math.min(3, Math.max(1, rankedCands.length))).map((s) => s.cid));
+  const maxGlobalScore = rankedCands[0]?.scoreRate ?? 0.5;
+  const baseCandStat = candStats.get(0);
+  const baseExploreWinRate = baseCandStat && baseCandStat.games > 0
+    ? baseCandStat.wins / baseCandStat.games
+    : (total ? winGames.length / total : 0);
+
+  const synthesizeFromSubset = (subsetAll, useGlobalElites = false) => {
+    const allWins = subsetAll.filter((e) => e.outcome === 'win');
+    const subsetLosses = subsetAll.filter((e) => e.outcome === 'loss');
+    if (!allWins.length) return [...base];
+
+    const subCandStats = new Map();
+    for (const ev of subsetAll) {
+      const cid = ev.candidateIdx ?? 0;
+      const cur = subCandStats.get(cid) || { cid, games: 0, wins: 0, draws: 0 };
+      cur.games++;
+      if (ev.outcome === 'win') cur.wins++;
+      else if (ev.outcome === 'draw') cur.draws++;
+      subCandStats.set(cid, cur);
+    }
+    const subRanked = [...subCandStats.values()]
+      .map((s) => ({ ...s, scoreRate: (s.wins + 0.5 * s.draws) / Math.max(1, s.games) }))
+      .sort((a, b) => b.scoreRate - a.scoreRate);
+    const localElites = useGlobalElites
+      ? topEliteIds
+      : new Set(subRanked.slice(0, Math.min(3, Math.max(1, subRanked.length))).map((s) => s.cid));
+    const maxScore = subRanked[0]?.scoreRate ?? maxGlobalScore;
+
+    // 優先取高勝率精英候選的勝利對局；若無則取全部勝利對局
+    const eliteWins = allWins.filter((e) => localElites.has(e.candidateIdx ?? 0));
+    const selectedWins = eliteWins.length > 0 ? eliteWins : allWins;
+
+    const accumW = Array(22).fill(0);
+    let weightSum = 0;
+    const winAdv = Array(22).fill(0);
+    let winAdvCount = 0;
+    const lossAdv = Array(22).fill(0);
+    let lossAdvCount = 0;
+
+    for (const ev of selectedWins) {
+      const cid = ev.candidateIdx ?? 0;
+      const cw = ev.candidateWeights || candidates[cid] || base;
+      const st = subCandStats.get(cid) || candStats.get(cid) || { games: 1, wins: 1, draws: 0 };
+      const sr = (st.wins + 0.5 * st.draws) / Math.max(1, st.games);
+      const importance = Math.exp(18 * (sr - maxScore));
+      for (let k = 0; k < 22; k++) {
+        accumW[k] += (cw[k] ?? base[k]) * importance;
+      }
+      weightSum += importance;
+      if (Array.isArray(ev.featureAdvantage) && ev.featureAdvantage.length === 22) {
+        for (let k = 0; k < 22; k++) winAdv[k] += Number(ev.featureAdvantage[k] || 0);
+        winAdvCount++;
+      }
+    }
+
+    for (const ev of subsetLosses) {
+      if (Array.isArray(ev.featureAdvantage) && ev.featureAdvantage.length === 22) {
+        for (let k = 0; k < 22; k++) lossAdv[k] += Number(ev.featureAdvantage[k] || 0);
+        lossAdvCount++;
+      }
+    }
+
+    return base.map((bVal, k) => {
+      const meanWinW = weightSum > 0 ? accumW[k] / weightSum : bVal;
+      const wAdv = winAdvCount > 0 ? winAdv[k] / winAdvCount : 0;
+      const lAdv = lossAdvCount > 0 ? lossAdv[k] / lossAdvCount : 0;
+      const contrast = (wAdv - lAdv) * 0.28;
+      return roundW(meanWinW + contrast);
+    });
+  };
+
+  const overallWeights = synthesizeFromSubset(exploreEvents, true);
+  const eliteWinCount = winGames.filter((e) => topEliteIds.has(e.candidateIdx ?? 0)).length || winGames.length;
+  const byOpponent = {};
+  const oppGroups = new Map();
+  for (const ev of exploreEvents) {
+    if (!ev.opponentId) continue;
+    if (!oppGroups.has(ev.opponentId)) oppGroups.set(ev.opponentId, []);
+    oppGroups.get(ev.opponentId).push(ev);
+  }
+  for (const [oppId, list] of oppGroups.entries()) {
+    const oppWins = list.filter((e) => e.outcome === 'win').length;
+    const oppDraws = list.filter((e) => e.outcome === 'draw').length;
+    const oppSynth = synthesizeFromSubset(list, false);
+    const blended = oppSynth.map((v, k) => roundW(0.55 * v + 0.45 * overallWeights[k]));
+    byOpponent[oppId] = {
+      games: list.length,
+      wins: oppWins,
+      draws: oppDraws,
+      losses: list.length - oppWins - oppDraws,
+      winRate: list.length ? oppWins / list.length : 0,
+      weights: blended
+    };
+  }
+
+  const adjustments = FEATURE_NAMES_22.map((name, idx) => {
+    const b = base[idx] || 0;
+    const s = overallWeights[idx] || 0;
+    return {
+      index: idx,
+      name,
+      labelZh: FEATURE_LABELS_ZH[name] || name,
+      base: b,
+      synthesized: s,
+      delta: roundW(s - b)
+    };
+  }).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  return {
+    exploreTotal: total,
+    exploreWins: winGames.length,
+    exploreDraws: drawGames.length,
+    exploreLosses: lossGames.length,
+    eliteWinsSelected: eliteWinCount,
+    exploreWinRate: total ? winGames.length / total : 0,
+    baseExploreWinRate,
+    bestCandidateWinRate: rankedCands[0]?.winRate ?? 0,
+    exploreScoreRate: total ? (winGames.length + 0.5 * drawGames.length) / total : 0,
+    weights: overallWeights,
+    byOpponent,
+    topAdjustments: adjustments.slice(0, 6),
+    allAdjustments: adjustments
+  };
+}
 
 export function validOutcomes(events, ids, gamesPerOpponent = GAMES_PER_OPPONENT) {
   const allowed = new Set(ids), repeated = new Set(), valid = [];
