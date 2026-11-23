@@ -1,7 +1,9 @@
 //! Zero-allocation, zero-dependency WebAssembly Fast-Sim Engine for Pocket Lab.
-//! Supports 10,000,000-game exploration (Stage 1) + 50,000-game formal test (Stage 2)
-//! across parallel Web Workers with full 13,500+ Strategy Lexicon card-level bonuses
-//! and 22-dim feature-advantage extraction.
+//! Supports:
+//! - run_explore_chunk: 10,000,000-game exploration (Stage 1)
+//! - run_test_chunk: 50,000-game formal test (Stage 2)
+//! - run_replay_game: 100% bit-for-bit identical deterministic turn-by-turn replay
+//!   guaranteed to match every dot's outcome, turns, and seat in run_test_chunk!
 //! Compile: rustc --target wasm32-unknown-unknown --crate-type cdylib -C opt-level=3 -C lto=fat -C codegen-units=1 -C panic=abort tools/battle/fastsim_wasm.rs -o public/battle/fastsim.wasm
 
 #![allow(static_mut_refs)]
@@ -10,14 +12,17 @@ const FEATURES: usize = 22;
 const CARD_STRIDE: usize = 14;
 const MAX_DECKS: usize = 12; // 0 = player, 1..=10 = enemies
 const MAX_CANDS: usize = 40;
+const STEP_STRIDE: usize = 24;
+const MAX_REPLAY_STEPS: usize = 1024;
 
 static mut DECKS_BUF: [i32; MAX_DECKS * 20 * CARD_STRIDE] = [0; MAX_DECKS * 20 * CARD_STRIDE];
 static mut BONUS_BUF: [f32; MAX_DECKS * 20] = [0.0; MAX_DECKS * 20];
-// weights[0..22] = enemy_weights; weights[22 + c*22 ..] = candidate c weights (or player test weights at c=0)
 static mut WEIGHTS_BUF: [f32; (MAX_CANDS + 1) * FEATURES] = [0.0; (MAX_CANDS + 1) * FEATURES];
 static mut OUT_U32: [u32; 16384] = [0; 16384];
 static mut OUT_F64: [f64; 4096] = [0.0; 4096];
-static mut OUT_U8: [u8; 131072] = [0; 131072]; // supports up to 65,536 games per test_chunk
+static mut OUT_U8: [u8; 131072] = [0; 131072];
+static mut REPLAY_BUF: [i32; MAX_REPLAY_STEPS * STEP_STRIDE] = [0; MAX_REPLAY_STEPS * STEP_STRIDE];
+static mut REPLAY_LEN: u32 = 0;
 
 #[no_mangle] pub extern "C" fn get_decks_ptr() -> *mut i32 { unsafe { DECKS_BUF.as_mut_ptr() } }
 #[no_mangle] pub extern "C" fn get_bonus_ptr() -> *mut f32 { unsafe { BONUS_BUF.as_mut_ptr() } }
@@ -25,9 +30,12 @@ static mut OUT_U8: [u8; 131072] = [0; 131072]; // supports up to 65,536 games pe
 #[no_mangle] pub extern "C" fn get_out_u32_ptr() -> *mut u32 { unsafe { OUT_U32.as_mut_ptr() } }
 #[no_mangle] pub extern "C" fn get_out_f64_ptr() -> *mut f64 { unsafe { OUT_F64.as_mut_ptr() } }
 #[no_mangle] pub extern "C" fn get_out_u8_ptr() -> *mut u8 { unsafe { OUT_U8.as_mut_ptr() } }
+#[no_mangle] pub extern "C" fn get_replay_ptr() -> *mut i32 { unsafe { REPLAY_BUF.as_mut_ptr() } }
+#[no_mangle] pub extern "C" fn get_replay_len() -> u32 { unsafe { REPLAY_LEN } }
 
 #[derive(Clone, Copy, Default)]
 struct CompactCard {
+    slot_id: i16,
     is_pokemon: u8,
     stage: u8,
     type_code: u8,
@@ -83,6 +91,7 @@ fn read_deck(deck_slot: usize) -> [CompactCard; 20] {
             let off = (base_c + i) * CARD_STRIDE;
             let atk_dmg = DECKS_BUF[off + 8] as i16;
             out[i] = CompactCard {
+                slot_id: DECKS_BUF[off + 13] as i16,
                 is_pokemon: DECKS_BUF[off] as u8,
                 stage: DECKS_BUF[off + 1] as u8,
                 type_code: DECKS_BUF[off + 2] as u8,
@@ -105,7 +114,54 @@ fn read_deck(deck_slot: usize) -> [CompactCard; 20] {
 }
 
 #[inline(always)]
-fn simulate_game(
+fn push_replay_step(
+    turn: u8,
+    actor: usize,
+    kind: i32,
+    card_idx: i32,
+    aux1: i32,
+    aux2: i32,
+    points: &[u8; 2],
+    board: &[[Slot; 4]; 2],
+    hand_len: &[usize; 2],
+    lib_len: &[usize; 2],
+) {
+    unsafe {
+        let idx = REPLAY_LEN as usize;
+        if idx >= MAX_REPLAY_STEPS { return; }
+        let o = idx * STEP_STRIDE;
+        REPLAY_BUF[o] = turn as i32;
+        REPLAY_BUF[o + 1] = actor as i32;
+        REPLAY_BUF[o + 2] = kind;
+        REPLAY_BUF[o + 3] = card_idx;
+        REPLAY_BUF[o + 4] = aux1;
+        REPLAY_BUF[o + 5] = aux2;
+        REPLAY_BUF[o + 6] = points[0] as i32;
+        REPLAY_BUF[o + 7] = points[1] as i32;
+
+        for p in 0..2 {
+            let bo = o + 8 + p * 8;
+            let act = board[p][0];
+            let mut bench_cnt = 0i32;
+            for s in 1..4 { if board[p][s].occ { bench_cnt += 1; } }
+            REPLAY_BUF[bo] = if act.occ { act.card.slot_id as i32 } else { -1 };
+            REPLAY_BUF[bo + 1] = if act.occ { act.hp as i32 } else { 0 };
+            REPLAY_BUF[bo + 2] = if act.occ { act.max_hp as i32 } else { 0 };
+            REPLAY_BUF[bo + 3] = if act.occ { act.energy as i32 } else { 0 };
+            REPLAY_BUF[bo + 4] = bench_cnt;
+            REPLAY_BUF[bo + 5] = hand_len[p] as i32;
+            REPLAY_BUF[bo + 6] = lib_len[p] as i32;
+            REPLAY_BUF[bo + 7] = if act.occ { act.tool as i32 } else { 0 };
+        }
+        REPLAY_LEN += 1;
+    }
+}
+
+/// Core simulation engine parameterized by `const RECORD: bool`.
+/// When `RECORD == false`, zero replay code is emitted (100% full speed).
+/// When `RECORD == true`, executes the EXACT SAME RNG & decisions and logs every step.
+#[inline(always)]
+fn simulate_game_impl<const RECORD: bool>(
     d0: &[CompactCard; 20],
     d1: &[CompactCard; 20],
     w0: &[f32; FEATURES],
@@ -114,6 +170,7 @@ fn simulate_game(
     first_player: usize,
     track_feat: bool,
     feat_out: &mut [f32; FEATURES],
+    points_out: &mut [u8; 2],
 ) -> (u8, u8, bool) {
     let mut rng = Rng::new(seed);
     let mut libs = [*d0, *d1];
@@ -124,6 +181,10 @@ fn simulate_game(
     let mut points = [0u8, 0u8];
     let mut feat_sum = [0.0f32; FEATURES];
     let mut feat_cnt = 0u32;
+
+    if RECORD {
+        unsafe { REPLAY_LEN = 0; }
+    }
 
     for p in 0..2 {
         for i in (1..20).rev() {
@@ -155,19 +216,27 @@ fn simulate_game(
                     placed_active = true;
                     hand_len[p] -= 1;
                     hands[p][idx] = hands[p][hand_len[p]];
+                    if RECORD {
+                        push_replay_step(0, p, 1, c.slot_id as i32, 0, 0, &points, &board, &hand_len, &lib_len);
+                    }
                     continue;
                 } else {
                     let mut placed_bench = false;
+                    let mut bslot = 0;
                     for s in 1..4 {
                         if !board[p][s].occ {
                             board[p][s] = Slot { occ: true, card: c, hp: c.hp, max_hp: c.hp, energy: 0, tool: 0, status: 0, turn_placed: 0 };
                             placed_bench = true;
+                            bslot = s;
                             break;
                         }
                     }
                     if placed_bench {
                         hand_len[p] -= 1;
                         hands[p][idx] = hands[p][hand_len[p]];
+                        if RECORD {
+                            push_replay_step(0, p, 2, c.slot_id as i32, bslot as i32, 0, &points, &board, &hand_len, &lib_len);
+                        }
                         continue;
                     }
                 }
@@ -177,6 +246,9 @@ fn simulate_game(
         if !placed_active {
             let fb = if p == 0 { d0[0] } else { d1[0] };
             board[p][0] = Slot { occ: true, card: fb, hp: fb.hp.max(60), max_hp: fb.hp.max(60), energy: 0, tool: 0, status: 0, turn_placed: 0 };
+            if RECORD {
+                push_replay_step(0, p, 1, fb.slot_id as i32, 0, 0, &points, &board, &hand_len, &lib_len);
+            }
         }
     }
 
@@ -188,8 +260,12 @@ fn simulate_game(
 
         if lib_len[cur] > 0 && hand_len[cur] < 12 {
             lib_len[cur] -= 1;
-            hands[cur][hand_len[cur]] = libs[cur][lib_len[cur]];
+            let drawn = libs[cur][lib_len[cur]];
+            hands[cur][hand_len[cur]] = drawn;
             hand_len[cur] += 1;
+            if RECORD {
+                push_replay_step(turn, cur, 3, drawn.slot_id as i32, 1, 0, &points, &board, &hand_len, &lib_len);
+            }
         }
 
         let mut energy_attached = turn == 1;
@@ -370,12 +446,20 @@ fn simulate_game(
             }
 
             match best_kind {
-                0 => break,
+                0 => {
+                    if RECORD {
+                        push_replay_step(turn, cur, 11, -1, 0, 0, &points, &board, &hand_len, &lib_len);
+                    }
+                    break;
+                }
                 1 => {
                     let c = hands[cur][best_a];
                     board[cur][best_b] = Slot { occ: true, card: c, hp: c.hp, max_hp: c.hp, energy: 0, tool: 0, status: 0, turn_placed: turn };
                     hand_len[cur] -= 1;
                     hands[cur][best_a] = hands[cur][hand_len[cur]];
+                    if RECORD {
+                        push_replay_step(turn, cur, 4, c.slot_id as i32, best_b as i32, 0, &points, &board, &hand_len, &lib_len);
+                    }
                 }
                 2 => {
                     let c = hands[cur][best_a];
@@ -388,6 +472,9 @@ fn simulate_game(
                     board[cur][best_b].turn_placed = turn;
                     hand_len[cur] -= 1;
                     hands[cur][best_a] = hands[cur][hand_len[cur]];
+                    if RECORD {
+                        push_replay_step(turn, cur, 5, c.slot_id as i32, best_b as i32, 0, &points, &board, &hand_len, &lib_len);
+                    }
                 }
                 3 => {
                     let c = hands[cur][best_a];
@@ -464,10 +551,14 @@ fn simulate_game(
                         7 => { dmg_boost += 10; }
                         _ => {}
                     }
+                    if RECORD {
+                        push_replay_step(turn, cur, 6, c.slot_id as i32, c.trainer_kind as i32, c.effect_val as i32, &points, &board, &hand_len, &lib_len);
+                    }
                 }
                 4 => {
                     ability_used = true;
                     let ab = board[cur][best_a].card.ab_flags;
+                    let ab_card_id = board[cur][best_a].card.slot_id as i32;
                     if (ab & 2) != 0 && lib_len[cur] > 0 && hand_len[cur] < 12 {
                         lib_len[cur] -= 1;
                         hands[cur][hand_len[cur]] = libs[cur][lib_len[cur]];
@@ -486,27 +577,43 @@ fn simulate_game(
                                 if target_s == 0 {
                                     for ns in 1..4 { if board[foe][ns].occ { board[foe].swap(0, ns); break; } }
                                 }
+                                if RECORD {
+                                    push_replay_step(turn, cur, 7, ab_card_id, best_a as i32, ab as i32, &points, &board, &hand_len, &lib_len);
+                                }
                                 if points[cur] >= 3 || !board[foe][0].occ {
+                                    *points_out = points;
                                     return finish_game(if cur == 0 { 1 } else { 0 }, turn, track_feat, feat_cnt, &feat_sum, feat_out);
                                 }
                             }
                         }
                     }
+                    if RECORD {
+                        push_replay_step(turn, cur, 7, ab_card_id, best_a as i32, ab as i32, &points, &board, &hand_len, &lib_len);
+                    }
                 }
                 5 => {
                     energy_attached = true;
                     board[cur][best_a].energy = board[cur][best_a].energy.saturating_add(1);
+                    if RECORD {
+                        push_replay_step(turn, cur, 8, board[cur][best_a].card.slot_id as i32, best_a as i32, board[cur][best_a].energy as i32, &points, &board, &hand_len, &lib_len);
+                    }
                 }
                 6 => {
                     retreated = true;
+                    let old_id = board[cur][0].card.slot_id as i32;
+                    let new_id = board[cur][best_a].card.slot_id as i32;
                     board[cur][0].energy = board[cur][0].energy.saturating_sub(board[cur][0].card.retreat);
                     board[cur][0].status = 0;
                     board[cur].swap(0, best_a);
+                    if RECORD {
+                        push_replay_step(turn, cur, 9, old_id, best_a as i32, new_id, &points, &board, &hand_len, &lib_len);
+                    }
                 }
                 7 => {
                     let atk = board[cur][0].card;
                     let weak_bonus = if board[foe][0].occ && board[foe][0].card.weak_code == atk.type_code { 20 } else { 0 };
                     let total_dmg = atk.atk_dmg + dmg_boost + weak_bonus;
+                    let mut ko_flag = 0i32;
                     if board[foe][0].occ {
                         board[foe][0].hp -= total_dmg;
                         if board[foe][0].tool == 2 { board[cur][0].hp -= 20; }
@@ -527,6 +634,7 @@ fn simulate_game(
                         if (atk.atk_flags & 16) != 0 { board[cur][0].energy = board[cur][0].energy.saturating_add(1); }
 
                         if board[foe][0].hp <= 0 {
+                            ko_flag = 1;
                             points[cur] = points[cur].saturating_add(board[foe][0].card.prize);
                             board[foe][0].occ = false;
                             for ns in 1..4 { if board[foe][ns].occ { board[foe].swap(0, ns); break; } }
@@ -536,11 +644,14 @@ fn simulate_game(
                             board[cur][0].occ = false;
                             for ns in 1..4 { if board[cur][ns].occ { board[cur].swap(0, ns); break; } }
                         }
+                        if RECORD {
+                            push_replay_step(turn, cur, 10, atk.slot_id as i32, total_dmg as i32, (weak_bonus as i32) | (ko_flag << 8), &points, &board, &hand_len, &lib_len);
+                        }
                         let cur_won = points[cur] >= 3 || !board[foe][0].occ;
                         let foe_won = points[foe] >= 3 || !board[cur][0].occ;
-                        if cur_won && foe_won { return finish_game(2, turn, track_feat, feat_cnt, &feat_sum, feat_out); }
-                        if cur_won { return finish_game(if cur == 0 { 1 } else { 0 }, turn, track_feat, feat_cnt, &feat_sum, feat_out); }
-                        if foe_won { return finish_game(if foe == 0 { 1 } else { 0 }, turn, track_feat, feat_cnt, &feat_sum, feat_out); }
+                        if cur_won && foe_won { *points_out = points; return finish_game(2, turn, track_feat, feat_cnt, &feat_sum, feat_out); }
+                        if cur_won { *points_out = points; return finish_game(if cur == 0 { 1 } else { 0 }, turn, track_feat, feat_cnt, &feat_sum, feat_out); }
+                        if foe_won { *points_out = points; return finish_game(if foe == 0 { 1 } else { 0 }, turn, track_feat, feat_cnt, &feat_sum, feat_out); }
                     }
                     break;
                 }
@@ -550,15 +661,22 @@ fn simulate_game(
 
         for p in 0..2 {
             if board[p][0].occ && (board[p][0].status & 1) != 0 {
+                let st_card = board[p][0].card.slot_id as i32;
                 board[p][0].hp -= 10;
                 if board[p][0].hp <= 0 {
                     let opp = 1 - p;
                     points[opp] = points[opp].saturating_add(board[p][0].card.prize);
                     board[p][0].occ = false;
                     for ns in 1..4 { if board[p][ns].occ { board[p].swap(0, ns); break; } }
+                    if RECORD {
+                        push_replay_step(turn, p, 12, st_card, 10, 1, &points, &board, &hand_len, &lib_len);
+                    }
                     if points[opp] >= 3 || !board[p][0].occ {
+                        *points_out = points;
                         return finish_game(if opp == 0 { 1 } else { 0 }, turn, track_feat, feat_cnt, &feat_sum, feat_out);
                     }
+                } else if RECORD {
+                    push_replay_step(turn, p, 12, st_card, 10, 0, &points, &board, &hand_len, &lib_len);
                 }
             }
         }
@@ -566,6 +684,7 @@ fn simulate_game(
         cur = foe;
     }
 
+    *points_out = points;
     finish_game(2, 30, track_feat, feat_cnt, &feat_sum, feat_out)
 }
 
@@ -610,7 +729,6 @@ pub extern "C" fn run_explore_chunk(
             let off = FEATURES + c * FEATURES;
             cands[c].copy_from_slice(&WEIGHTS_BUF[off..off + FEATURES]);
         }
-        // Clear output buffers
         for v in OUT_U32[0..4096].iter_mut() { *v = 0; }
         for v in OUT_F64[0..3072].iter_mut() { *v = 0.0; }
     }
@@ -624,6 +742,7 @@ pub extern "C" fn run_explore_chunk(
     let mut losses = 0u32;
     let mut turns_sum = 0u64;
     let mut feat_buf = [0.0f32; FEATURES];
+    let mut pts_dummy = [0u8; 2];
 
     let opp_stride = 6 + nc * 4;
 
@@ -636,10 +755,9 @@ pub extern "C" fn run_explore_chunk(
             let first = if pair_idx < half_pairs { 0 } else { 1 };
             let seed_slot = pair_idx % half_pairs;
             let seed = ((seed_base as u64) << 32) ^ ((opp_idx as u64 + 1) * 1_000_003) ^ (seed_slot as u64 * 2654435761);
-            // Track 22-dim decision features on 1 out of 8 games (= 1,250,000 full feature-tracked games per 10M run!)
             let track = (pair_idx & 7) == 0;
 
-            let (code, turns, has_feat) = simulate_game(
+            let (code, turns, has_feat) = simulate_game_impl::<false>(
                 &d0,
                 &enemies[opp_idx],
                 &cands[cand_idx],
@@ -648,6 +766,7 @@ pub extern "C" fn run_explore_chunk(
                 first,
                 track,
                 &mut feat_buf,
+                &mut pts_dummy,
             );
 
             total += 1;
@@ -748,13 +867,14 @@ pub extern "C" fn run_test_chunk(
     let mut s_losses = 0u32;
     let mut turns_sum = 0u32;
     let mut dummy = [0.0f32; FEATURES];
+    let mut pts_dummy = [0u8; 2];
 
     unsafe {
         for k in 0..n {
             let idx = start + k;
             let first = if idx < half { 0 } else { 1 };
             let seed = ((seed_base as u64) << 32) ^ ((e_slot as u64) * 1_000_003) ^ (idx as u64 * 2654435761);
-            let (code, turns, _) = simulate_game(&d0, &d1, &w_player, &w_enemy, seed, first, false, &mut dummy);
+            let (code, turns, _) = simulate_game_impl::<false>(&d0, &d1, &w_player, &w_enemy, seed, first, false, &mut dummy, &mut pts_dummy);
             OUT_U8[k] = code;
             OUT_U8[n + k] = turns;
             turns_sum += turns as u32;
@@ -778,4 +898,40 @@ pub extern "C" fn run_test_chunk(
     }
 
     n as u32
+}
+
+/// Replays a single exact game from run_test_chunk with 100% bit-for-bit parity.
+/// Writes summary into OUT_U32[0..5] = [outcome_code, turns, first, points0, points1]
+/// and full step-by-step records into REPLAY_BUF (count in REPLAY_LEN).
+#[no_mangle]
+pub extern "C" fn run_replay_game(
+    enemy_slot: u32,
+    game_idx: u32,
+    total_per_opp: u32,
+    seed_base: u32,
+) -> u32 {
+    let e_slot = (enemy_slot as usize).clamp(1, 10);
+    let d0 = read_deck(0);
+    let d1 = read_deck(e_slot);
+    let mut w_enemy = [0.0f32; FEATURES];
+    let mut w_player = [0.0f32; FEATURES];
+    unsafe {
+        w_enemy.copy_from_slice(&WEIGHTS_BUF[0..FEATURES]);
+        w_player.copy_from_slice(&WEIGHTS_BUF[FEATURES..2 * FEATURES]);
+    }
+    let half = (total_per_opp as usize) / 2;
+    let idx = game_idx as usize;
+    let first = if idx < half { 0 } else { 1 };
+    let seed = ((seed_base as u64) << 32) ^ ((e_slot as u64) * 1_000_003) ^ (idx as u64 * 2654435761);
+    let mut dummy = [0.0f32; FEATURES];
+    let mut pts = [0u8; 2];
+    let (code, turns, _) = simulate_game_impl::<true>(&d0, &d1, &w_player, &w_enemy, seed, first, false, &mut dummy, &mut pts);
+    unsafe {
+        OUT_U32[0] = code as u32;
+        OUT_U32[1] = turns as u32;
+        OUT_U32[2] = first as u32;
+        OUT_U32[3] = pts[0] as u32;
+        OUT_U32[4] = pts[1] as u32;
+        REPLAY_LEN
+    }
 }

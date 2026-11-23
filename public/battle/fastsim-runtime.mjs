@@ -176,6 +176,67 @@ export async function instantiateFastSim(wasmSource) {
       };
     }
 
+    if (req.op === 'replay_game') {
+      writeDeck(0, req.deck);
+      writeDeck(1, req.enemy);
+      const weights = new Float32Array(mem.buffer, ex.get_weights_ptr(), 2 * FEATURES);
+      for (let k = 0; k < FEATURES; k++) {
+        weights[k] = Number(req.enemy_weights[k] || 0);
+        weights[FEATURES + k] = Number(req.weights[k] || 0);
+      }
+      const stepCount = ex.run_replay_game(
+        1,
+        req.game_idx >>> 0,
+        req.total_per_opp >>> 0,
+        req.seed_base >>> 0
+      );
+      const u32 = new Uint32Array(mem.buffer, ex.get_out_u32_ptr(), 8);
+      const raw = new Int32Array(mem.buffer, ex.get_replay_ptr(), stepCount * 24);
+      const steps = [];
+      for (let i = 0; i < stepCount; i++) {
+        const o = i * 24;
+        steps.push({
+          turn: raw[o],
+          actor: raw[o + 1],
+          kind: raw[o + 2],
+          cardIdx: raw[o + 3],
+          aux1: raw[o + 4],
+          aux2: raw[o + 5],
+          points: [raw[o + 6], raw[o + 7]],
+          board: [
+            {
+              cardIdx: raw[o + 8],
+              hp: raw[o + 9],
+              maxHp: raw[o + 10],
+              energy: raw[o + 11],
+              bench: raw[o + 12],
+              hand: raw[o + 13],
+              deck: raw[o + 14],
+              tool: raw[o + 15]
+            },
+            {
+              cardIdx: raw[o + 16],
+              hp: raw[o + 17],
+              maxHp: raw[o + 18],
+              energy: raw[o + 19],
+              bench: raw[o + 20],
+              hand: raw[o + 21],
+              deck: raw[o + 22],
+              tool: raw[o + 23]
+            }
+          ]
+        });
+      }
+      const code = u32[0];
+      return {
+        outcome: code === 1 ? 'win' : code === 0 ? 'loss' : 'draw',
+        turns: u32[1],
+        first: u32[2],
+        points: [u32[3], u32[4]],
+        steps
+      };
+    }
+
     throw Error(`Unknown fastsim op: ${req.op}`);
   };
 }

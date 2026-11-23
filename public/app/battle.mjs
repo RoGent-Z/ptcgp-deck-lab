@@ -279,19 +279,20 @@ export function resolveOpponentLineup(meta, coverageMap = null) {
   return { selected, skipped };
 }
 
-export function renderGameStrip(opponentId, events = [], playable = false, gamesPerOpp = 500, actionName = 'replay-game', rangeStart = 0, rangeCount = null, totalAll = null) {
+export function renderGameStrip(opponentId, events = [], playable = false, gamesPerOpp = 500, actionName = 'replay-game', rangeStart = 0, rangeCount = null, totalAll = null, secondStart = null) {
   const count = rangeCount ?? gamesPerOpp;
   const totalLabel = totalAll ?? gamesPerOpp;
   const half = Math.floor(count / 2);
   const overallHalf = Math.floor(totalLabel / 2);
+  const secondBase = secondStart ?? (rangeStart + half);
   const is500 = count >= 200;
   const byIndex = new Map();
   for (const e of events) byIndex.set(e.index, e);
 
-  const makeHalf = (startOffset, endOffset) => {
+  const makeHalf = (baseIdx, halfCount) => {
     let cells = '';
-    for (let k = startOffset; k < endOffset; k++) {
-      const idx = rangeStart + k;
+    for (let k = 0; k < halfCount; k++) {
+      const idx = baseIdx + k;
       const ev = byIndex.get(idx);
       const cls = ev ? `is-${ev.outcome}` : 'is-pending';
       const resName = ev ? ({ win: '勝', loss: '敗', draw: '和' }[ev.outcome] || ev.outcome) : '未執行';
@@ -309,9 +310,9 @@ export function renderGameStrip(opponentId, events = [], playable = false, games
     return `<div class="strip-half ${is500 ? 'is-250' : ''}">${cells}</div>`;
   };
   return `<div class="game-strip ${is500 ? 'is-500' : ''}" role="group" aria-label="${count} 局勝負點陣">
-    ${makeHalf(0, half)}
+    ${makeHalf(rangeStart, half)}
     <span class="strip-gap ${is500 ? 'is-500' : ''}" aria-hidden="true"></span>
-    ${makeHalf(half, count)}
+    ${makeHalf(secondBase, count - half)}
   </div>`;
 }
 
@@ -563,7 +564,7 @@ function buildSampleEventsFromCompact(oppId, rec, gamesPerOpp = GAMES_PER_OPPONE
   const str = rec.outcomesStr;
   const half = Math.floor(gamesPerOpp / 2);
   const out = [];
-  // 取前 250 局先攻 + 前 250 局後攻作為 500 格視覺點陣代表（全 5,000 局均可於回放中直接切換）
+  // 取前 250 局先攻（真實索引 0..249）+ 前 250 局後攻（真實索引 half..half+249）作為 500 格點陣
   for (let i = 0; i < Math.min(250, str.length); i++) {
     const ch = str[i];
     out.push({ opponentId: oppId, index: i, first: 0, outcome: ch === 'W' ? 'win' : ch === 'L' ? 'loss' : 'draw' });
@@ -572,7 +573,7 @@ function buildSampleEventsFromCompact(oppId, rec, gamesPerOpp = GAMES_PER_OPPONE
     const srcIdx = half + i;
     if (srcIdx >= str.length) break;
     const ch = str[srcIdx];
-    out.push({ opponentId: oppId, index: 250 + i, first: 1, outcome: ch === 'W' ? 'win' : ch === 'L' ? 'loss' : 'draw' });
+    out.push({ opponentId: oppId, index: srcIdx, first: 1, outcome: ch === 'W' ? 'win' : ch === 'L' ? 'loss' : 'draw' });
   }
   return out;
 }
@@ -663,7 +664,7 @@ export function renderBattleReport(run, lineup, options = {}) {
           </div>
         </div>
         <div class="battle-strip-col">
-          ${renderGameStrip(opp.id, stripEvents, Boolean(options.canReplay), 500, 'replay-game', 0, 500, 500)}
+          ${renderGameStrip(opp.id, stripEvents, Boolean(options.canReplay), 500, 'replay-game', 0, 500, gamesPerOpp, hasCompact ? FIRST_SEAT_GAMES : 250)}
         </div>
         <div class="battle-opp-stat">
           <strong class="num-lg">${winPct}</strong>
@@ -1062,10 +1063,103 @@ function formatBoardSide(b, cardsList = state.cards) {
   return `<b>${esc(name)}</b>（體力 ${hp} · ${energy}能 · 備戰 ${benchCount} 隻 · 手牌 ${hand} 張）${benchNames ? ` <span class="muted">${esc(benchNames)}</span>` : ''}`;
 }
 
-export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, customGamesPerOpp = null, customWeights = null, customSeedPrefix = null, replayAction = 'replay-game' }) {
+function expandCardObjs20(deckLike) {
+  const out = [];
+  for (const item of deckLike?.cards || []) {
+    const card = state.cardsById?.get ? state.cardsById.get(item.id) : null;
+    const cnt = Math.max(1, Number(item.count || 1));
+    for (let k = 0; k < cnt; k++) {
+      if (out.length < 20) out.push(card || { id: item.id, name: item.id });
+    }
+  }
+  while (out.length < 20 && out.length > 0) out.push(out[0]);
+  return out;
+}
+
+function formatFastSimStepZh(step, myCards20, oppCards20) {
+  const actorCards = step.actor === 0 ? myCards20 : oppCards20;
+  const card = step.cardIdx >= 0 && step.cardIdx < actorCards.length ? actorCards[step.cardIdx] : null;
+  const cName = card?.name || '寶可夢';
+  switch (step.kind) {
+    case 1:
+      return `開局將「${cName}」放置於戰鬥場`;
+    case 2:
+      return `開局將「${cName}」放置於${slotLabelZh(step.aux1)}`;
+    case 3:
+      return `從牌庫抽取 1 張卡牌（「${cName}」）`;
+    case 4:
+      return `將「${cName}」放置於${slotLabelZh(step.aux1)}`;
+    case 5:
+      return `將${slotLabelZh(step.aux1)}的寶可夢進化為「${cName}」`;
+    case 6: {
+      const tk = step.aux1;
+      const val = step.aux2;
+      if (tk === 1) return `施放訓練家卡「${cName}」（檢索／抽取 ${Math.max(1, Math.min(2, val))} 張卡牌）`;
+      if (tk === 2) return `施放恢復訓練家卡「${cName}」（為戰鬥場恢復 ${val} 點體力）`;
+      if (tk === 3) return val === 3 ? `施放干擾訓練家卡「${cName}」（壓縮對手手牌）` : `施放干擾訓練家卡「${cName}」（強制替換對手戰鬥場寶可夢）`;
+      if (tk === 4) return `施放增傷訓練家卡「${cName}」（本回合招式傷害 +${val}）`;
+      if (tk === 5) return val > 0 ? `為戰鬥場裝備道具「${cName}」（最大體力 +20）` : `為戰鬥場裝備道具「${cName}」（反擊傷害 20）`;
+      if (tk === 6) return val === 99 ? `施放「${cName}」（基礎寶可夢直接跳階進化為二階）` : val >= 2 ? `施放「${cName}」（額外補充 1 顆能量）` : `施放機動訓練家卡「${cName}」`;
+      if (tk === 7) return `發動競技場卡「${cName}」（招式傷害 +10）`;
+      return `施放訓練家卡「${cName}」`;
+    }
+    case 7: {
+      const abName = card?.abilities?.[0]?.name ? `「${card.abilities[0].name}」` : '';
+      return `發動${slotLabelZh(step.aux1)}「${cName}」的特性${abName}`;
+    }
+    case 8:
+      return `從能量區為${slotLabelZh(step.aux1)}「${cName}」附著 1 顆能量（目前 ${step.aux2} 顆）`;
+    case 9: {
+      const newCard = step.aux2 >= 0 && step.aux2 < actorCards.length ? actorCards[step.aux2] : null;
+      const newName = newCard?.name || `${slotLabelZh(step.aux1)}寶可夢`;
+      return `戰鬥場「${cName}」撤退，換上${slotLabelZh(step.aux1)}「${newName}」`;
+    }
+    case 10: {
+      const atkName = card?.attacks?.[0]?.name ? `「${card.attacks[0].name}」` : '主力招式';
+      const weakBonus = step.aux2 & 0xff;
+      const ko = (step.aux2 >> 8) & 1;
+      const extra = `${weakBonus > 0 ? '，觸發屬性弱點 +20' : ''}${ko ? '，擊倒對手戰鬥場寶可夢！' : ''}`;
+      return `「${cName}」發動招式${atkName}，造成 ${step.aux1} 點傷害${extra}`;
+    }
+    case 11:
+      return '結束回合';
+    case 12:
+      return `回合間檢查：${playerSideZh(step.actor)}戰鬥場「${cName}」因異常狀態受到 ${step.aux1} 點傷害${step.aux2 ? '並氣絕！' : ''}`;
+    default:
+      return '執行對局動作';
+  }
+}
+
+function formatFastBoardSide(side, deckCards20) {
+  if (!side || side.cardIdx < 0) return '空場（等待替補）';
+  const card = deckCards20[side.cardIdx];
+  const name = card?.name || '寶可夢';
+  const toolTag = side.tool === 1 ? '·斗蓬' : side.tool === 2 ? '·頭盔' : '';
+  return `<b>${esc(name)}</b>（體力 ${side.hp}/${side.maxHp} · ${side.energy}能${toolTag} · 備戰 ${side.bench} 隻 · 手牌 ${side.hand} 張 · 牌庫 ${side.deck} 張）`;
+}
+
+export function buildFullGameFlowModal({
+  opp,
+  oppId,
+  idx,
+  run,
+  deck,
+  weights,
+  customGamesPerOpp = null,
+  customWeights = null,
+  customSeedPrefix = null,
+  customSeedBase = null,
+  customMyFastDeck = null,
+  customOppFastDeck = null,
+  replayAction = 'replay-game'
+}) {
   const gamesPerOpp = customGamesPerOpp || GAMES_PER_OPPONENT;
   const half = Math.floor(gamesPerOpp / 2);
-  const seed = fnv1a32(`${customSeedPrefix || run?.runId || 'demo'}:${oppId}:${idx}`);
+  const seedBase = customSeedBase ?? (
+    customSeedPrefix
+      ? fnv1a32(`${customSeedPrefix}:${oppId}`)
+      : fnv1a32(`${run?.runId || 'demo'}:test50k:${oppId}`)
+  );
   const first = idx < half ? 0 : 1;
   const sideText = first === 0
     ? `我方先攻（先攻第 ${(idx + 1).toLocaleString('zh-TW')}/${half.toLocaleString('zh-TW')} 局）`
@@ -1073,11 +1167,11 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
   const prevIdx = (idx - 1 + gamesPerOpp) % gamesPerOpp;
   const nextIdx = (idx + 1) % gamesPerOpp;
 
-  if (!state.engineReady || !state.runtimeFn || !opp?.representative || !deck) {
+  if (!state.engineReady || !state.fastSimFn || !opp?.representative || !deck) {
     return `
       <div class="flow-modal">
         <div class="flow-nav-bar">
-          <span>第 <b>${(idx + 1).toLocaleString('zh-TW')}</b> / ${gamesPerOpp.toLocaleString('zh-TW')} 局 · ${esc(sideText)} · 隨機種子 <code>${seed}</code></span>
+          <span>第 <b>${(idx + 1).toLocaleString('zh-TW')}</b> / ${gamesPerOpp.toLocaleString('zh-TW')} 局 · ${esc(sideText)} · 隨機種子 <code>${seedBase}</code></span>
         </div>
         <p class="desc">對戰模擬引擎尚未就緒，暫無法重播此局完整流程。</p>
       </div>
@@ -1089,36 +1183,37 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
     || run?.winningStrategy?.weights
     || weights;
 
-  const replayRes = state.runtimeFn({
-    op: 'game',
-    deck: { cards: deck.cards, energy: deck.energy },
-    enemy: { cards: opp.representative.cards, energy: opp.representative.energy },
+  // 100% 還原與 test_50k_chunk 完全一致的雙方緊湊牌組與策略詞條加成，確保綠點必為勝局、紅點必為敗局
+  let myBonus = run?.matchedStrategies?.cardBonusById || null;
+  let oppBonus = run?.matchedStrategies?.oppCardBonusById?.[oppId] || null;
+  if (!myBonus && state.strategyLexicon) {
+    myBonus = matchDeckStrategies(deck, [{ rank: 1, entry: opp }], state.strategyLexicon, weights).cardBonusById;
+  }
+  if (!oppBonus && state.strategyLexicon) {
+    oppBonus = matchDeckStrategies(opp.representative, [], state.strategyLexicon, weights).cardBonusById;
+  }
+  const myFastDeck = customMyFastDeck || expandDeckForFastSim(deck, myBonus || {});
+  const oppFastDeck = customOppFastDeck || expandDeckForFastSim(opp.representative, oppBonus || {});
+
+  const replayRes = state.fastSimFn({
+    op: 'replay_game',
+    deck: myFastDeck,
+    enemy: oppFastDeck,
     weights: playerWeights,
     enemy_weights: weights,
-    seed,
-    first,
-    replay: true
+    game_idx: idx,
+    total_per_opp: gamesPerOpp,
+    seed_base: seedBase
   });
 
-  // 建立本局雙方牌表精準英轉中映射（讓招式與特性 100% 精準顯示官方中文名）
-  const matchCardsByEn = new Map();
-  for (const item of [...(deck.cards || []), ...(opp.representative?.cards || [])]) {
-    const c = state.cardsById?.get ? state.cardsById.get(item.id) : null;
-    if (c?.nameEn) matchCardsByEn.set(normEnKey(c.nameEn), c);
-  }
-
-  const steps = Array.isArray(replayRes?.replay) ? replayRes.replay : [];
+  const myCards20 = expandCardObjs20(deck);
+  const oppCards20 = expandCardObjs20(opp.representative);
+  const steps = Array.isArray(replayRes?.steps) ? replayRes.steps : [];
   const outcomeLabel = { win: '我方獲勝', loss: '對手獲勝', draw: '平局（達 30 回合上限）' }[replayRes.outcome] || '對局結束';
   const outcomeCls = `is-${replayRes.outcome || 'draw'}`;
   const finalPts = Array.isArray(replayRes?.points) ? `${replayRes.points[0]} : ${replayRes.points[1]}` : '—';
 
-  // 記錄每一步執行前的盤面狀態，以便準確辨識發動招式／特性的當前寶可夢
-  const enrichedSteps = steps.map((s, i) => ({
-    ...s,
-    _seq: i + 1,
-    _prevBoard: i > 0 ? steps[i - 1].board : null
-  }));
-
+  const enrichedSteps = steps.map((s, i) => ({ ...s, _seq: i + 1 }));
   const setupSteps = enrichedSteps.filter((s) => s.turn === 0);
   const combatSteps = enrichedSteps.filter((s) => s.turn > 0);
   const byTurn = new Map();
@@ -1131,19 +1226,13 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
     const actorBadge = s.actor === 0
       ? '<span class="flow-actor is-me">我方（千萬局獲勝策略）</span>'
       : '<span class="flow-actor is-opp">對手（環境基準策略）</span>';
+    const actionZh = formatFastSimStepZh(s, myCards20, oppCards20);
     const b0 = s.board?.[0];
     const b1 = s.board?.[1];
-    const actionZh = translateActionLabel(s.action, {
-      actor: s.actor,
-      prevBoard: s._prevBoard,
-      board: s.board,
-      matchCardsByEn,
-      cardsList: state.cards
-    });
     const boardHtml = b0 && b1
       ? `<div class="flow-board-snap">
-          <span>我方戰鬥場：${formatBoardSide(b0, state.cards)}</span>
-          <span>對手戰鬥場：${formatBoardSide(b1, state.cards)}</span>
+          <span>我方戰鬥場：${formatFastBoardSide(b0, myCards20)}</span>
+          <span>對手戰鬥場：${formatFastBoardSide(b1, oppCards20)}</span>
         </div>`
       : '';
     return `
@@ -1186,7 +1275,7 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
         <div class="flow-nav-info">
           <span class="flow-result-badge ${outcomeCls}">${esc(outcomeLabel)}（${esc(finalPts)}）</span>
           <span>第 <b>${(idx + 1).toLocaleString('zh-TW')}</b> / ${gamesPerOpp.toLocaleString('zh-TW')} 局 · ${esc(sideText)}</span>
-          <span>共 <b>${replayRes.turns || 0}</b> 回合 / <b>${steps.length}</b> 步完整動作 · 隨機種子 <code>${seed}</code></span>
+          <span>共 <b>${replayRes.turns || 0}</b> 回合 / <b>${steps.length}</b> 步完整動作 · 隨機種子 <code>${seedBase}</code></span>
         </div>
         <div class="flow-nav-btns">
           <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${prevIdx}">◀ 上一局（第 ${(prevIdx + 1).toLocaleString('zh-TW')} 局）</button>
@@ -1195,7 +1284,7 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
       </div>
 
       <div class="flow-stage-card">
-        <h3>階段一 · 對局雙方牌組與策略配置（精確規則引擎完整重現）</h3>
+        <h3>階段一 · 對局雙方牌組與策略配置（與勝負點陣同引擎、同種子 100% 一致重現）</h3>
         <p class="sub">我方：<b>${esc(deck.name)}</b>（${esc(translateEnergyListZh(deck.energy))} · 套用 13,500 策略詞條庫與 10,000,000 局勝局提煉獲勝策略）　對陣　對手：<b>${esc(opp.name)}</b>（${esc(translateEnergyListZh(opp.representative.energy))} · 採用環境基準策略模型）</p>
       </div>
 
@@ -1211,7 +1300,7 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
 
       <div class="flow-stage-card is-end">
         <h3>階段四 · 終局結算</h3>
-        <p class="sub">最終判定：<b>${esc(outcomeLabel)}</b> · 最終得分 <b>${esc(finalPts)}</b> · 全場累計執行 <b>${steps.length}</b> 個合法對局動作，已完整呈現本局每一步操作與雙方場上變化。</p>
+        <p class="sub">最終判定：<b>${esc(outcomeLabel)}</b> · 最終得分 <b>${esc(finalPts)}</b> · 全場累計執行 <b>${steps.length}</b> 個合法對局動作，已與點陣勝負結果完全一致重現。</p>
       </div>
     </div>
   `;
@@ -1347,6 +1436,9 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
     allOutcomes,
     allTurns,
     seedPrefix,
+    testSeedBase,
+    myFastDeck,
+    oppFastDeck,
     workersUsed
   };
 }
@@ -1373,7 +1465,7 @@ export function renderSingleOpponentDeepProgress({ opp, phase, done, total, wins
 }
 
 export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
-  const { opp, deck, baseWeights, winningWeights, matched, strategy, agg, allOutcomes, allTurns, seedPrefix } = deepResult;
+  const { opp, deck, baseWeights, winningWeights, matched, strategy, agg, allOutcomes, allTurns, seedPrefix, testSeedBase, myFastDeck, oppFastDeck } = deepResult;
   const testWr = agg.total ? ((agg.wins / agg.total) * 100).toFixed(2) + '%' : '—';
   const expWr = ((strategy.exploreWinRate || 0) * 100).toFixed(2) + '%';
   const deltaPct = agg.total
@@ -1420,6 +1512,9 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
     customGamesPerOpp: DEEP_GAMES_PER_OPPONENT,
     customWeights: winningWeights,
     customSeedPrefix: seedPrefix,
+    customSeedBase: testSeedBase,
+    customMyFastDeck: myFastDeck,
+    customOppFastDeck: oppFastDeck,
     replayAction: 'replay-single-deep'
   });
 
@@ -1457,23 +1552,26 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
 
   const lexicon = await ensureStrategyLexicon();
   const matched = matchDeckStrategies(deck, lineup, lexicon, weights);
-  run.matchedStrategies = {
-    totalLexiconCount: matched.totalLexiconCount,
-    matchedCount: matched.matchedCount,
-    cardMatchedCount: matched.cardMatchedCount,
-    macroMatchedCount: matched.macroMatchedCount,
-    topActiveStrategies: matched.topActiveStrategies,
-    matchedIds: matched.matchedIds
-  };
-
   const myFastDeck = expandDeckForFastSim(deck, matched.cardBonusById);
+  const oppCardBonusById = {};
   const fastEnemies = lineup.map((item) => {
     const oppM = matchDeckStrategies(item.entry.representative, [], lexicon, weights);
+    oppCardBonusById[item.entry.id] = oppM.cardBonusById;
     return {
       id: item.entry.id,
       cards: expandDeckForFastSim(item.entry.representative, oppM.cardBonusById)
     };
   });
+  run.matchedStrategies = {
+    totalLexiconCount: matched.totalLexiconCount,
+    matchedCount: matched.matchedCount,
+    cardMatchedCount: matched.cardMatchedCount,
+    macroMatchedCount: matched.macroMatchedCount,
+    cardBonusById: matched.cardBonusById,
+    oppCardBonusById,
+    topActiveStrategies: matched.topActiveStrategies,
+    matchedIds: matched.matchedIds
+  };
   const oppIds = fastEnemies.map((e) => e.id);
   const candidates = buildExplorationCandidates(
     matched.lexiconSeedWeights,

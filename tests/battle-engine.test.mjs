@@ -223,6 +223,53 @@ test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-expl
   assert.equal(fTest.outcomes.length, 1000);
   assert.equal(fTest.wins + fTest.draws + fTest.losses, 1000);
 
+  // Strict 100-game dot-to-replay parity test (first seat 0..49 + second seat 2500..2549)
+  const fTestSecond = fastSim({
+    op: "test_50k_chunk",
+    deck: expand(top10[0].representative, matched.cardBonusById),
+    enemy: expand(top10[1].representative),
+    opponent_id: top10[1].id,
+    weights: fStrat.weights,
+    enemy_weights: v3.weights,
+    start_idx: 2500,
+    count: 50,
+    total_per_opp: 5000,
+    seed_base: 99
+  });
+  for (let i = 0; i < 50; i++) {
+    const r1 = fastSim({
+      op: "replay_game",
+      deck: expand(top10[0].representative, matched.cardBonusById),
+      enemy: expand(top10[1].representative),
+      weights: fStrat.weights,
+      enemy_weights: v3.weights,
+      game_idx: i,
+      total_per_opp: 5000,
+      seed_base: 99
+    });
+    const exp1 = fTest.outcomes[i] === 1 ? "win" : fTest.outcomes[i] === 0 ? "loss" : "draw";
+    assert.equal(r1.outcome, exp1, `First-seat game #${i} outcome mismatch`);
+    assert.equal(r1.turns, fTest.turns[i], `First-seat game #${i} turns mismatch`);
+    assert.equal(r1.first, 0);
+    assert.ok(r1.steps.length > 0);
+
+    const r2 = fastSim({
+      op: "replay_game",
+      deck: expand(top10[0].representative, matched.cardBonusById),
+      enemy: expand(top10[1].representative),
+      weights: fStrat.weights,
+      enemy_weights: v3.weights,
+      game_idx: 2500 + i,
+      total_per_opp: 5000,
+      seed_base: 99
+    });
+    const exp2 = fTestSecond.outcomes[i] === 1 ? "win" : fTestSecond.outcomes[i] === 0 ? "loss" : "draw";
+    assert.equal(r2.outcome, exp2, `Second-seat game #${2500 + i} outcome mismatch`);
+    assert.equal(r2.turns, fTestSecond.turns[i], `Second-seat game #${2500 + i} turns mismatch`);
+    assert.equal(r2.first, 1);
+    assert.ok(r2.steps.length > 0);
+  }
+
   // Verify pure-Chinese replay action & card name translation (zero English action/name/HP leaks)
   const { translateActionLabel, translateEnCardName } = await import("../public/app/battle.mjs");
   const sampleActions = [
