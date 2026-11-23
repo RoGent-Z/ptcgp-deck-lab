@@ -33,20 +33,20 @@ test('same name across printings triggers shared cap',()=>{const altered=structu
 test('invalid import is rejected without partial coercion',()=>{for(const bad of [{...complete,cards:[{id:'A1-005',count:0}]},{...complete,energy:['Typo']},{...complete,cards:[{id:'A1-001',count:'2'}]}]) assert.throws(()=>readDeckFile(JSON.stringify(bad)))});
 test('search handles compact card id',()=>{assert.equal(normalizeSearch(' A1－001 '),'a1001')});
 test('aggregate includes draws, rejects duplicate slot, incomplete seeds',()=>{let events=[{opponentId:'a',index:0,outcome:'win'},{opponentId:'a',index:0,outcome:'loss'},{opponentId:'a',index:1,outcome:'draw'},{opponentId:'a',index:2,outcome:'skip'},{opponentId:'b',index:2,outcome:'loss'}];const accepted=validOutcomes(events,['a','b']);assert.equal(accepted.length,3);assert.equal(resultsFor(accepted,'a').length,2);assert.deepEqual(aggregate(accepted),{wins:1,draws:1,losses:1,total:3});assert.equal(summarizeBatch(accepted,['a','b']).complete,false)});
-test('computeCompositeWinRate and two-stage 10M-explore + 50k-test strategy synthesis work cleanly',()=>{
-  assert.equal(EXPLORE_TOTAL_GAMES,10000000);
-  assert.equal(EXPLORE_GAMES_PER_OPPONENT,1000000);
-  assert.equal(GAMES_PER_OPPONENT,5000);
-  assert.equal(FIRST_SEAT_GAMES,2500);
-  assert.equal(TOTAL_BATCH_GAMES,50000);
-  assert.equal(DEEP_EXPLORE_GAMES,10000000);
-  assert.equal(DEEP_GAMES_PER_OPPONENT,50000);
+test('computeCompositeWinRate and two-stage 1B-explore + 5M-test strategy synthesis work cleanly',()=>{
+  assert.equal(EXPLORE_TOTAL_GAMES,1000000000);
+  assert.equal(EXPLORE_GAMES_PER_OPPONENT,100000000);
+  assert.equal(GAMES_PER_OPPONENT,500000);
+  assert.equal(FIRST_SEAT_GAMES,250000);
+  assert.equal(TOTAL_BATCH_GAMES,5000000);
+  assert.equal(DEEP_EXPLORE_GAMES,1000000000);
+  assert.equal(DEEP_GAMES_PER_OPPONENT,5000000);
   assert.equal(isEngineImplementedStatus('Fully implemented'),true);
   assert.equal(isEngineImplementedStatus('Unknown card'),false);
   const lineup=[{rank:1,entry:{id:'a',name:'A',share:0.3}},{rank:2,entry:{id:'b',name:'B',share:0.1}}];
   const events=[
     ...Array.from({length:10},(_,i)=>({opponentId:'a',index:i,outcome:i<8?'win':'loss',turns:8})),
-    ...Array.from({length:10},(_,i)=>({opponentId:'b',index:2500+i,outcome:i<2?'win':'loss',turns:10}))
+    ...Array.from({length:10},(_,i)=>({opponentId:'b',index:250000+i,outcome:i<2?'win':'loss',turns:10}))
   ];
   const comp=computeCompositeWinRate(events,lineup);
   assert.equal(comp.total,20);

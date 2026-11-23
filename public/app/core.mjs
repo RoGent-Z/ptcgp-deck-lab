@@ -55,14 +55,14 @@ export function validateDeck(deck, byId) {
 export function normalizeSearch(text, map={}) {
   return Array.from(String(text||'').normalize('NFKC').toLowerCase()).map(ch=>map[ch]||ch).join('').replace(/[\s·•・－-]/g,'');
 }
-export const EXPLORE_TOTAL_GAMES = 10000000;
-export const EXPLORE_GAMES_PER_OPPONENT = 1000000;
+export const EXPLORE_TOTAL_GAMES = 1000000000;
+export const EXPLORE_GAMES_PER_OPPONENT = 100000000;
 export const EXPLORE_CANDIDATE_COUNT = 40;
-export const GAMES_PER_OPPONENT = 5000;
-export const FIRST_SEAT_GAMES = 2500;
-export const TOTAL_BATCH_GAMES = 50000;
-export const DEEP_EXPLORE_GAMES = 10000000;
-export const DEEP_GAMES_PER_OPPONENT = 50000;
+export const GAMES_PER_OPPONENT = 500000;
+export const FIRST_SEAT_GAMES = 250000;
+export const TOTAL_BATCH_GAMES = 5000000;
+export const DEEP_EXPLORE_GAMES = 1000000000;
+export const DEEP_GAMES_PER_OPPONENT = 5000000;
 
 export const FEATURE_NAMES_22 = [
   'endTurn', 'noop', 'place', 'activePower', 'evolve', 'evolutionPower',

@@ -870,7 +870,7 @@ async function handleAction(el) {
         });
       }
       if (!uiState.battle.abortCtrl.signal.aborted) {
-        showNotice(`已完成兩階段勝率測試：第 1 階段 ${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 局探索提煉獲勝策略 → 第 2 階段 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 局正式測試完成`);
+        showNotice(`模擬完成：10 億局策略探索 → 500 萬局實測`);
       }
     } catch (err) {
       showNotice(err?.message || '模擬中斷');
@@ -893,8 +893,18 @@ async function handleAction(el) {
     uiState.battle.deepAbortCtrl = ctrl;
 
     openModal(
-      `單組深度測試（${DEEP_EXPLORE_GAMES.toLocaleString('zh-TW')} 探索 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${opp.name}`,
-      renderSingleOpponentDeepProgress({ opp, phase: 'explore', done: 0, total: DEEP_EXPLORE_GAMES, wins: 0, gamesPerSec: 0, workers: Math.min(16, navigator.hardwareConcurrency || 4) }),
+      `單組深度模擬（10 億探索 → 500 萬實測）· 對陣 ${opp.name}`,
+      renderSingleOpponentDeepProgress({
+        opp,
+        phase: 'explore',
+        done: 0,
+        total: DEEP_EXPLORE_GAMES,
+        wins: 0,
+        gamesPerSec: 0,
+        mode: state.gpuReady ? 'gpu' : 'cpu',
+        adapter: state.gpuAdapterName,
+        workers: Math.min(16, navigator.hardwareConcurrency || 4)
+      }),
       { wide: true }
     );
 
@@ -911,15 +921,15 @@ async function handleAction(el) {
         }
       });
       if (!deepRes || ctrl.signal.aborted) {
-        showNotice('已中止單組深度測試');
+        showNotice('已中止單組深度模擬');
         return;
       }
       uiState.battle.lastSingleDeep = deepRes;
       const html = renderSingleOpponentDeepModal(deepRes, 0);
-      openModal(`單組深度推演（10,000,000 推演 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
-      showNotice(`已完成對「${opp.name}」的 10,000,000 推演 + ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試`);
+      openModal(`單組深度模擬（10 億探索 → 500 萬實測）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+      showNotice(`已完成對「${opp.name}」的 10 億局探索 + 500 萬局實測`);
     } catch (err) {
-      showNotice(err?.message || '單組深度測試失敗');
+      showNotice(err?.message || '單組深度模擬失敗');
     }
     return;
   }
@@ -934,7 +944,7 @@ async function handleAction(el) {
       uiState.battle.lex.page = Math.max(1, Number(el.dataset.page) || 1);
     }
     if (!state.strategyLexicon) {
-      openModal('全卡庫與競技攻略策略詞條庫（載入中…）', '<div class="empty-box is-dashed">正在載入 13,500 條策略詞條庫…</div>', { wide: true });
+      openModal('策略詞條庫（載入中…）', '<div class="empty-box is-dashed">正在載入 13,500 條策略詞條庫…</div>', { wide: true });
       await ensureStrategyLexicon();
     }
     const run = state.runs.find((r) => r.runId === uiState.battle.activeRunId) || state.runs[0];
@@ -946,23 +956,23 @@ async function handleAction(el) {
       ...uiState.battle.lex
     });
     const total = state.strategyLexicon?.entries?.length || 13500;
-    openModal(`全卡庫與網路攻略策略詞條庫（共 ${total.toLocaleString('zh-TW')} 條）`, html, { wide: true });
+    openModal(`策略詞條庫（${total.toLocaleString('zh-TW')} 條）`, html, { wide: true });
     return;
   }
 
   if (action === 'cancel-single-deep') {
     uiState.battle.deepAbortCtrl?.abort();
     dialogEl.close();
-    showNotice('已中止單組深度測試');
+    showNotice('已中止單組深度模擬');
     return;
   }
 
   if (action === 'replay-single-deep') {
     const deepRes = uiState.battle.lastSingleDeep;
-    if (!deepRes) { showNotice('請先執行該對手的 10,000,000 推演 + 50,000 測試'); return; }
+    if (!deepRes) { showNotice('請先執行單組 10 億探索 + 500 萬實測'); return; }
     const idx = Number(el.dataset.idx) || 0;
     const html = renderSingleOpponentDeepModal(deepRes, idx);
-    openModal(`單組深度推演（10,000,000 推演 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+    openModal(`單組深度模擬（10 億探索 → 500 萬實測）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
     return;
   }
 

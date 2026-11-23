@@ -976,6 +976,7 @@ export function renderBattle() {
   const activeModel = state.modelsById.get(uiState.battle.modelId) || state.modelInfo;
   const activeModelMeta = activeModel?.metaEntry || modelList.find((x) => x.id === uiState.battle.modelId) || null;
   const activeModelVersion = activeModel?.version || 'selfplay-cem-v3';
+  const activeModelDisplay = activeModelMeta?.label || activeModelVersion;
 
   if (state.engineReady && state.runtimeFn) {
     const coverIds = [
@@ -1017,19 +1018,23 @@ export function renderBattle() {
     && (expDone < EXPLORE_TOTAL_GAMES || testDone < TOTAL_BATCH_GAMES)
   );
   const primaryBtnLabel = hasIncompleteRun
-    ? `繼續剩餘（推演 ${expDone.toLocaleString('zh-TW')}/${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} · 測試 ${testDone.toLocaleString('zh-TW')}/${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')}）`
-    : `開始千萬級勝率推演（先 ${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 推演 → 再 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 測試）`;
+    ? `繼續剩餘（探索 ${expDone.toLocaleString('zh-TW')} · 實測 ${testDone.toLocaleString('zh-TW')}）`
+    : '開始勝率模擬（10 億探索 → 500 萬實測）';
   const lexTotal = state.strategyIndex?.totalEntries || state.strategyLexicon?.totalEntries || 13500;
+  const hwModeLabel = state.gpuReady
+    ? `GPU 顯存加速${state.gpuAdapterName ? ` · ${state.gpuAdapterName}` : ''}`
+    : `多執行緒記憶體並行（${Math.min(16, Number(globalThis.navigator?.hardwareConcurrency || 4))} 核）`;
+  const top10Count = Object.keys(state.top10Elite?.teams || {}).length;
 
   return `
     <div class="page-head">
-      <h1>對戰測試與模擬綜合勝率（13,500 策略詞條 · 10,000,000 局推演 → 50,000 局測試）</h1>
-      <p class="desc">全卡庫 4,577 張卡每張逐一考察 2,400 局實戰並結合頂尖競技攻略，構建 <b>${lexTotal.toLocaleString('zh-TW')} 條獨立策略詞條</b>並注入引擎：第一階段以多執行緒 WASM 進行 <b>${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 次對局推演勝利策略</b>（前十對手各 ${EXPLORE_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局），第二階段採用獲勝策略再進行 <b>${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 次實際勝率推演</b>（每對手先攻 ${FIRST_SEAT_GAMES.toLocaleString('zh-TW')} + 後攻 ${FIRST_SEAT_GAMES.toLocaleString('zh-TW')} = ${GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）。</p>
+      <h1>對戰測試與勝率模擬</h1>
+      <p class="desc">10 億局策略探索 → 500 萬局實測 · 前十對手均採千萬局互博最佳策略。</p>
     </div>
 
     <div class="battle-setup-grid">
       <section class="panel">
-        <h2>1. 選擇測試牌組與千萬局策略模型</h2>
+        <h2>1. 參戰牌組與引擎</h2>
         <div class="field-stack">
           <div class="field-label">
             <span>參戰牌組</span>
@@ -1056,28 +1061,28 @@ export function renderBattle() {
             })}
           </div>
           ${selectedDeck && !deckLegal ? `<div class="status-note is-warn">目前選中的牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
-          ${unsupportedDeckCards.length ? `<div class="status-note is-warn">以下卡牌尚未實裝至 DeckGym 規則引擎，暫無法模擬：${unsupportedDeckCards.map((c) => esc(c.id)).join('、')}</div>` : ''}
+          ${unsupportedDeckCards.length ? `<div class="status-note is-warn">以下卡牌尚未實裝至規則引擎，暫無法模擬：${unsupportedDeckCards.map((c) => esc(c.id)).join('、')}</div>` : ''}
         </div>
         <div class="engine-status-card ${state.engineReady ? 'is-ready' : 'is-pending'}">
           <div>
-            <strong>模擬引擎：${state.engineReady ? 'WASM 已就緒' : '籌備中'}</strong>
-            <p>${state.engineReady ? `目前模型：${esc(modelBadge)}` : esc(state.engineError || '對戰模擬引擎尚未開放，目前可瀏覽賽事前十牌組清單。')}</p>
+            <strong>${state.engineReady ? `引擎就緒 · ${esc(hwModeLabel)}` : '模擬引擎籌備中'}</strong>
+            <p>${state.engineReady ? `${esc(activeModelDisplay)}${top10Count ? ` · 前 ${top10Count} 對手已載入千萬局互博策略` : ''} · ${lexTotal.toLocaleString('zh-TW')} 詞條` : esc(state.engineError || '對戰模擬引擎尚未就緒。')}</p>
           </div>
         </div>
         <div class="actions block-gap">
           <button class="btn btn-primary" type="button" data-action="start-real-battle" ${canRunReal && !uiState.battle.running ? '' : 'disabled'}>
             ${icon('play', 15)}<span>${primaryBtnLabel}</span>
           </button>
-          <button class="btn btn-outline" type="button" data-action="open-strategy-lexicon">瀏覽 ${lexTotal.toLocaleString('zh-TW')} 策略詞條庫</button>
+          <button class="btn btn-outline" type="button" data-action="open-strategy-lexicon">策略詞條庫 (${lexTotal.toLocaleString('zh-TW')})</button>
           ${uiState.battle.running ? `<button class="btn btn-outline" type="button" data-action="pause-battle">${icon('pause', 15)}暫停</button>` : ''}
-          ${(m?.entries?.length && !uiState.battle.running) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck">${icon('plus', 15)}${decks.length ? '匯入榜首試測' : '一鍵匯入榜首並測試'}</button>` : ''}
+          ${(m?.entries?.length && !uiState.battle.running) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck">${icon('plus', 15)}${decks.length ? '匯入榜首試測' : '匯入榜首並測試'}</button>` : ''}
           ${state.fixture ? `<button class="btn btn-outline" type="button" data-action="run-fixture-preview" ${uiState.battle.running ? 'disabled' : ''}>展示點陣預覽</button>` : ''}
           ${activeRun ? `<button class="btn btn-outline" type="button" data-action="reset-battle-run" ${uiState.battle.running ? 'disabled' : ''}>清空重測</button>` : ''}
         </div>
       </section>
 
       <section class="panel">
-        <h2>2. 鎖定的前十對手（${lineup.selected.length}/10 · 10,000,000 推演 + 50,000 測試）</h2>
+        <h2>2. 賽事前十對手（${lineup.selected.length}/10 · 各千萬局互博最佳化）</h2>
         <ol class="opponent-preview-list">
           ${lineup.selected.map((x) => `
             <li>
@@ -1095,7 +1100,7 @@ export function renderBattle() {
     <section class="panel block-gap" id="battle-report-area">
       ${activeRun
         ? renderBattleReport(activeRun, lineup.selected, { canReplay: state.engineReady || state.fixture })
-        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>開始對戰測試後，系統將自動從 <b>13,500 條策略詞條庫</b>激活本牌組專屬詞條，透過多執行緒 FastSim WASM 先執行 <b>10,000,000 次對局推演勝利策略</b>，後續自動採取該獲勝策略進行 <b>50,000 次實際勝率推演</b>（每對手 5,000 局），即時計算等權與環境加權「模擬綜合勝率」，並支援 DeckGym 四階段完整對局回放。</p></div>'}
+        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>點擊「開始勝率模擬」，以顯存/記憶體並行執行 10 億局策略探索與 500 萬局實測。</p></div>'}
     </section>
 
     ${renderTrainingBenchmarkSection()}

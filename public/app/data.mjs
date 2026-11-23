@@ -38,6 +38,10 @@ export const state = {
   fastSimFn: null,
   fastSimModule: null,
   fastSimReady: false,
+  gpuSim: null,
+  gpuReady: false,
+  gpuAdapterName: '',
+  top10Elite: null,
   modelInfo: null,
   modelManifest: null,
   modelsById: new Map(),
@@ -93,7 +97,7 @@ function indexMetaEntries(meta, foldMap) {
 export async function loadInitialData(forceRefresh = false) {
   const prevHash = state.meta?.hash;
 
-  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, cardPriorsData, strategyIndexData, spritesData] = await Promise.all([
+  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, cardPriorsData, strategyIndexData, top10EliteData, spritesData] = await Promise.all([
     Object.keys(state.foldMap).length
       ? Promise.resolve(state.foldMap)
       : fetchJsonOptional('assets/han-fold.json').catch(() => ({})),
@@ -108,6 +112,7 @@ export async function loadInitialData(forceRefresh = false) {
       .catch(() => null),
     fetchJsonOptional('battle/models/card-priors.json', forceRefresh).catch(() => null),
     fetchJsonOptional('battle/strategies/index.json', forceRefresh).catch(() => null),
+    fetchJsonOptional('battle/models/top10-elite.json', forceRefresh).catch(() => null),
     fetchJsonOptional('data/sprites.json', forceRefresh).catch(() => null)
   ]);
 
@@ -115,6 +120,7 @@ export async function loadInitialData(forceRefresh = false) {
   state.spriteMap = spritesData?.byNameEn || {};
   state.cardPriors = cardPriorsData || null;
   state.strategyIndex = strategyIndexData || null;
+  state.top10Elite = top10EliteData || null;
   state.lastCheckedAt = new Date().toISOString();
 
   if (metaTop) {

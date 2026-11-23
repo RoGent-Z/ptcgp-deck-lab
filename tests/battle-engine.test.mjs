@@ -39,15 +39,31 @@ test("seeded first and second seat games resolve by the rules and replay exactly
   }
 });
 
-test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-explore + 50k-test WASM engines execute deterministically", async () => {
+test("deployed trained models (v3/v1/v2), top10 100M-league elite strategies, 13,500+ strategy lexicon, and 1B-explore + 5M-test WASM engines execute deterministically", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/battle/models/manifest.json", import.meta.url), "utf8"));
   assert.equal(manifest.defaultModelId, "v3");
+  assert.equal(manifest.models[0].label, "1B5M全量模型");
   assert.ok(manifest.strategyLexiconEntries >= 10000);
-  assert.equal(manifest.exploreTotalGames, 10000000);
-  assert.equal(manifest.gamesPerOpponent, 5000);
-  assert.equal(manifest.totalBatchGames, 50000);
-  assert.equal(manifest.deepExploreGames, 10000000);
-  assert.equal(manifest.deepTestGamesPerOpponent, 50000);
+  assert.equal(manifest.top10GamesPerTeam, 10000000);
+  assert.equal(manifest.top10TotalLeagueGames, 100000000);
+  assert.equal(manifest.exploreTotalGames, 1000000000);
+  assert.equal(manifest.gamesPerOpponent, 500000);
+  assert.equal(manifest.totalBatchGames, 5000000);
+  assert.equal(manifest.deepExploreGames, 1000000000);
+  assert.equal(manifest.deepTestGamesPerOpponent, 5000000);
+
+  // Verify Top-10 100,000,000-game co-evolved elite strategies (10M games/team)
+  const top10Elite = JSON.parse(await readFile(new URL("../public/battle/models/top10-elite.json", import.meta.url), "utf8"));
+  assert.equal(top10Elite.gamesPerTeam, 10000000);
+  assert.equal(top10Elite.totalLeagueGames, 100000000);
+  const eliteEntries = Object.entries(top10Elite.teams || {});
+  assert.equal(eliteEntries.length, 10);
+  for (const [id, info] of eliteEntries) {
+    assert.equal(info.gamesTrained, 10000000, `${id} expected 10M gamesTrained`);
+    assert.equal(info.weights.length, 22, `${id} expected 22 weights`);
+    const mirrorWr = info.vsMatrix?.[info.rank - 1];
+    assert.ok(mirrorWr >= 0.45 && mirrorWr <= 0.55, `${id} mirror win rate ${mirrorWr} out of balanced range`);
+  }
 
   // Verify 13,500+ Strategy Lexicon covers all 4,577 cards with >= 1,000 games/card & unique IDs
   const lexIndex = JSON.parse(await readFile(new URL("../public/battle/strategies/index.json", import.meta.url), "utf8"));
@@ -190,14 +206,16 @@ test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-expl
     return out;
   };
   const fastSim = await instantiateFastSim(await readFile(new URL("../public/battle/fastsim.wasm", import.meta.url)));
-  const cands40 = buildExplorationCandidates(matched.lexiconSeedWeights, "ut-fast10m", 40);
+  const cands40 = buildExplorationCandidates(matched.lexiconSeedWeights, "ut-fast1b", 40);
+  const opp1EliteW = top10Elite.teams[top10[1].id].weights;
   const fExp = fastSim({
     op: "explore_10m_chunk",
     deck: expand(top10[0].representative, matched.cardBonusById),
     enemies: [{ id: top10[1].id, cards: expand(top10[1].representative) }],
     candidates: cands40,
-    enemy_weights: v3.weights,
-    games_per_opponent: 1000000,
+    enemy_weights: opp1EliteW,
+    enemy_weights_list: [opp1EliteW],
+    games_per_opponent: 100000000,
     start_game: 0,
     count: 2000,
     seed_base: 42
@@ -213,27 +231,27 @@ test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-expl
     enemy: expand(top10[1].representative),
     opponent_id: top10[1].id,
     weights: fStrat.weights,
-    enemy_weights: v3.weights,
+    enemy_weights: opp1EliteW,
     start_idx: 0,
     count: 1000,
-    total_per_opp: 5000,
+    total_per_opp: 500000,
     seed_base: 99
   });
   assert.equal(fTest.completed, 1000);
   assert.equal(fTest.outcomes.length, 1000);
   assert.equal(fTest.wins + fTest.draws + fTest.losses, 1000);
 
-  // Strict 100-game dot-to-replay parity test (first seat 0..49 + second seat 2500..2549)
+  // Strict 100-game dot-to-replay parity test (first seat 0..49 + second seat 250000..250049)
   const fTestSecond = fastSim({
     op: "test_50k_chunk",
     deck: expand(top10[0].representative, matched.cardBonusById),
     enemy: expand(top10[1].representative),
     opponent_id: top10[1].id,
     weights: fStrat.weights,
-    enemy_weights: v3.weights,
-    start_idx: 2500,
+    enemy_weights: opp1EliteW,
+    start_idx: 250000,
     count: 50,
-    total_per_opp: 5000,
+    total_per_opp: 500000,
     seed_base: 99
   });
   for (let i = 0; i < 50; i++) {
@@ -242,9 +260,9 @@ test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-expl
       deck: expand(top10[0].representative, matched.cardBonusById),
       enemy: expand(top10[1].representative),
       weights: fStrat.weights,
-      enemy_weights: v3.weights,
+      enemy_weights: opp1EliteW,
       game_idx: i,
-      total_per_opp: 5000,
+      total_per_opp: 500000,
       seed_base: 99
     });
     const exp1 = fTest.outcomes[i] === 1 ? "win" : fTest.outcomes[i] === 0 ? "loss" : "draw";
@@ -258,14 +276,14 @@ test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-expl
       deck: expand(top10[0].representative, matched.cardBonusById),
       enemy: expand(top10[1].representative),
       weights: fStrat.weights,
-      enemy_weights: v3.weights,
-      game_idx: 2500 + i,
-      total_per_opp: 5000,
+      enemy_weights: opp1EliteW,
+      game_idx: 250000 + i,
+      total_per_opp: 500000,
       seed_base: 99
     });
     const exp2 = fTestSecond.outcomes[i] === 1 ? "win" : fTestSecond.outcomes[i] === 0 ? "loss" : "draw";
-    assert.equal(r2.outcome, exp2, `Second-seat game #${2500 + i} outcome mismatch`);
-    assert.equal(r2.turns, fTestSecond.turns[i], `Second-seat game #${2500 + i} turns mismatch`);
+    assert.equal(r2.outcome, exp2, `Second-seat game #${250000 + i} outcome mismatch`);
+    assert.equal(r2.turns, fTestSecond.turns[i], `Second-seat game #${250000 + i} turns mismatch`);
     assert.equal(r2.first, 1);
     assert.ok(r2.steps.length > 0);
   }

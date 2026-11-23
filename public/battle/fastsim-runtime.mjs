@@ -1,6 +1,9 @@
-// Fast zero-allocation WASM runtime wrapper for Pocket Lab 10,000,000-explore + 50,000-test engine.
+// Fast zero-allocation fixed-point i32 WASM runtime wrapper for Pocket Lab.
+// Uses exact Q10 (* 1024) i32 weights/bonuses and Rng32 matching WebGPU WGSL bit-for-bit.
 const FEATURES = 22;
 const CARD_STRIDE = 14;
+const MAX_ENEMIES = 10;
+const MAX_CANDS = 40;
 const moduleCache = new WeakMap();
 
 async function compileFastModule(wasmSource) {
@@ -24,7 +27,7 @@ export async function instantiateFastSim(wasmSource) {
 
   const writeDeck = (slot, compactCards) => {
     const decks = new Int32Array(mem.buffer, ex.get_decks_ptr(), 12 * 20 * CARD_STRIDE);
-    const bonuses = new Float32Array(mem.buffer, ex.get_bonus_ptr(), 12 * 20);
+    const bonuses = new Int32Array(mem.buffer, ex.get_bonus_ptr(), 12 * 20);
     const baseCard = slot * 20;
     for (let i = 0; i < 20; i++) {
       const c = compactCards[i] || compactCards[0];
@@ -43,33 +46,39 @@ export async function instantiateFastSim(wasmSource) {
       decks[off + 11] = c.trainerKind | 0;
       decks[off + 12] = c.effectVal | 0;
       decks[off + 13] = i;
-      bonuses[baseCard + i] = Number(c.strategyBonus || 0);
+      bonuses[baseCard + i] = Math.round(Number(c.strategyBonus || 0) * 1024);
     }
   };
 
   return function invokeFastSim(req) {
-    if (req.op === 'explore_10m_chunk') {
+    if (req.op === 'explore_10m_chunk' || req.op === 'explore_chunk') {
       const enemies = req.enemies || [];
       const cands = req.candidates || [];
-      const nOpps = enemies.length;
-      const nCands = cands.length;
+      const nOpps = Math.min(MAX_ENEMIES, enemies.length);
+      const nCands = Math.min(MAX_CANDS, cands.length);
 
       writeDeck(0, req.deck);
       for (let o = 0; o < nOpps; o++) writeDeck(o + 1, enemies[o].cards);
 
-      const weights = new Float32Array(mem.buffer, ex.get_weights_ptr(), (nCands + 1) * FEATURES);
-      for (let k = 0; k < FEATURES; k++) weights[k] = Number(req.enemy_weights[k] || 0);
+      const weights = new Int32Array(mem.buffer, ex.get_weights_ptr(), (MAX_ENEMIES + MAX_CANDS) * FEATURES);
+      weights.fill(0);
+      const enemyWeightsList = req.enemy_weights_list || null;
+      for (let o = 0; o < nOpps; o++) {
+        const ew = (enemyWeightsList && enemyWeightsList[o]) || req.enemy_weights || [];
+        const off = o * FEATURES;
+        for (let k = 0; k < FEATURES; k++) weights[off + k] = Math.round(Number(ew[k] || 0) * 1024);
+      }
       for (let c = 0; c < nCands; c++) {
-        const off = FEATURES + c * FEATURES;
-        for (let k = 0; k < FEATURES; k++) weights[off + k] = Number(cands[c][k] || 0);
+        const off = (MAX_ENEMIES + c) * FEATURES;
+        for (let k = 0; k < FEATURES; k++) weights[off + k] = Math.round(Number(cands[c][k] || 0) * 1024);
       }
 
       ex.run_explore_chunk(
         nOpps,
         nCands,
-        req.games_per_opponent,
-        req.start_game,
-        req.count,
+        req.games_per_opponent >>> 0,
+        req.start_game >>> 0,
+        req.count >>> 0,
         req.seed_base >>> 0
       );
 
@@ -133,20 +142,20 @@ export async function instantiateFastSim(wasmSource) {
       };
     }
 
-    if (req.op === 'test_50k_chunk') {
+    if (req.op === 'test_50k_chunk' || req.op === 'test_chunk') {
       writeDeck(0, req.deck);
       writeDeck(1, req.enemy);
-      const weights = new Float32Array(mem.buffer, ex.get_weights_ptr(), 2 * FEATURES);
+      const weights = new Int32Array(mem.buffer, ex.get_weights_ptr(), (MAX_ENEMIES + 1) * FEATURES);
       for (let k = 0; k < FEATURES; k++) {
-        weights[k] = Number(req.enemy_weights[k] || 0);
-        weights[FEATURES + k] = Number(req.weights[k] || 0);
+        weights[k] = Math.round(Number(req.enemy_weights[k] || 0) * 1024);
+        weights[MAX_ENEMIES * FEATURES + k] = Math.round(Number(req.weights[k] || 0) * 1024);
       }
 
       const n = ex.run_test_chunk(
         1,
-        req.start_idx,
-        req.count,
-        req.total_per_opp,
+        req.start_idx >>> 0,
+        req.count >>> 0,
+        req.total_per_opp >>> 0,
         req.seed_base >>> 0
       );
 
@@ -179,10 +188,10 @@ export async function instantiateFastSim(wasmSource) {
     if (req.op === 'replay_game') {
       writeDeck(0, req.deck);
       writeDeck(1, req.enemy);
-      const weights = new Float32Array(mem.buffer, ex.get_weights_ptr(), 2 * FEATURES);
+      const weights = new Int32Array(mem.buffer, ex.get_weights_ptr(), (MAX_ENEMIES + 1) * FEATURES);
       for (let k = 0; k < FEATURES; k++) {
-        weights[k] = Number(req.enemy_weights[k] || 0);
-        weights[FEATURES + k] = Number(req.weights[k] || 0);
+        weights[k] = Math.round(Number(req.enemy_weights[k] || 0) * 1024);
+        weights[MAX_ENEMIES * FEATURES + k] = Math.round(Number(req.weights[k] || 0) * 1024);
       }
       const stepCount = ex.run_replay_game(
         1,
