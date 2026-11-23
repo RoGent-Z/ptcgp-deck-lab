@@ -16,9 +16,11 @@ import {
   GAMES_PER_OPPONENT,
   interval,
   isAndroidOrMobileEnv,
+  isCardCompatibleWithDeck,
   isEngineImplementedStatus,
   matchDeckStrategies,
   mergeExploreChunkStats,
+  replaceDeckCardOnce,
   resolveModelSimProfile,
   synthesizeWinningStrategyFromStats,
   TOTAL_BATCH_GAMES,
@@ -231,6 +233,170 @@ async function runFastTasks(tasks, { fastSim, signal, onResult }) {
   for (let i = 0; i < tasks.length; i++) {
     if (signal?.aborted) break;
     const res = fastSim(tasks[i].request);
+    if (res?.error) throw Error(res.error);
+    await onResult?.(res, tasks[i], i);
+    await new Promise((r) => setTimeout(r, 0));
+  }
+  return 1;
+}
+
+// 延遲載入完整規則對戰引擎（deckgym.wasm，僅在使用者啟動 AI 優化或桌面端背景載入時觸發，不影響行動端冷啟動）
+let deckGymInitPromise = null;
+export async function ensureDeckGymRuntime() {
+  if (state.runtimeFn && state.wasmModule) return state.runtimeFn;
+  if (deckGymInitPromise) return deckGymInitPromise;
+  deckGymInitPromise = (async () => {
+    const [modRes, wasmRes] = await Promise.all([
+      import('../battle/runtime.mjs'),
+      fetch('battle/deckgym.wasm')
+    ]);
+    if (!wasmRes.ok) throw Error(`無法載入完整規則對戰引擎 (${wasmRes.status})`);
+    const bytes = await wasmRes.arrayBuffer();
+    const compiled = await WebAssembly.compile(bytes);
+    const fn = await modRes.instantiateBattle(compiled);
+    state.wasmModule = compiled;
+    state.wasmBytes = bytes;
+    state.runtimeFn = fn;
+    return fn;
+  })().finally(() => {
+    deckGymInitPromise = null;
+  });
+  return deckGymInitPromise;
+}
+
+// 多執行緒完整規則 Web Worker 並行池（行動端上限 4 核、桌面端上限 12 核）
+let deckGymWorkerPool = null;
+let deckGymWorkerPoolPromise = null;
+
+async function spawnDeckGymWorkerPool() {
+  if (typeof Worker === 'undefined') return null;
+  const hw = Number(globalThis.navigator?.hardwareConcurrency || 4);
+  const maxWorkers = isAndroidOrMobileEnv() ? 4 : 12;
+  const count = Math.max(2, Math.min(maxWorkers, hw));
+  const workerUrl = new URL('../battle/worker.mjs', import.meta.url);
+  const wasmUrl = new URL('../battle/deckgym.wasm', import.meta.url).href;
+
+  const workers = [];
+  let seq = 1;
+  const initOne = (idx) => new Promise((resolve, reject) => {
+    let w;
+    try {
+      w = new Worker(workerUrl, { type: 'module' });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const id = seq++;
+    const onMsg = (ev) => {
+      if (ev.data?.id !== id) return;
+      w.removeEventListener('message', onMsg);
+      w.removeEventListener('error', onErr);
+      if (ev.data.ok) resolve(w);
+      else reject(Error(ev.data.error || `DeckGym Worker #${idx} init failed`));
+    };
+    const onErr = (err) => {
+      w.removeEventListener('message', onMsg);
+      w.removeEventListener('error', onErr);
+      reject(Error(err?.message || `DeckGym Worker #${idx} error`));
+    };
+    w.addEventListener('message', onMsg);
+    w.addEventListener('error', onErr);
+    try {
+      if (state.wasmModule) {
+        w.postMessage({ type: 'init', id, module: state.wasmModule });
+      } else {
+        w.postMessage({ type: 'init', id, wasmUrl });
+      }
+    } catch {
+      w.postMessage({ type: 'init', id, wasmUrl });
+    }
+  });
+
+  try {
+    const initialized = await Promise.all(Array.from({ length: count }, (_, i) => initOne(i)));
+    workers.push(...initialized);
+  } catch (err) {
+    for (const w of workers) {
+      try { w.terminate(); } catch {}
+    }
+    console.warn('[battle] DeckGym worker pool fallback to main thread:', err?.message || err);
+    return null;
+  }
+
+  return {
+    size: workers.length,
+    async runTasks(tasks, { signal, onResult }) {
+      let nextIdx = 0;
+      let firstError = null;
+      const runOnWorker = (w) => new Promise((resolve) => {
+        const step = () => {
+          if (firstError || signal?.aborted || nextIdx >= tasks.length) {
+            resolve();
+            return;
+          }
+          const taskIdx = nextIdx++;
+          const task = tasks[taskIdx];
+          const id = seq++;
+          const onMsg = (ev) => {
+            if (ev.data?.id !== id) return;
+            w.removeEventListener('message', onMsg);
+            w.removeEventListener('error', onErr);
+            if (!ev.data.ok) {
+              firstError = Error(ev.data.error || 'Worker 執行失敗');
+              resolve();
+              return;
+            }
+            if (ev.data.result?.error) {
+              firstError = Error(ev.data.result.error);
+              resolve();
+              return;
+            }
+            Promise.resolve(onResult?.(ev.data.result, task, taskIdx))
+              .then(step)
+              .catch((err) => {
+                firstError = err;
+                resolve();
+              });
+          };
+          const onErr = (err) => {
+            w.removeEventListener('message', onMsg);
+            w.removeEventListener('error', onErr);
+            firstError = Error(err?.message || 'Worker 異常');
+            resolve();
+          };
+          w.addEventListener('message', onMsg);
+          w.addEventListener('error', onErr);
+          w.postMessage({ type: 'run', id, request: task.request });
+        };
+        step();
+      });
+
+      await Promise.all(workers.map((w) => runOnWorker(w)));
+      if (firstError) throw firstError;
+    }
+  };
+}
+
+async function getDeckGymWorkerPool() {
+  if (deckGymWorkerPool) return deckGymWorkerPool;
+  if (!deckGymWorkerPoolPromise) {
+    deckGymWorkerPoolPromise = spawnDeckGymWorkerPool().then((pool) => {
+      deckGymWorkerPool = pool;
+      return pool;
+    });
+  }
+  return deckGymWorkerPoolPromise;
+}
+
+async function runDeckGymTasks(tasks, { runtimeFn, signal, onResult }) {
+  const pool = await getDeckGymWorkerPool();
+  if (pool) {
+    await pool.runTasks(tasks, { signal, onResult });
+    return pool.size;
+  }
+  for (let i = 0; i < tasks.length; i++) {
+    if (signal?.aborted) break;
+    const res = runtimeFn(tasks[i].request);
     if (res?.error) throw Error(res.error);
     await onResult?.(res, tasks[i], i);
     await new Promise((r) => setTimeout(r, 0));
@@ -2101,8 +2267,141 @@ export async function executeFixturePreviewBatch({ run, lineup, onTick, signal }
 }
 
 // ============================================================================
-// 牌組 AI 優化（底層採用 1M5Q 輕量模型遍歷全卡庫所有合法替換方案並測算實戰勝率）
+// 牌組 AI 優化（三階段：全卡庫規則相容初篩 → 完整規則多執行緒實戰模擬 → 高精度同種子複核）
 // ============================================================================
+function buildCompatibleMetaStapleItems({ candidates, metaEntries, targetCardId, origCard, remainingNameCounts, remainingBasics, optCtx, cardsById }) {
+  const candByLimit = new Map();
+  for (const item of candidates) {
+    if (!item?.card || item.isOriginal) continue;
+    const lk = item.card.limitName || item.card.nameEn || item.card.name;
+    if (!candByLimit.has(lk)) candByLimit.set(lk, item);
+  }
+
+  const origLimitKey = origCard ? (origCard.limitName || origCard.nameEn || origCard.name) : '';
+  const usageByLimit = new Map();
+  for (const entry of metaEntries || []) {
+    const share = Math.max(0.005, Number(entry?.share || 0.01));
+    const cardsList = entry?.representative?.cards || [];
+    for (const cEntry of cardsList) {
+      const c = cardsById.get(cEntry.id);
+      if (!c) continue;
+      const lk = c.limitName || c.nameEn || c.name;
+      if (lk === origLimitKey) continue;
+      if ((remainingNameCounts.get(lk) || 0) >= 2) continue;
+      if (remainingBasics === 0 && !(c.type === 'pokemon' && c.stage === 'basic')) continue;
+      if (!isCardCompatibleWithDeck(c, optCtx)) continue;
+      usageByLimit.set(lk, (usageByLimit.get(lk) || 0) + share * (Number(cEntry.count) || 1));
+    }
+  }
+
+  const sortedLimits = [...usageByLimit.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([lk]) => lk);
+
+  const staples = [];
+  for (const lk of sortedLimits) {
+    const item = candByLimit.get(lk);
+    if (item && item.card.id !== targetCardId) {
+      staples.push(item);
+      if (staples.length >= 16) break;
+    }
+  }
+  return staples;
+}
+
+function countOutcomesString(outcomesStr) {
+  let wins = 0;
+  let draws = 0;
+  let losses = 0;
+  const s = String(outcomesStr || '');
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    if (ch === 87) wins++; // 'W'
+    else if (ch === 68) draws++; // 'D'
+    else if (ch === 76) losses++; // 'L'
+  }
+  return { wins, draws, losses, games: wins + draws + losses };
+}
+
+async function evaluateCandidatesWithExactRules({
+  deck,
+  targetCardId,
+  candidateItems,
+  lineup,
+  playerWeights,
+  enemyWeightsList,
+  gamesPerOpp,
+  seedPrefix,
+  runtimeFn,
+  signal,
+  onCandidateProgress
+}) {
+  const nCand = candidateItems.length;
+  const nOpps = lineup.length;
+  const aggList = candidateItems.map((item) => ({
+    ...item,
+    games: 0,
+    wins: 0,
+    draws: 0,
+    losses: 0,
+    doneOpps: 0
+  }));
+
+  const tasks = [];
+  for (let ci = 0; ci < nCand; ci++) {
+    const item = candidateItems[ci];
+    const modDeck = item.isOriginal || item.card.id === targetCardId
+      ? deck
+      : replaceDeckCardOnce(deck, targetCardId, item.card.id);
+    const deckPayload = { cards: modDeck.cards, energy: modDeck.energy };
+
+    for (let oi = 0; oi < nOpps; oi++) {
+      const opp = lineup[oi].entry;
+      tasks.push({
+        ci,
+        oi,
+        request: {
+          op: 'test_chunk',
+          deck: deckPayload,
+          enemy: { cards: opp.representative.cards, energy: opp.representative.energy },
+          opponent_id: opp.id,
+          weights: playerWeights,
+          enemy_weights: enemyWeightsList[oi],
+          seed_prefix: seedPrefix,
+          start_idx: 0,
+          count: gamesPerOpp,
+          total_per_opp: gamesPerOpp
+        }
+      });
+    }
+  }
+
+  let finishedCandidates = 0;
+  await runDeckGymTasks(tasks, {
+    runtimeFn,
+    signal,
+    onResult: (res, task) => {
+      const agg = aggList[task.ci];
+      const cnt = countOutcomesString(res.outcomes);
+      agg.wins += cnt.wins;
+      agg.draws += cnt.draws;
+      agg.losses += cnt.losses;
+      agg.games += cnt.games;
+      agg.doneOpps++;
+      if (agg.doneOpps === nOpps) {
+        finishedCandidates++;
+        onCandidateProgress?.(finishedCandidates, nCand);
+      }
+    }
+  });
+
+  for (const agg of aggList) {
+    agg.winRate = agg.games ? agg.wins / agg.games : 0;
+    agg.scoreRate = agg.games ? (agg.wins + 0.5 * agg.draws) / agg.games : 0;
+  }
+  return aggList;
+}
+
 export async function executeDeckCardOptimize({ deck, targetCardId, lineup, onProgress, signal }) {
   const { ready, fastSim, gpuSim, error } = await probeEngine();
   if (!ready) throw Error(error || '模擬引擎尚未就緒');
@@ -2134,19 +2433,30 @@ export async function executeDeckCardOptimize({ deck, targetCardId, lineup, onPr
     cardBonusById
   });
 
-  const { baseDeck20, origCard, totalCatalogCount, totalLegalChecked, candidates } = prep;
-  const nOpps = fastEnemies.length;
-  const useGpu = Boolean(gpuSim?.ready);
-  const screenSeedBase = fnv1a32(`opt-screen:${deck.id}:${targetCardId}`);
-  const verifySeedBase = fnv1a32(`opt-verify:${deck.id}:${targetCardId}`);
+  const {
+    baseDeck20,
+    origCard,
+    optCtx,
+    remainingNameCounts,
+    remainingBasics,
+    totalCatalogCount,
+    totalLegalChecked,
+    incompatibleCount,
+    candidates
+  } = prep;
 
-  // 第一輪：遍歷全卡庫所有合法候選卡
-  const screenGamesPerOpp = useGpu ? 100 : 20;
+  const nOpps = fastEnemies.length;
+  const mobile = isAndroidOrMobileEnv();
+  const useGpu = Boolean(gpuSim?.ready);
+  const screenSeedBase = fnv1a32(`opt-screen-v2:${deck.id}:${targetCardId}`);
+
+  // 階段一：全卡庫合法與相容卡牌快速初篩（已過濾異色死牌、缺前階進化卡、條件不符訓練家）
+  const screenGamesPerOpp = useGpu ? 80 : 20;
   const batchSize = useGpu ? 64 : 32;
   const scored = new Array(candidates.length);
-  let checkedCards = 0;
+  let checkedCards = incompatibleCount;
 
-  onProgress?.({ stage: 'screen', done: 0, total: totalLegalChecked });
+  onProgress?.({ stage: 'screen', done: Math.min(totalLegalChecked, checkedCards), total: totalLegalChecked });
 
   if (useGpu) {
     gpuSim.uploadOptimizeContext({
@@ -2168,11 +2478,7 @@ export async function executeDeckCardOptimize({ deck, targetCardId, lineup, onPr
         const r = res.results[i];
         scored[start + i] = {
           ...slice[i],
-          games: r.games,
-          wins: r.wins,
-          draws: r.draws,
-          losses: r.losses,
-          winRate: r.games ? r.wins / r.games : 0
+          screenWinRate: r.games ? r.wins / r.games : 0
         };
         checkedCards += slice[i].representedCount || 1;
       }
@@ -2206,11 +2512,7 @@ export async function executeDeckCardOptimize({ deck, targetCardId, lineup, onPr
           const r = res.results[i];
           scored[task.start + i] = {
             ...task.slice[i],
-            games: r.games,
-            wins: r.wins,
-            draws: r.draws,
-            losses: r.losses,
-            winRate: r.games ? r.wins / r.games : 0
+            screenWinRate: r.games ? r.wins / r.games : 0
           };
           checkedCards += task.slice[i].representedCount || 1;
         }
@@ -2220,76 +2522,123 @@ export async function executeDeckCardOptimize({ deck, targetCardId, lineup, onPr
   }
   if (signal?.aborted) return null;
 
-  // 第二輪：對前段高勝率候選（前 24 名 + 原卡）以 1M5Q 完整 5,000 局（10 對手 × 500 局）複核定榜
+  // 組合階段二候選清單：原卡 + 賽事環境相容熱門卡 + 初篩前段（均衡涵蓋訓練家與寶可夢）
   const origItem = scored[0];
-  const othersRanked = scored.slice(1).filter(Boolean).sort((a, b) => b.winRate - a.winRate || b.wins - a.wins);
-  const finalists = [origItem, ...othersRanked.slice(0, 24)].filter(Boolean);
-  const verifyGamesPerOpp = 500; // 10 * 500 = 5,000 局完整輕量模型實測
+  const othersRanked = scored.slice(1).filter(Boolean).sort((a, b) => b.screenWinRate - a.screenWinRate);
+  const topTrainers = othersRanked.filter((x) => x.card?.type === 'trainer').slice(0, 10);
+  const topPokemons = othersRanked.filter((x) => x.card?.type === 'pokemon').slice(0, 8);
+  const metaStaples = buildCompatibleMetaStapleItems({
+    candidates,
+    metaEntries: state.meta?.entries || [],
+    targetCardId,
+    origCard,
+    remainingNameCounts,
+    remainingBasics,
+    optCtx,
+    cardsById: state.cardsById
+  });
 
-  onProgress?.({ stage: 'verify', done: 0, total: finalists.length });
-
-  let verified = [];
-  if (useGpu) {
-    const res = await gpuSim.runOptimizeBatch({
-      candidateCards: finalists.map((x) => x.encoded),
-      nOpps,
-      gamesPerOpp: verifyGamesPerOpp,
-      seedBase: verifySeedBase
-    });
-    verified = finalists.map((item, i) => {
-      const r = res.results[i];
-      return {
-        ...item,
-        games: r.games,
-        wins: r.wins,
-        draws: r.draws,
-        losses: r.losses,
-        winRate: r.games ? r.wins / r.games : 0
-      };
-    });
-    onProgress?.({ stage: 'verify', done: finalists.length, total: finalists.length });
-  } else {
-    const vTasks = finalists.map((item, idx) => ({
-      idx,
-      item,
-      request: {
-        op: 'optimize_batch',
-        base_deck: baseDeck20,
-        enemies: fastEnemies,
-        player_weights: playerWeights,
-        enemy_weights: playerWeights,
-        enemy_weights_list: enemyWeightsList,
-        candidate_cards: [item.encoded],
-        games_per_opp: verifyGamesPerOpp,
-        seed_base: verifySeedBase
-      }
-    }));
-    const vOut = new Array(finalists.length);
-    let vDone = 0;
-    await runFastTasks(vTasks, {
-      fastSim,
-      signal,
-      onResult: (res, task) => {
-        const r = res.results[0];
-        vOut[task.idx] = {
-          ...task.item,
-          games: r.games,
-          wins: r.wins,
-          draws: r.draws,
-          losses: r.losses,
-          winRate: r.games ? r.wins / r.games : 0
-        };
-        vDone++;
-        onProgress?.({ stage: 'verify', done: vDone, total: finalists.length });
-      }
-    });
-    verified = vOut.filter(Boolean);
+  const mergedPool = [];
+  const seenIds = new Set();
+  for (const item of [origItem, ...metaStaples.slice(0, 12), ...topTrainers, ...topPokemons]) {
+    if (!item?.card?.id || seenIds.has(item.card.id)) continue;
+    seenIds.add(item.card.id);
+    mergedPool.push(item);
+    if (mergedPool.length >= (mobile ? 20 : 28)) break;
   }
+
+  // 階段二：載入完整規則對戰引擎並以真實卡效、能量、進化與特性規則實戰模擬
+  onProgress?.({ stage: 'sim', done: 0, total: mergedPool.length });
+  const runtimeFn = await ensureDeckGymRuntime();
   if (signal?.aborted) return null;
 
+  // 確認所有候選卡皆已被完整規則引擎完整支援，剔除極少數未實裝特典卡
+  const covMap = ensureCardCoverage(mergedPool.map((x) => x.card.id));
+  const simPool = mergedPool.filter((x) => {
+    if (x.isOriginal) return true;
+    const st = covMap?.[x.card.id];
+    return !st || isEngineImplementedStatus(st);
+  });
+
+  const simGamesPerOpp = mobile ? 8 : 16; // 桌面 160 局/卡、行動端 80 局/卡（完整規則先後攻各半）
+  const simSeedPrefix = `opt-exact-s2:${deck.id}:${targetCardId}`;
+  const stage2Results = await evaluateCandidatesWithExactRules({
+    deck,
+    targetCardId,
+    candidateItems: simPool,
+    lineup,
+    playerWeights,
+    enemyWeightsList,
+    gamesPerOpp: simGamesPerOpp,
+    seedPrefix: simSeedPrefix,
+    runtimeFn,
+    signal,
+    onCandidateProgress: (done, total) => {
+      onProgress?.({ stage: 'sim', done, total });
+    }
+  });
+  if (signal?.aborted) return null;
+
+  // 階段三：對前段候選卡 + 原卡進行高精度同種子完整規則複核（桌面累計 560 局/卡，行動端 280 局/卡）
+  const s2Orig = stage2Results.find((x) => x.isOriginal) || stage2Results[0];
+  const s2Others = stage2Results
+    .filter((x) => !x.isOriginal)
+    .sort((a, b) => b.scoreRate - a.scoreRate || b.winRate - a.winRate);
+  const finalistKeep = mobile ? 6 : 9;
+  const finalists = [s2Orig, ...s2Others.slice(0, finalistKeep)].filter(Boolean);
+  const s2ById = new Map(stage2Results.map((x) => [x.card.id, x]));
+
+  const verifyGamesPerOpp = mobile ? 20 : 40; // 桌面追加 400 局/卡（累計 560 局）；行動端追加 200 局/卡（累計 280 局）
+  const verifySeedPrefix = `opt-exact-s3:${deck.id}:${targetCardId}`;
+  onProgress?.({ stage: 'verify', done: 0, total: finalists.length });
+
+  const stage3Results = await evaluateCandidatesWithExactRules({
+    deck,
+    targetCardId,
+    candidateItems: finalists,
+    lineup,
+    playerWeights,
+    enemyWeightsList,
+    gamesPerOpp: verifyGamesPerOpp,
+    seedPrefix: verifySeedPrefix,
+    runtimeFn,
+    signal,
+    onCandidateProgress: (done, total) => {
+      onProgress?.({ stage: 'verify', done, total });
+    }
+  });
+  if (signal?.aborted) return null;
+
+  // 合併階段二 + 階段三的完整規則實戰戰績
+  const verified = stage3Results.map((r3) => {
+    const r2 = s2ById.get(r3.card.id);
+    const wins = r3.wins + (r2?.wins || 0);
+    const draws = r3.draws + (r2?.draws || 0);
+    const losses = r3.losses + (r2?.losses || 0);
+    const games = r3.games + (r2?.games || 0);
+    return {
+      ...r3,
+      wins,
+      draws,
+      losses,
+      games,
+      winRate: games ? wins / games : 0,
+      scoreRate: games ? (wins + 0.5 * draws) / games : 0
+    };
+  });
+
   const baseline = verified.find((x) => x.isOriginal) || verified[0];
-  const ranked = [...verified].sort((a, b) => b.winRate - a.winRate || (a.isOriginal ? -1 : 1));
-  const best = ranked[0] || baseline;
+  const ranked = [...verified].sort((a, b) => b.winRate - a.winRate || b.scoreRate - a.scoreRate || (a.isOriginal ? -1 : 1));
+  let best = ranked[0] || baseline;
+  // 若最高候選卡勝率未顯著超越原卡（< +0.1%），誠實建議保留原卡
+  if (best && baseline && !best.isOriginal && (best.winRate - baseline.winRate) < 0.001) {
+    best = baseline;
+    const origIdx = ranked.findIndex((x) => x.isOriginal);
+    if (origIdx > 0) {
+      ranked.splice(origIdx, 1);
+      ranked.unshift(baseline);
+    }
+  }
   const topList = ranked.slice(0, 10);
 
   return {
@@ -2318,20 +2667,30 @@ export function renderDeckOptimizerModal(optState) {
   })).filter((x) => x.card);
 
   if (running) {
-    const isVerify = progress?.stage === 'verify';
+    const stage = progress?.stage || 'screen';
+    const isSim = stage === 'sim';
+    const isVerify = stage === 'verify';
     const done = Number(progress?.done || 0);
     const total = Math.max(1, Number(progress?.total || 1));
     const pct = Math.min(100, (done / total) * 100).toFixed(1);
     const targetName = state.cardsById.get(selectedCardId)?.name || '所選卡牌';
+    const stageTitle = isVerify
+      ? '正在對前段推薦卡牌進行高精度實戰複核…'
+      : isSim
+        ? '正在進行完整規則實戰對局測試…'
+        : `正在為「${esc(targetName)}」篩選全卡庫相容卡牌…`;
+    const stageSub = isVerify
+      ? `正在複核前 ${total} 張高勝率候選卡（${done} / ${total}）`
+      : isSim
+        ? `已完成 ${done} / ${total} 組候選牌組實戰模擬（${pct}%）`
+        : `已檢驗 ${done.toLocaleString('zh-TW')} / ${total.toLocaleString('zh-TW')} 張符合規則的卡牌（${pct}%）`;
     return `
       <div class="opt-modal">
         <div class="opt-progress-box">
           <div class="opt-progress-head">
             <div>
-              <strong>${isVerify ? '正在精細比較前段推薦卡牌…' : `正在為「${esc(targetName)}」尋找最佳替換卡牌…`}</strong>
-              <p class="sub">${isVerify
-                ? `正在複核前 ${total} 張高勝率候選卡（${done} / ${total}）`
-                : `已評估 ${done.toLocaleString('zh-TW')} / ${total.toLocaleString('zh-TW')} 張符合規則的卡牌（${pct}%）`}</p>
+              <strong>${stageTitle}</strong>
+              <p class="sub">${stageSub}</p>
             </div>
             <button class="btn btn-outline" type="button" data-action="cancel-deck-optimize">取消</button>
           </div>
@@ -2416,7 +2775,7 @@ export function renderDeckOptimizerModal(optState) {
         <div class="opt-rank-section">
           <h3>高勝率替換推薦（前 ${result.topList.length} 名）</h3>
           <ul class="opt-rank-list">${topRows}</ul>
-          <p class="sub opt-footnote">已為您遍歷檢驗全部 ${result.totalLegalChecked.toLocaleString('zh-TW')} 張符合組牌規則的卡牌。</p>
+          <p class="sub opt-footnote">已為您遍歷檢驗全部 ${result.totalLegalChecked.toLocaleString('zh-TW')} 張符合組牌規則的卡牌，並以完整規則實戰篩選出最佳替換建議。</p>
         </div>
       </div>
     `;

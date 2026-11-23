@@ -616,12 +616,33 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
   let bestCost = 1;
   let atkFlags = 0;
   for (const atk of card.attacks || []) {
-    const dmgNum = parseInt(String(atk.damage || '0').replace(/[^0-9]/g, ''), 10) || 0;
-    const cost = Math.max(1, Math.min(5, (atk.cost || []).length || 1));
+    const rawDmgStr = String(atk.damage || '0');
+    let dmgNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
+    const cost = Math.max(0, Math.min(5, (atk.cost || []).length));
     const eff = String(atk.effect || '');
-    if (dmgNum > bestDmg || (dmgNum === bestDmg && cost < bestCost)) {
+    // 在快速初篩中對高代價招式做真實期望折減，避免棄能/反傷/擲硬幣招式被誤判為免費高傷
+    if (/反面.*失敗|若為反面.*失敗|tails.*does nothing/i.test(eff)) {
+      dmgNum = Math.round(dmgNum * 0.5);
+    } else if (rawDmgStr.includes('×') || rawDmgStr.includes('x')) {
+      dmgNum = Math.round(dmgNum * 0.65);
+    }
+    if (/下個自己的回合.*無法使用|can't attack during your next turn/i.test(eff)) {
+      dmgNum = Math.round(dmgNum * 0.72);
+    }
+    const discardMatch = eff.match(/將這隻寶可夢身上的(?:所有|(\d+)個).*能量丟棄|discard\s+(\d+|all)\s+.*energy/i);
+    if (discardMatch) {
+      const nDisc = /所有|all/i.test(discardMatch[0]) ? 3 : Math.max(1, Number(discardMatch[1] || discardMatch[2] || 1));
+      dmgNum = Math.round(dmgNum * Math.max(0.52, 1 - 0.14 * nDisc));
+    }
+    const recoilMatch = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
+    if (recoilMatch) {
+      const recoil = Number(recoilMatch[1] || recoilMatch[2] || 0);
+      dmgNum = Math.max(10, dmgNum - Math.round(recoil * 0.6));
+    }
+    const effCost = Math.max(1, cost);
+    if (dmgNum > bestDmg || (dmgNum === bestDmg && effCost < bestCost)) {
       bestDmg = dmgNum;
-      bestCost = cost;
+      bestCost = effCost;
     }
     if (eff.length > 0) atkFlags |= 1;
     if (/備戰|bench/i.test(eff) && /傷害|damage/i.test(eff)) atkFlags |= 2;
@@ -645,26 +666,36 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
   let effectVal = 0;
   if (!isPokemon) {
     const eff = `${card.name || ''} ${card.nameEn || ''} ${card.effect || ''}`;
+    const body = `${card.effect || ''}`;
     if (card.subtype === 'stadium') {
-      trainerKind = 7; effectVal = 10;
+      trainerKind = 7;
+      effectVal = /傷害\+\d+|\+\d+點/i.test(body) ? 10 : 5;
     } else if (card.subtype === 'tool') {
       trainerKind = 5;
-      effectVal = /斗蓬|斗篷|Cape|HP\+20|HP\+30/i.test(eff) ? 20 : /頭盔|Helmet|20點傷害/i.test(eff) ? -20 : 10;
+      effectVal = /最大HP\+30/i.test(body) ? 25
+        : /斗蓬|斗篷|Cape|HP\+20/i.test(eff) ? 20
+        : /頭盔|Helmet|20點傷害/i.test(eff) ? -20
+        : /撤退/i.test(body) ? 8
+        : 10;
     } else if (/奇異糖果|神奇糖果|Rare Candy/i.test(eff)) {
       trainerKind = 6; effectVal = 99;
-    } else if (/大木博士|精靈球|模仿少女|奇樹|通訊|Research|Poké Ball|Copycat|Iono|Communication|抽.*張|抽出/i.test(eff)) {
-      trainerKind = 1; effectVal = /大木|Research/i.test(eff) ? 2 : 1;
-    } else if (/傷藥|莉佳|珠貝|莉莉艾|寶可夢中心|Potion|Erika|Irida|Lillie|Center Lady|恢復/i.test(eff)) {
+    } else if (/能量區.*附於|棄牌區.*能量附於|改附於.*能量|火補丁|滿充|小霞|小剛|小光|電次|卡奇|梅麗莎|Flame Patch|Misty|Brock|Dawn|Volkner/i.test(eff)) {
+      trainerKind = 6; effectVal = 2;
+    } else if (/撤退所需的能量減少|撤退費用減少|速度強化|葉子|X Speed|Leaf/i.test(eff)) {
+      trainerKind = 6; effectVal = 1;
+    } else if (/大木博士|博士的研究|精靈球|模仿少女|奇樹|通訊|Research|Poké Ball|Copycat|Iono|Communication|抽\d+張|加入手牌/i.test(eff)) {
+      trainerKind = 1; effectVal = /大木|博士的研究|Research/i.test(eff) ? 2 : 1;
+    } else if (/傷藥|莉佳|珠貝|莉莉艾|寶可夢中心|卡露妮|Potion|Erika|Irida|Lillie|Center Lady|恢復\d+HP/i.test(eff)) {
       trainerKind = 2;
-      const m = eff.match(/(\d+)\s*HP|恢復\s*(\d+)/i);
-      effectVal = m ? Math.min(80, Number(m[1] || m[2]) || 30) : 30;
+      const m = body.match(/(\d+)\s*HP|恢復\s*(\d+)/i);
+      let healVal = m ? Math.min(80, Number(m[1] || m[2]) || 30) : 30;
+      if (/能量丟棄|discard.*energy/i.test(body)) healVal = Math.max(20, Math.round(healVal * 0.5));
+      effectVal = healVal;
     } else if (/娜姿|赤日|古茲馬|夥星|紅牌|Sabrina|Cyrus|Guzma|Mars|Red Card|互換|放回牌庫/i.test(eff)) {
       trainerKind = 3;
       effectVal = /赤日|Cyrus/i.test(eff) ? 2 : /夥星|紅牌|Mars|Red Card/i.test(eff) ? 3 : 1;
-    } else if (/坂木|赤紅|夏伯|竹蘭|Giovanni|Red\b|Blaine|Cynthia|\+\d+點/i.test(eff)) {
-      trainerKind = 4; effectVal = /赤紅|Red\b/i.test(eff) ? 20 : 10;
-    } else if (/速度強化|葉子|小光|小霞|小剛|火焰貼片|X Speed|Leaf|Dawn|Misty|Brock|Flame Patch|撤退|能量/i.test(eff)) {
-      trainerKind = 6; effectVal = /能量|Energy|Misty|Brock|Dawn|Patch/i.test(eff) ? 2 : 1;
+    } else if (/坂木|赤紅|夏伯|竹蘭|可爾妮|哈烏|Giovanni|Red\b|Blaine|Cynthia|\+\d+點/i.test(eff)) {
+      trainerKind = 4; effectVal = /赤紅|Red\b|\+20|\+30/i.test(eff) ? 20 : 10;
     } else {
       trainerKind = 1; effectVal = 1;
     }
@@ -1206,15 +1237,18 @@ export function getPokemonCategorySearchTerms(id) {
 }
 
 const TRAINER_TYPE_RESTRICTIONS = [
-  ['grass', /草屬性|草能量|Grass\s+Pok[eé]mon|Grass\s+Energy/i],
-  ['fire', /火屬性|火能量|Fire\s+Pok[eé]mon|Fire\s+Energy/i],
-  ['water', /水屬性|水能量|Water\s+Pok[eé]mon|Water\s+Energy/i],
-  ['lightning', /雷屬性|雷能量|Lightning\s+Pok[eé]mon|Lightning\s+Energy/i],
-  ['psychic', /超屬性|超能量|Psychic\s+Pok[eé]mon|Psychic\s+Energy/i],
-  ['fighting', /鬥屬性|鬥能量|Fighting\s+Pok[eé]mon|Fighting\s+Energy/i],
-  ['darkness', /惡屬性|惡能量|Darkness\s+Pok[eé]mon|Darkness\s+Energy/i],
-  ['metal', /鋼屬性|鋼能量|Metal\s+Pok[eé]mon|Metal\s+Energy/i]
+  ['grass', /\[\s*草\s*\]|草屬性|草能量|(?<![\u4e00-\u9fff])草寶可夢|Grass\s+Pok[eé]mon|Grass\s+Energy/i],
+  ['fire', /\[\s*火\s*\]|火屬性|火能量|(?<![\u4e00-\u9fff])火寶可夢|Fire\s+Pok[eé]mon|Fire\s+Energy/i],
+  ['water', /\[\s*水\s*\]|水屬性|水能量|(?<![\u4e00-\u9fff])水寶可夢|Water\s+Pok[eé]mon|Water\s+Energy/i],
+  ['lightning', /\[\s*雷\s*\]|雷屬性|雷能量|(?<![\u4e00-\u9fff])雷寶可夢|Lightning\s+Pok[eé]mon|Lightning\s+Energy/i],
+  ['psychic', /\[\s*超\s*\]|超屬性|超能量|(?<![\u4e00-\u9fff])超寶可夢|Psychic\s+Pok[eé]mon|Psychic\s+Energy/i],
+  ['fighting', /\[\s*鬥\s*\]|鬥屬性|鬥能量|Fighting\s+Pok[eé]mon|Fighting\s+Energy/i],
+  ['darkness', /\[\s*惡\s*\]|惡屬性|惡能量|(?<![\u4e00-\u9fff])惡寶可夢|Darkness\s+Pok[eé]mon|Darkness\s+Energy/i],
+  ['metal', /\[\s*鋼\s*\]|鋼屬性|鋼能量|(?<![\u4e00-\u9fff])鋼寶可夢|Metal\s+Pok[eé]mon|Metal\s+Energy/i],
+  ['colorless', /\[\s*無\s*\]寶可夢|無色屬性|無色寶可夢|Colorless\s+Pok[eé]mon/i]
 ];
+
+const GENERIC_QUOTED_TERMS = /^(硬幣|正面|反面|能量|進化|道具|基礎|支援者|物品|競技場|手牌|牌庫|戰鬥場|備戰區|寶可夢ex|超級進化寶可夢ex|寶可夢道具|究極異獸|化石|弱點|特性|招式|傷害|分數|分)$/;
 
 function normCardNameKey(s) {
   return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -1253,13 +1287,154 @@ export function replaceDeckCardOnce(deck, oldCardId, newCardId, cardsById = null
   return nextDeck;
 }
 
+export function isCardCompatibleWithDeck(card, ctx) {
+  if (!card || !ctx) return true;
+  const {
+    deckEnergySet,
+    remainingTypes,
+    remainingNames,
+    remainingEvolvesFromSet,
+    validStage2Keys,
+    hasStage1,
+    hasStage2,
+    hasMega,
+    hasUltraBeast,
+    hasAncient,
+    hasFuture,
+    hasTool,
+    hasStadium,
+    hasLowHpBasic,
+    hasRareCandyTarget
+  } = ctx;
+
+  const isFossil = card.subtype === 'fossil' || /化石|Fossil/i.test(`${card.name || ''} ${card.nameEn || ''}`);
+  if (isFossil) {
+    const myKeys = [card.name, card.nameEn, card.limitName].map(normCardNameKey).filter(Boolean);
+    return myKeys.some((k) => remainingEvolvesFromSet?.has(k));
+  }
+
+  if (card.type === 'pokemon') {
+    // 1. 檢查進化鏈是否在剩餘 19 張牌中存在對應前階
+    if (card.stage === 'stage1') {
+      const preKey = normCardNameKey(card.evolvesFrom);
+      if (!preKey || !remainingNames.has(preKey)) return false;
+    } else if (card.stage === 'stage2') {
+      const preKey = normCardNameKey(card.evolvesFrom);
+      const myKey = normCardNameKey(card.limitName || card.nameEn || card.name);
+      if ((!preKey || !remainingNames.has(preKey)) && !validStage2Keys.has(myKey)) return false;
+    }
+
+    // 2. 檢查是否至少有一個招式可用牌組設定的能量支付（0 費或全無色也算可支付）
+    const attacks = Array.isArray(card.attacks) ? card.attacks : [];
+    if (attacks.length > 0 && deckEnergySet?.size > 0) {
+      const hasPlayableAttack = attacks.some((atk) => {
+        const costs = Array.isArray(atk.cost) ? atk.cost : [];
+        return costs.every((sym) => {
+          const k = String(sym || '').toLowerCase();
+          return !k || k === 'colorless' || deckEnergySet.has(k);
+        });
+      });
+      if (!hasPlayableAttack) {
+        // 僅當該寶可夢具備無需異色能量也能在後排發揮作用的強特性時才放行（否則無法攻擊）
+        const hasEnergyFreeBenchAb = (card.abilities || []).some((ab) => {
+          const ae = String(ab.effect || '');
+          return /備戰區|每回合.*1次|傷害|恢復|抽.*張|撤退/i.test(ae) && !/\[[草火水雷超鬥惡鋼]\]能量/.test(ae);
+        });
+        if (!hasEnergyFreeBenchAb) return false;
+      }
+    }
+    return true;
+  }
+
+  if (card.type === 'trainer') {
+    const nameStr = `${card.name || ''} ${card.nameEn || ''}`;
+    const eff = `${card.effect || ''}`;
+
+    // 1. 檢查自身屬性 / 能量限制（忽略專門針對對手能量的干擾卡如「傑尼龜噴壺」）
+    const isOpponentOnlyEnergyTarget = /將對手的.*寶可夢身上的.*\[[草火水雷超鬥惡鋼]\]能量/.test(eff)
+      && !/自己的.*\[[草火水雷超鬥惡鋼]\]/.test(eff);
+    if (!isOpponentOnlyEnergyTarget) {
+      const matchedTypes = [];
+      for (const [typeKey, rx] of TRAINER_TYPE_RESTRICTIONS) {
+        if (rx.test(eff)) matchedTypes.push(typeKey);
+      }
+      if (matchedTypes.length > 0) {
+        const hasMatch = matchedTypes.some((t) => remainingTypes.has(t) || deckEnergySet.has(t));
+        if (!hasMatch) return false;
+      }
+    }
+
+    // 2. 檢查階段與特殊類別依賴
+    if (/神奇糖果|奇異糖果|Rare Candy/i.test(nameStr)) {
+      if (!hasRareCandyTarget) return false;
+    } else if (/2階進化寶可夢|Stage 2/i.test(eff) && !hasStage2) {
+      return false;
+    } else if (/1階進化寶可夢|Stage 1/i.test(eff) && !hasStage1) {
+      return false;
+    }
+
+    if (/從自己的牌庫.*超級進化|自己的.*超級進化/i.test(eff) && !/除外/.test(eff) && !hasMega) {
+      return false;
+    }
+    if (/究極異獸|Ultra Beast/i.test(eff) && !/除外/.test(eff) && !hasUltraBeast) {
+      return false;
+    }
+    if (/古代寶可夢|Ancient\s+Pok[eé]mon/i.test(eff) && !hasAncient) {
+      return false;
+    }
+    if (/未來寶可夢|Future\s+Pok[eé]mon/i.test(eff) && !hasFuture) {
+      return false;
+    }
+    if (/從自己的牌庫.*「寶可夢道具」|寶可夢工具卡交換/.test(eff) && !hasTool) {
+      return false;
+    }
+    if (/從自己的牌庫.*「競技場」/.test(eff) && !hasStadium) {
+      return false;
+    }
+    if (/HP為50以下的基礎寶可夢/.test(eff) && !hasLowHpBasic) {
+      return false;
+    }
+
+    // 3. 檢查點名特定寶可夢的專屬訓練家卡（排除卡牌自稱與通用名詞）
+    const ownNames = new Set([card.name, card.nameEn, card.limitName].map(normCardNameKey).filter(Boolean));
+    const quoted = [...eff.matchAll(/[「“]([^」”]{2,16})[」”]/g)]
+      .map((m) => m[1].trim())
+      .filter((w) => w && !GENERIC_QUOTED_TERMS.test(w) && !ownNames.has(normCardNameKey(w)));
+    if (quoted.length > 0) {
+      const hasAny = quoted.some((q) => {
+        const nk = normCardNameKey(q);
+        for (const rn of remainingNames) {
+          if (rn.includes(nk) || nk.includes(rn)) return true;
+        }
+        if (remainingEvolvesFromSet?.has(nk)) return true;
+        return false;
+      });
+      if (!hasAny) return false;
+    }
+  }
+  return true;
+}
+
 export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
   const base = encodeCardForFastSim(card, strategyBonus);
   if (!card || !ctx) return base;
 
-  const { deckEnergySet, remainingTypes, remainingNames, validStage2Keys } = ctx;
+  const { deckEnergySet } = ctx;
+  if (!isCardCompatibleWithDeck(card, ctx)) {
+    if (card.type === 'pokemon') {
+      base.stage = 99;
+      base.atkDmg = 0;
+      base.atkFlags = 0;
+      base.abFlags = 0;
+    } else {
+      base.trainerKind = 0;
+      base.effectVal = 0;
+    }
+    base.strategyBonus = 0;
+    return base;
+  }
+
   if (card.type === 'pokemon') {
-    // Check attack energy compatibility with deck.energy
     const attacks = Array.isArray(card.attacks) ? card.attacks : [];
     if (attacks.length > 0 && deckEnergySet?.size > 0) {
       let playableDmg = 0;
@@ -1271,7 +1446,19 @@ export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
           return !k || k === 'colorless' || deckEnergySet.has(k);
         });
         if (canPay) {
-          const dmgNum = parseInt(String(atk.damage || '0').replace(/[^0-9]/g, ''), 10) || 0;
+          const rawDmgStr = String(atk.damage || '0');
+          let dmgNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
+          const eff = String(atk.effect || '');
+          if (/反面.*失敗|若為反面.*失敗|tails.*does nothing/i.test(eff)) dmgNum = Math.round(dmgNum * 0.5);
+          else if (rawDmgStr.includes('×') || rawDmgStr.includes('x')) dmgNum = Math.round(dmgNum * 0.65);
+          if (/下個自己的回合.*無法使用|can't attack during your next turn/i.test(eff)) dmgNum = Math.round(dmgNum * 0.72);
+          const discardMatch = eff.match(/將這隻寶可夢身上的(?:所有|(\d+)個).*能量丟棄|discard\s+(\d+|all)\s+.*energy/i);
+          if (discardMatch) {
+            const nDisc = /所有|all/i.test(discardMatch[0]) ? 3 : Math.max(1, Number(discardMatch[1] || discardMatch[2] || 1));
+            dmgNum = Math.round(dmgNum * Math.max(0.52, 1 - 0.14 * nDisc));
+          }
+          const recoilMatch = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
+          if (recoilMatch) dmgNum = Math.max(10, dmgNum - Math.round(Number(recoilMatch[1] || recoilMatch[2] || 0) * 0.6));
           const costLen = Math.max(1, Math.min(5, costs.length || 1));
           if (dmgNum > playableDmg || (dmgNum === playableDmg && costLen < playableCost)) {
             playableDmg = dmgNum;
@@ -1285,48 +1472,6 @@ export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
       } else {
         base.atkDmg = playableDmg;
         base.atkCost = playableCost;
-      }
-    }
-
-    // Check evolution chain availability in the remaining 19 cards
-    if (card.stage === 'stage1') {
-      const preKey = normCardNameKey(card.evolvesFrom);
-      if (!preKey || !remainingNames.has(preKey)) {
-        base.stage = 99; // Unplayable orphan Stage 1
-      }
-    } else if (card.stage === 'stage2') {
-      const preKey = normCardNameKey(card.evolvesFrom);
-      const myKey = normCardNameKey(card.limitName || card.nameEn || card.name);
-      if ((!preKey || !remainingNames.has(preKey)) && !validStage2Keys.has(myKey)) {
-        base.stage = 99; // Unplayable orphan Stage 2
-      }
-    }
-  } else if (card.type === 'trainer') {
-    const eff = `${card.effect || ''}`;
-    for (const [typeKey, rx] of TRAINER_TYPE_RESTRICTIONS) {
-      if (rx.test(eff) && !remainingTypes.has(typeKey) && !deckEnergySet.has(typeKey)) {
-        base.trainerKind = 0;
-        base.effectVal = 0;
-        base.strategyBonus = 0;
-        break;
-      }
-    }
-    // Named-Pokémon trainer synergy check (e.g. 「九尾」「大岩蛇」)
-    if (base.trainerKind !== 0) {
-      const quoted = [...eff.matchAll(/「([^」]{2,14})」/g)].map((m) => m[1]).filter((w) => !/硬幣|正面|反面|能量|進化|道具|基礎|支援者|物品|競技場|手牌|牌庫|戰鬥場|備戰區/.test(w));
-      if (quoted.length > 0) {
-        const hasAny = quoted.some((q) => {
-          const nk = normCardNameKey(q);
-          for (const rn of remainingNames) {
-            if (rn.includes(nk) || nk.includes(rn)) return true;
-          }
-          return false;
-        });
-        if (!hasAny) {
-          base.trainerKind = 0;
-          base.effectVal = 0;
-          base.strategyBonus = 0;
-        }
       }
     }
   }
@@ -1366,9 +1511,19 @@ export function buildLegalReplacementCandidates({
 
   const remainingNameCounts = new Map();
   const remainingNames = new Set();
+  const remainingEvolvesFromSet = new Set();
   const remainingTypes = new Set();
   let remainingBasics = 0;
   let hasRareCandy = false;
+  let hasStage1 = false;
+  let hasStage2 = false;
+  let hasMega = false;
+  let hasUltraBeast = false;
+  let hasAncient = false;
+  let hasFuture = false;
+  let hasTool = false;
+  let hasStadium = false;
+  let hasLowHpBasic = false;
 
   for (const entry of remainingEntries) {
     const c = cardsById.get(entry.id);
@@ -1379,36 +1534,76 @@ export function buildLegalReplacementCandidates({
       const nk = normCardNameKey(nm);
       if (nk) remainingNames.add(nk);
     }
+    if (c.evolvesFrom) {
+      const ef = normCardNameKey(c.evolvesFrom);
+      if (ef) remainingEvolvesFromSet.add(ef);
+    }
     if (c.type === 'pokemon') {
-      if (c.stage === 'basic') remainingBasics += entry.count;
+      if (c.stage === 'basic') {
+        remainingBasics += entry.count;
+        if (Number(c.hp || 999) <= 50) hasLowHpBasic = true;
+      } else if (c.stage === 'stage1') {
+        hasStage1 = true;
+      } else if (c.stage === 'stage2') {
+        hasStage2 = true;
+      }
+      const cats = c._pokeCats || getPokemonCategories(c);
+      if (cats.includes('mega')) hasMega = true;
+      if (cats.includes('ultrabeast')) hasUltraBeast = true;
+      if (cats.includes('ancient') || /古代|Ancient/i.test(`${c.subtype || ''} ${(c.tags || []).join(' ')}`)) hasAncient = true;
+      if (cats.includes('future') || /未來|Future/i.test(`${c.subtype || ''} ${(c.tags || []).join(' ')}`)) hasFuture = true;
       for (const t of c.types || []) remainingTypes.add(String(t || '').toLowerCase());
-    } else if (/神奇糖果|Rare Candy/i.test(`${c.name || ''} ${c.nameEn || ''}`)) {
-      hasRareCandy = true;
+    } else {
+      if (c.subtype === 'tool') hasTool = true;
+      if (c.subtype === 'stadium') hasStadium = true;
+      if (/神奇糖果|奇異糖果|Rare Candy/i.test(`${c.name || ''} ${c.nameEn || ''}`)) {
+        hasRareCandy = true;
+      }
     }
   }
 
-  // Build Rare Candy Stage 2 allow-list from Basic -> Stage 1 -> Stage 2 relationships in allCards
-  const validStage2Keys = new Set();
-  if (hasRareCandy) {
-    const stage1FromRemainingBasics = new Set();
-    for (const c of allCards) {
-      if (c.type === 'pokemon' && c.stage === 'stage1' && remainingNames.has(normCardNameKey(c.evolvesFrom))) {
-        for (const nm of [c.name, c.nameEn, c.limitName]) {
-          const nk = normCardNameKey(nm);
-          if (nk) stage1FromRemainingBasics.add(nk);
-        }
-      }
-    }
-    for (const c of allCards) {
-      if (c.type === 'pokemon' && c.stage === 'stage2' && stage1FromRemainingBasics.has(normCardNameKey(c.evolvesFrom))) {
-        const mk = normCardNameKey(c.limitName || c.nameEn || c.name);
-        if (mk) validStage2Keys.add(mk);
+  // 建立剩餘牌組中的基礎 -> 1階 -> 2階進化鏈索引，用於判定神奇糖果與 2 階進化卡的相容性
+  const stage1FromRemainingBasics = new Set();
+  for (const c of allCards) {
+    if (c.type === 'pokemon' && c.stage === 'stage1' && remainingNames.has(normCardNameKey(c.evolvesFrom))) {
+      for (const nm of [c.name, c.nameEn, c.limitName]) {
+        const nk = normCardNameKey(nm);
+        if (nk) stage1FromRemainingBasics.add(nk);
       }
     }
   }
+  const allReachableStage2Keys = new Set();
+  for (const c of allCards) {
+    if (c.type === 'pokemon' && c.stage === 'stage2' && stage1FromRemainingBasics.has(normCardNameKey(c.evolvesFrom))) {
+      const mk = normCardNameKey(c.limitName || c.nameEn || c.name);
+      if (mk) allReachableStage2Keys.add(mk);
+    }
+  }
+  const validStage2Keys = hasRareCandy ? allReachableStage2Keys : new Set();
+  const hasRareCandyTarget = remainingEntries.some((entry) => {
+    const c = cardsById.get(entry.id);
+    if (!c || c.type !== 'pokemon' || c.stage !== 'stage2') return false;
+    return allReachableStage2Keys.has(normCardNameKey(c.limitName || c.nameEn || c.name));
+  });
 
   const deckEnergySet = new Set((deck?.energy || []).map((e) => String(e || '').toLowerCase()));
-  const optCtx = { deckEnergySet, remainingTypes, remainingNames, validStage2Keys };
+  const optCtx = {
+    deckEnergySet,
+    remainingTypes,
+    remainingNames,
+    remainingEvolvesFromSet,
+    validStage2Keys,
+    hasStage1,
+    hasStage2,
+    hasMega,
+    hasUltraBeast,
+    hasAncient,
+    hasFuture,
+    hasTool,
+    hasStadium,
+    hasLowHpBasic,
+    hasRareCandyTarget
+  };
 
   // Build fixed 19-card base deck array for FastSim / WebGPU
   const baseCards19 = [];
@@ -1425,6 +1620,7 @@ export function buildLegalReplacementCandidates({
 
   const groups = new Map();
   let totalLegalChecked = 0;
+  let incompatibleCount = 0;
 
   // Always insert original card first as baseline (#0)
   const origGroupKey = `__ORIG__:${targetCardId}`;
@@ -1432,6 +1628,7 @@ export function buildLegalReplacementCandidates({
     card: origCard,
     encoded: origEnc,
     isOriginal: true,
+    compatible: true,
     representedCount: 1,
     prefScore: 9999
   });
@@ -1447,6 +1644,12 @@ export function buildLegalReplacementCandidates({
     totalLegalChecked++;
     if (card.id === targetCardId) continue;
 
+    // 過濾在當前牌組中根本無法發動效果的死牌（異色專屬訓練家、缺前階進化卡、缺能攻擊寶可夢等）
+    if (!isCardCompatibleWithDeck(card, optCtx)) {
+      incompatibleCount++;
+      continue;
+    }
+
     const bonus = Number(cardBonusById[card.id] || 0);
     const enc = encodeCardForOptimizer(card, bonus, optCtx);
 
@@ -1456,11 +1659,14 @@ export function buildLegalReplacementCandidates({
       continue;
     }
 
-    const fKey = [
-      limitKey, enc.isPokemon, enc.stage, enc.typeCode, enc.weakCode,
-      enc.hp, enc.retreat, enc.prize, enc.atkCost, enc.atkDmg,
-      enc.atkFlags, enc.abFlags, enc.trainerKind, enc.effectVal
-    ].join('|');
+    // 依卡牌實質功能分組（訓練家直接以卡名分組，避免同效異畫重複測試，但保留所有不同名稱的訓練家卡！）
+    const fKey = card.type === 'trainer'
+      ? `T|${normCardNameKey(limitKey)}`
+      : [
+          'P', normCardNameKey(limitKey), enc.stage, enc.typeCode, enc.weakCode,
+          enc.hp, enc.retreat, enc.prize, enc.atkCost, enc.atkDmg,
+          enc.atkFlags, enc.abFlags
+        ].join('|');
 
     const pref = rarityPreferenceScore(card, collection);
     const existing = groups.get(fKey);
@@ -1469,6 +1675,7 @@ export function buildLegalReplacementCandidates({
         card,
         encoded: enc,
         isOriginal: false,
+        compatible: true,
         representedCount: 1,
         prefScore: pref
       });
@@ -1485,8 +1692,12 @@ export function buildLegalReplacementCandidates({
   return {
     baseDeck20,
     origCard,
+    optCtx,
+    remainingNameCounts,
+    remainingBasics,
     totalCatalogCount: allCards.length,
     totalLegalChecked,
+    incompatibleCount,
     candidates: [...groups.values()]
   };
 }

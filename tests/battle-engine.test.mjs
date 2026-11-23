@@ -340,7 +340,8 @@ test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-lea
   assert.equal(translateEnCardName("Eevee", cardsAll), "伊布");
   assert.equal(translateEnCardName("Igglybuff", cardsAll), "寶寶丁");
 
-  // Verify Deck AI Optimizer legality filtering across all 4,577 cards + WASM optimize_batch execution
+  // Verify Deck AI Optimizer legality + compatibility filtering across all 4,577 cards + exact-rules verification
+  const { encodeCardForOptimizer, isCardCompatibleWithDeck } = await import("../public/app/core.mjs");
   const targetId = top10[0].representative.cards[0].id;
   const optPrep = buildLegalReplacementCandidates({
     deck: { id: "ut-deck", name: "Test", cards: top10[0].representative.cards, energy: top10[0].representative.energy },
@@ -352,8 +353,32 @@ test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-lea
   });
   assert.equal(optPrep.totalCatalogCount, 4577);
   assert.ok(optPrep.totalLegalChecked > 4000, `Expected > 4000 legal replacement cards, got ${optPrep.totalLegalChecked}`);
+  assert.ok(optPrep.incompatibleCount > 2500, `Expected off-type/orphan cards filtered out, got ${optPrep.incompatibleCount}`);
   assert.equal(optPrep.candidates[0].isOriginal, true);
   assert.equal(optPrep.candidates[0].card.id, targetId);
+
+  // Regression: Psychic-only Diantha (B2-149 [超]), Grass-only Erika (A1-219 [草]), Water-only Misty/Irida MUST be rejected in a pure Fire deck!
+  for (const offTypeId of ["B2-149", "A1-219", "A1-220", "A2a-072", "A2a-075", "B2-148"]) {
+    const offCard = cardById.get(offTypeId);
+    assert.equal(isCardCompatibleWithDeck(offCard, optPrep.optCtx), false, `${offTypeId} (${offCard?.name}) must be incompatible in Fire deck`);
+    const encOff = encodeCardForOptimizer(offCard, 0, optPrep.optCtx);
+    assert.equal(encOff.trainerKind, 0, `${offTypeId} must encode as trainerKind=0`);
+    assert.ok(!optPrep.candidates.some((x) => x.card.id === offTypeId), `${offTypeId} must not appear in compatible candidates`);
+  }
+  // Regression: Universal staples (Sabrina/Cyrus/Leaf/Cape/Helmet) MUST stay compatible (no '戰鬥寶可夢' false-match on 鬥!)
+  for (const stapleId of ["A1-225", "A2-150", "A1a-068", "A2-147", "A2-148", "B1-217"]) {
+    const sc = cardById.get(stapleId);
+    assert.equal(isCardCompatibleWithDeck(sc, optPrep.optCtx), true, `${stapleId} (${sc?.name}) must be compatible in Fire deck`);
+  }
+  // Regression: Leaf (A1a-068) must be retreat reduction (effectVal=1), NOT free energy attach (effectVal=2);
+  // Wally (B4-153 滿充) must be energy attach (trainerKind=6), NOT fake draw (trainerKind=1)!
+  const encLeaf = encodeCardForFastSim(cardById.get("A1a-068"), 0);
+  assert.equal(encLeaf.trainerKind, 6);
+  assert.equal(encLeaf.effectVal, 1);
+  const encWally = encodeCardForFastSim(cardById.get("B4-153"), 0);
+  assert.equal(encWally.trainerKind, 6);
+  assert.equal(encWally.effectVal, 2);
+
   // Every candidate replacement deck MUST pass validateDeck() with zero issues!
   for (const sample of optPrep.candidates.slice(0, 30)) {
     const replaced = replaceDeckCardOnce(
