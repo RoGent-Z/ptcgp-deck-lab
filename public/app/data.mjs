@@ -35,10 +35,15 @@ export const state = {
   engineReady: false,
   engineError: '',
   runtimeFn: null,
+  fastSimFn: null,
+  fastSimModule: null,
+  fastSimReady: false,
   modelInfo: null,
   modelManifest: null,
   modelsById: new Map(),
   cardPriors: null,
+  strategyIndex: null,
+  strategyLexicon: null,
   coverageMap: null,
   cloudSession: null,
   lastSyncedUserId: null,
@@ -88,7 +93,7 @@ function indexMetaEntries(meta, foldMap) {
 export async function loadInitialData(forceRefresh = false) {
   const prevHash = state.meta?.hash;
 
-  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, cardPriorsData, spritesData] = await Promise.all([
+  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, cardPriorsData, strategyIndexData, spritesData] = await Promise.all([
     Object.keys(state.foldMap).length
       ? Promise.resolve(state.foldMap)
       : fetchJsonOptional('assets/han-fold.json').catch(() => ({})),
@@ -102,12 +107,14 @@ export async function loadInitialData(forceRefresh = false) {
       .then((d) => d || fetchJsonOptional('battle/models/baseline-v0.json', forceRefresh))
       .catch(() => null),
     fetchJsonOptional('battle/models/card-priors.json', forceRefresh).catch(() => null),
+    fetchJsonOptional('battle/strategies/index.json', forceRefresh).catch(() => null),
     fetchJsonOptional('data/sprites.json', forceRefresh).catch(() => null)
   ]);
 
   state.foldMap = fold || {};
   state.spriteMap = spritesData?.byNameEn || {};
   state.cardPriors = cardPriorsData || null;
+  state.strategyIndex = strategyIndexData || null;
   state.lastCheckedAt = new Date().toISOString();
 
   if (metaTop) {
@@ -177,6 +184,21 @@ export async function loadInitialData(forceRefresh = false) {
     }
   }
   return { changed: Boolean(prevHash && state.meta?.hash && prevHash !== state.meta.hash) };
+}
+
+let strategyLexiconPromise = null;
+export async function ensureStrategyLexicon() {
+  if (state.strategyLexicon) return state.strategyLexicon;
+  if (!strategyLexiconPromise) {
+    strategyLexiconPromise = fetchJsonOptional('battle/strategies/lexicon.json')
+      .then((doc) => {
+        if (doc) state.strategyLexicon = doc;
+        return state.strategyLexicon;
+      })
+      .catch(() => null)
+      .finally(() => { strategyLexiconPromise = null; });
+  }
+  return strategyLexiconPromise;
 }
 
 export async function ensureFullMeta() {

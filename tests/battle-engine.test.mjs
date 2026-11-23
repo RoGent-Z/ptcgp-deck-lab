@@ -2,9 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { instantiateBattle } from "../public/battle/runtime.mjs";
+import { instantiateFastSim } from "../public/battle/fastsim-runtime.mjs";
 import {
   buildExplorationCandidates,
   createEmptyExploreStats,
+  encodeCardForFastSim,
+  matchDeckStrategies,
   mergeExploreChunkStats,
   synthesizeWinningStrategyFromStats
 } from "../public/app/core.mjs";
@@ -36,14 +39,25 @@ test("seeded first and second seat games resolve by the rules and replay exactly
   }
 });
 
-test("deployed trained models (v3/v1/v2), 4577-card 1000+ evaluations, and two-stage 100k-explore + 5k-test WASM pipeline execute deterministically", async () => {
+test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-explore + 50k-test WASM engines execute deterministically", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/battle/models/manifest.json", import.meta.url), "utf8"));
   assert.equal(manifest.defaultModelId, "v3");
-  assert.equal(manifest.exploreTotalGames, 100000);
-  assert.equal(manifest.gamesPerOpponent, 500);
-  assert.equal(manifest.totalBatchGames, 5000);
-  assert.equal(manifest.deepExploreGames, 100000);
-  assert.equal(manifest.deepTestGamesPerOpponent, 5000);
+  assert.ok(manifest.strategyLexiconEntries >= 10000);
+  assert.equal(manifest.exploreTotalGames, 10000000);
+  assert.equal(manifest.gamesPerOpponent, 5000);
+  assert.equal(manifest.totalBatchGames, 50000);
+  assert.equal(manifest.deepExploreGames, 10000000);
+  assert.equal(manifest.deepTestGamesPerOpponent, 50000);
+
+  // Verify 13,500+ Strategy Lexicon covers all 4,577 cards with >= 1,000 games/card & unique IDs
+  const lexIndex = JSON.parse(await readFile(new URL("../public/battle/strategies/index.json", import.meta.url), "utf8"));
+  const lexDoc = JSON.parse(await readFile(new URL("../public/battle/strategies/lexicon.json", import.meta.url), "utf8"));
+  assert.ok(lexIndex.totalEntries >= 10000, `Expected >= 10,000 strategy entries, got ${lexIndex.totalEntries}`);
+  assert.equal(lexDoc.entries.length, lexIndex.totalEntries);
+  assert.equal(lexIndex.cardsEvaluated, 4577);
+  assert.ok(lexIndex.minGamesPerCard >= 1000);
+  const uniqIds = new Set(lexDoc.entries.map((r) => r[0]));
+  assert.equal(uniqIds.size, lexDoc.entries.length);
 
   const v3 = JSON.parse(await readFile(new URL("../public/battle/models/v3.json", import.meta.url), "utf8"));
   const v1 = JSON.parse(await readFile(new URL("../public/battle/models/v1.json", import.meta.url), "utf8"));
@@ -161,4 +175,51 @@ test("deployed trained models (v3/v1/v2), 4577-card 1000+ evaluations, and two-s
   const expectedChar = replay0.outcome === "win" ? "W" : replay0.outcome === "loss" ? "L" : "D";
   assert.equal(testChunk.outcomes[0], expectedChar);
   assert.ok(Array.isArray(replay0.replay) && replay0.replay.length > 0);
+
+  // Verify FastSim WASM (10M explore + 50k test engine) + 13,500 Strategy Lexicon integration
+  const cardsAll = JSON.parse(await readFile(new URL("../public/data/cards.json", import.meta.url), "utf8"));
+  const cardById = new Map(cardsAll.map((c) => [c.id, c]));
+  const matched = matchDeckStrategies(top10[0].representative, top10.map((e, i) => ({ rank: i + 1, entry: e })), lexDoc, v3.weights);
+  assert.ok(matched.matchedCount >= 100, `Expected >= 100 matched strategies, got ${matched.matchedCount}`);
+  const expand = (rep, bonusMap = {}) => {
+    const out = [];
+    for (const c of rep.cards) {
+      const enc = encodeCardForFastSim(cardById.get(c.id), bonusMap[c.id] || 0);
+      for (let k = 0; k < c.count; k++) out.push(enc);
+    }
+    return out;
+  };
+  const fastSim = await instantiateFastSim(await readFile(new URL("../public/battle/fastsim.wasm", import.meta.url)));
+  const cands40 = buildExplorationCandidates(matched.lexiconSeedWeights, "ut-fast10m", 40);
+  const fExp = fastSim({
+    op: "explore_10m_chunk",
+    deck: expand(top10[0].representative, matched.cardBonusById),
+    enemies: [{ id: top10[1].id, cards: expand(top10[1].representative) }],
+    candidates: cands40,
+    enemy_weights: v3.weights,
+    games_per_opponent: 1000000,
+    start_game: 0,
+    count: 2000,
+    seed_base: 42
+  });
+  assert.equal(fExp.completed, 2000);
+  assert.equal(fExp.wins + fExp.draws + fExp.losses, 2000);
+  const fAcc = createEmptyExploreStats([top10[1].id], 40);
+  mergeExploreChunkStats(fAcc, fExp);
+  const fStrat = synthesizeWinningStrategyFromStats(fAcc, v3.weights, cands40);
+  const fTest = fastSim({
+    op: "test_50k_chunk",
+    deck: expand(top10[0].representative, matched.cardBonusById),
+    enemy: expand(top10[1].representative),
+    opponent_id: top10[1].id,
+    weights: fStrat.weights,
+    enemy_weights: v3.weights,
+    start_idx: 0,
+    count: 1000,
+    total_per_opp: 5000,
+    seed_base: 99
+  });
+  assert.equal(fTest.completed, 1000);
+  assert.equal(fTest.outcomes.length, 1000);
+  assert.equal(fTest.wins + fTest.draws + fTest.losses, 1000);
 });

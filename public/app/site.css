@@ -1837,6 +1837,43 @@ button.dot-cell:hover { transform: scale(1.6); outline: 1.5px solid var(--line-s
 }
 .card-prior-chip small { color: var(--swiss-red); font-family: var(--font-num); font-weight: 700; }
 
+.lexicon-banner {
+  margin-bottom: 14px;
+  padding: 13px 15px;
+  border-radius: var(--r-ctrl);
+  border: 1.5px solid var(--line-strong);
+  border-left: 5px solid var(--line-strong);
+  background: var(--grey-0);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+}
+.lex-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.lex-cat-tag {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: var(--r-ctrl);
+  border: 1px solid var(--line);
+  background: var(--grey-0);
+  font-size: 0.74rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.lex-guide-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 5px;
+  font-size: 0.8rem;
+  color: var(--text-mute);
+}
+.lex-table td { vertical-align: top; }
 .strategy-synth-banner {
   margin-bottom: 14px;
   padding: 13px 15px;

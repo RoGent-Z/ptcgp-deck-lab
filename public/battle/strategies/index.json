@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-11-23T02:08:47.386Z",
+  "totalEntries": 13500,
+  "cardsEvaluated": 4577,
+  "minGamesPerCard": 2400,
+  "totalCardEvalGames": 10984800,
+  "categories": [
+    {
+      "id": "opening_tempo",
+      "labelZh": "開局站位與先後手",
+      "count": 4161
+    },
+    {
+      "id": "combat_ko",
+      "labelZh": "斬殺斷點與傷害",
+      "count": 4161
+    },
+    {
+      "id": "synergy_combo",
+      "labelZh": "能源曲線與獎賞映射",
+      "count": 4161
+    },
+    {
+      "id": "trainer_timing",
+      "labelZh": "訓練家施放與濾牌",
+      "count": 416
+    },
+    {
+      "id": "disruption_control",
+      "labelZh": "手牌干擾與道具反制",
+      "count": 416
+    },
+    {
+      "id": "matchup_macro",
+      "labelZh": "高階環境與對位攻略",
+      "count": 185
+    }
+  ],
+  "sources": [
+    "2,400局單卡實測 + 網路競技攻略",
+    "2,400局單卡四流派實戰推演",
+    "網路頂尖競技攻略（Prize Map / Breakpoints / Tempo）",
+    "C1 賽事環境前十對位攻略 + 實戰驗證"
+  ],
+  "webGuides": [
+    {
+      "title": "PTCG Pocket 3-Point Prize Mapping & Sabrina/Cyrus Tempo Guide",
+      "site": "TCGProtectors / Untapped.gg",
+      "focus": "2-1 / 1-2 獎賞映射、娜姿鎖能陷阱與赤日斬殺收尾"
+    },
+    {
+      "title": "Advanced Deckbuilding: Giant Cape & Rocky Helmet Breakpoints + Anti-Mars Hand Management",
+      "site": "DittoBase / Competitive Community",
+      "focus": "大斗蓬 +20 HP 關鍵斷點、凸凸頭盔反傷計算與防夥星手牌壓縮"
+    },
+    {
+      "title": "Mega ex, Ultra Beasts & Rare Candy Fossil Stage-2 Meta Guide",
+      "site": "PokemonGOHub / Pokemon-Zone",
+      "focus": "超級進化 3 分獎賞風控、神奇糖果跳階與化石非 ex 換分策略"
+    },
+    {
+      "title": "C1 Top Archetypes Pilot Guide (Mega Charizard Y / Suicune / Mega Absol / Greninja / Giratina)",
+      "site": "LimitlessTCG / Pokemon.com",
+      "focus": "炎帝抽濾接超級噴火龍Y、水君戟脊龍轉能、超級阿勃梭魯手牌破壞與騎拉帝納後期收割"
+    },
+    {
+      "title": "Status Conditions (Poison/Sleep/Burn) & Stall/Healing Trainer Loops",
+      "site": "TCGPlayer / DotEsports / PTCGPocket.gg",
+      "focus": "異常狀態撤退/進化解除機制、莉佳/珠貝/莉莉艾續航循環與葉子/小光/古茲馬節奏切換"
+    }
+  ],
+  "sampleFeatured": [
+    {
+      "id": "ST-13489",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:energy-race",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 能源曲線競速對位",
+      "rule": "精算「甲賀忍蛙ex · 超級甲賀忍蛙ex」核心主攻的滿能回合數，在其缺 1 能量前搶先威脅擊倒或以娜姿打亂貼能對象。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13490",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:prize-map",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 獎賞分交換優化",
+      "rule": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」時嚴格控管 ex / Mega 3 分風險，優先迫使對手先手打 1 分怪再以主力反殺核心。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13491",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:gust-punish",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 娜姿/赤日後排懲罰",
+      "rule": "鎖定「甲賀忍蛙ex · 超級甲賀忍蛙ex」備戰區未進化胚體或已受傷主力，以點傷配合赤日/娜姿強行拖出收割。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13492",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:breakpoint-shield",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 關鍵血線與道具防禦",
+      "rule": "針對「甲賀忍蛙ex · 超級甲賀忍蛙ex」主力最高傷害線配置大斗蓬或回血續航，使其無法一擊帶走己方關鍵輸出手。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13493",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:evolution-race",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 進化節奏與神奇糖果搶拍",
+      "rule": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」時優先確保 1–2 階主力準時進化落地，透過特性與抽濾搶佔中盤火力制高點。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13494",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:hand-control",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 手牌資源控管與防干擾",
+      "rule": "預判「甲賀忍蛙ex · 超級甲賀忍蛙ex」可能攜帶夥星/紅牌或手牌破壞手段，及早消耗低費物品並保持進化件可檢索性。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13495",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:first-seat-plan",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 先攻對位取勝策略",
+      "rule": "先攻面對「甲賀忍蛙ex · 超級甲賀忍蛙ex」時善用提前 1 回合進化權，前排放置高血肉盾替後排主力安全蓄能。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13496",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:second-seat-plan",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 後攻對位反擊策略",
+      "rule": "後攻面對「甲賀忍蛙ex · 超級甲賀忍蛙ex」時憑藉先貼能優勢果斷搶攻壓血，將對手基礎胚體直接壓入斬殺線。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13497",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:retreat-pivot",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 殘血撤退與聯防輪轉",
+      "rule": "面對「甲賀忍蛙ex · 超級甲賀忍蛙ex」爆發前預留撤退費或葉子，將殘血核心換下保存能量並避免一次交出 2–3 分。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13498",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:ability-value",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 特性發動與場地聯動最大化",
+      "rule": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」時每回合最大化場上抽濾、充能或點傷特性頻次，建立長期資源滾雪球。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13499",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:endgame-close",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 終局斬殺計算與零失誤收官",
+      "rule": "進入對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」終局階段時優先搜尋最後 10–20 點補傷與斬殺線，不浪費回合於無效鋪場。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    },
+    {
+      "id": "ST-13500",
+      "cat": "matchup_macro",
+      "target": "greninja-ex-b1-mega-greninja-ex-c1:counter-tech",
+      "title": "對陣「甲賀忍蛙ex · 超級甲賀忍蛙ex」· 環境針對反制詞條",
+      "rule": "利用弱點 +20 屬性克制與道具拆除（古茲馬）瓦解「甲賀忍蛙ex · 超級甲賀忍蛙ex」標準防線，提高 50,000 局實戰勝率期望。",
+      "games": 10000,
+      "wr": 0.537,
+      "delta": 0.045
+    }
+  ]
+}

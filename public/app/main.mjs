@@ -24,6 +24,7 @@ import {
 import {
   deleteDeck,
   ensureFullMeta,
+  ensureStrategyLexicon,
   exportFullBackupJson,
   freshnessStatus,
   importBackupJson,
@@ -43,6 +44,7 @@ import {
 import { icon } from './icons.mjs';
 import {
   buildFullGameFlowModal,
+  buildStrategyLexiconModal,
   ensureCardCoverage,
   executeBattleBatch,
   executeFixturePreviewBatch,
@@ -815,9 +817,13 @@ async function handleAction(el) {
     const model = getSelectedBattleModel();
     const targetVersion = isDemo ? '展示樣板' : model.version;
 
-    const isIncomplete = (r) =>
-      (r.exploreStats?.completed ?? r.winningStrategy?.exploreTotal ?? 0) < EXPLORE_TOTAL_GAMES
-      || (r.events?.length || 0) < TOTAL_BATCH_GAMES;
+    const isIncomplete = (r) => {
+      const testDone = r.compactResults
+        ? Object.values(r.compactResults).reduce((s, rec) => s + (rec?.total || 0), 0)
+        : (r.events?.length || 0);
+      return (r.exploreStats?.completed ?? r.winningStrategy?.exploreTotal ?? 0) < EXPLORE_TOTAL_GAMES
+        || testDone < TOTAL_BATCH_GAMES;
+    };
 
     let run = state.runs.find((r) => r.runId === uiState.battle.activeRunId && r.deckId === deck.id && (r.isDemo || r.modelVersion === targetVersion))
       || state.runs.find((r) => r.deckId === deck.id && r.season === state.meta?.season && Boolean(r.isDemo) === isDemo && r.modelVersion === targetVersion && isIncomplete(r));
@@ -832,6 +838,8 @@ async function handleAction(el) {
         isDemo,
         exploreStats: null,
         winningStrategy: null,
+        matchedStrategies: null,
+        compactResults: {},
         events: [],
         createdAt: new Date().toISOString()
       };
@@ -908,11 +916,37 @@ async function handleAction(el) {
       }
       uiState.battle.lastSingleDeep = deepRes;
       const html = renderSingleOpponentDeepModal(deepRes, 0);
-      openModal(`單組深度測試（100,000 探索 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
-      showNotice(`已完成對「${opp.name}」的 100,000 探索 + ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試`);
+      openModal(`單組深度推演（10,000,000 推演 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+      showNotice(`已完成對「${opp.name}」的 10,000,000 推演 + ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試`);
     } catch (err) {
       showNotice(err?.message || '單組深度測試失敗');
     }
+    return;
+  }
+
+  if (action === 'open-strategy-lexicon' || action === 'strategy-lex-filter' || action === 'strategy-lex-page') {
+    if (!uiState.battle.lex) uiState.battle.lex = { q: '', cat: 'all', onlyMatched: false, page: 1 };
+    if (action === 'strategy-lex-filter') {
+      uiState.battle.lex.cat = el.dataset.cat || 'all';
+      uiState.battle.lex.onlyMatched = el.dataset.matched === '1';
+      uiState.battle.lex.page = 1;
+    } else if (action === 'strategy-lex-page') {
+      uiState.battle.lex.page = Math.max(1, Number(el.dataset.page) || 1);
+    }
+    if (!state.strategyLexicon) {
+      openModal('全卡庫與競技攻略策略詞條庫（載入中…）', '<div class="empty-box is-dashed">正在載入 13,500 條策略詞條庫…</div>', { wide: true });
+      await ensureStrategyLexicon();
+    }
+    const run = state.runs.find((r) => r.runId === uiState.battle.activeRunId) || state.runs[0];
+    const matchedIds = run?.matchedStrategies?.matchedIds || [];
+    const html = buildStrategyLexiconModal({
+      lexicon: state.strategyLexicon,
+      indexDoc: state.strategyIndex,
+      matchedIdSet: new Set(matchedIds),
+      ...uiState.battle.lex
+    });
+    const total = state.strategyLexicon?.entries?.length || 13500;
+    openModal(`全卡庫與網路攻略策略詞條庫（共 ${total.toLocaleString('zh-TW')} 條）`, html, { wide: true });
     return;
   }
 
@@ -925,10 +959,10 @@ async function handleAction(el) {
 
   if (action === 'replay-single-deep') {
     const deepRes = uiState.battle.lastSingleDeep;
-    if (!deepRes) { showNotice('請先執行該對手的 100,000 探索 + 5,000 測試'); return; }
+    if (!deepRes) { showNotice('請先執行該對手的 10,000,000 推演 + 50,000 測試'); return; }
     const idx = Number(el.dataset.idx) || 0;
     const html = renderSingleOpponentDeepModal(deepRes, idx);
-    openModal(`單組深度測試（100,000 探索 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+    openModal(`單組深度推演（10,000,000 推演 → ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 測試）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
     return;
   }
 
@@ -955,6 +989,8 @@ async function handleAction(el) {
         isDemo: false,
         exploreStats: null,
         winningStrategy: null,
+        matchedStrategies: null,
+        compactResults: {},
         events: [],
         createdAt: new Date().toISOString()
       };
@@ -1024,6 +1060,27 @@ document.addEventListener('input', (e) => {
   } else if (target.id === 'draft-name') {
     state.draft.name = target.value;
     saveDraft(state.draft);
+  } else if (target.id === 'lex-search-input') {
+    if (!uiState.battle.lex) uiState.battle.lex = { q: '', cat: 'all', onlyMatched: false, page: 1 };
+    uiState.battle.lex.q = target.value;
+    uiState.battle.lex.page = 1;
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => {
+      if (!dialogEl.open || !state.strategyLexicon) return;
+      const run = state.runs.find((r) => r.runId === uiState.battle.activeRunId) || state.runs[0];
+      const matchedIds = run?.matchedStrategies?.matchedIds || [];
+      dialogBodyEl.innerHTML = buildStrategyLexiconModal({
+        lexicon: state.strategyLexicon,
+        indexDoc: state.strategyIndex,
+        matchedIdSet: new Set(matchedIds),
+        ...uiState.battle.lex
+      });
+      const inp = document.getElementById('lex-search-input');
+      if (inp) {
+        inp.focus();
+        inp.setSelectionRange(inp.value.length, inp.value.length);
+      }
+    }, 120);
   }
 });
 

@@ -55,14 +55,14 @@ export function validateDeck(deck, byId) {
 export function normalizeSearch(text, map={}) {
   return Array.from(String(text||'').normalize('NFKC').toLowerCase()).map(ch=>map[ch]||ch).join('').replace(/[\s·•・－-]/g,'');
 }
-export const EXPLORE_TOTAL_GAMES = 100000;
-export const EXPLORE_GAMES_PER_OPPONENT = 10000;
-export const EXPLORE_CANDIDATE_COUNT = 20;
-export const GAMES_PER_OPPONENT = 500;
-export const FIRST_SEAT_GAMES = 250;
-export const TOTAL_BATCH_GAMES = 5000;
-export const DEEP_EXPLORE_GAMES = 100000;
-export const DEEP_GAMES_PER_OPPONENT = 5000;
+export const EXPLORE_TOTAL_GAMES = 10000000;
+export const EXPLORE_GAMES_PER_OPPONENT = 1000000;
+export const EXPLORE_CANDIDATE_COUNT = 40;
+export const GAMES_PER_OPPONENT = 5000;
+export const FIRST_SEAT_GAMES = 2500;
+export const TOTAL_BATCH_GAMES = 50000;
+export const DEEP_EXPLORE_GAMES = 10000000;
+export const DEEP_GAMES_PER_OPPONENT = 50000;
 
 export const FEATURE_NAMES_22 = [
   'endTurn', 'noop', 'place', 'activePower', 'evolve', 'evolutionPower',
@@ -534,6 +534,297 @@ export function synthesizeWinningStrategyFromStats(stats, baseWeights = [], cand
     byOpponent,
     topAdjustments: adjustments.slice(0, 6),
     allAdjustments: adjustments
+  };
+}
+
+const FASTSIM_TYPE_CODES = {
+  grass: 0, fire: 1, water: 2, lightning: 3, psychic: 4,
+  fighting: 5, darkness: 6, metal: 7, dragon: 8, colorless: 9
+};
+
+export function encodeCardForFastSim(card, strategyBonus = 0) {
+  if (!card) {
+    return {
+      isPokemon: 1, stage: 0, typeCode: 9, weakCode: 255, hp: 60, retreat: 1,
+      prize: 1, atkCost: 1, atkDmg: 20, atkFlags: 0, abFlags: 0,
+      trainerKind: 0, effectVal: 0, strategyBonus: Number(strategyBonus || 0)
+    };
+  }
+  const name = `${card.name || ''} ${card.nameEn || ''}`;
+  const isFossil = card.subtype === 'fossil' || /化石|Fossil/i.test(name);
+  const isPokemon = card.type === 'pokemon' || isFossil ? 1 : 0;
+  const stage = card.stage === 'stage2' ? 2 : card.stage === 'stage1' ? 1 : 0;
+  const primaryType = (card.types?.[0] || 'colorless').toLowerCase();
+  const typeCode = FASTSIM_TYPE_CODES[primaryType] ?? 9;
+  const weakCode = card.weakness ? (FASTSIM_TYPE_CODES[String(card.weakness).toLowerCase()] ?? 255) : 255;
+  const hp = isFossil ? 40 : (Number(card.hp) || (isPokemon ? 60 : 0));
+  const retreat = isFossil ? 4 : Math.min(4, Math.max(0, Number(card.retreat ?? 1)));
+  const cats = card.type === 'pokemon' ? (card._pokeCats || getPokemonCategories(card)) : [];
+  const isMega = cats.includes('mega');
+  const isEx = cats.includes('ex') || isMega;
+  const prize = isMega ? 3 : isEx ? 2 : 1;
+
+  let bestDmg = 0;
+  let bestCost = 1;
+  let atkFlags = 0;
+  for (const atk of card.attacks || []) {
+    const dmgNum = parseInt(String(atk.damage || '0').replace(/[^0-9]/g, ''), 10) || 0;
+    const cost = Math.max(1, Math.min(5, (atk.cost || []).length || 1));
+    const eff = String(atk.effect || '');
+    if (dmgNum > bestDmg || (dmgNum === bestDmg && cost < bestCost)) {
+      bestDmg = dmgNum;
+      bestCost = cost;
+    }
+    if (eff.length > 0) atkFlags |= 1;
+    if (/備戰|bench/i.test(eff) && /傷害|damage/i.test(eff)) atkFlags |= 2;
+    if (/中毒|灼傷|睡眠|麻痺|混亂|poison|burn|asleep|paralyz|confus/i.test(eff)) atkFlags |= 4;
+    if (/恢復|heal/i.test(eff)) atkFlags |= 8;
+    if (/能量區.*附|附於.*能量|attach.*energy/i.test(eff)) atkFlags |= 16;
+  }
+  if (isPokemon && bestDmg === 0) bestDmg = isFossil ? 0 : 20;
+
+  let abFlags = 0;
+  for (const ab of card.abilities || []) {
+    abFlags |= 1;
+    const eff = String(ab.effect || '');
+    if (/抽.*張|draw/i.test(eff)) abFlags |= 2;
+    if (/能量區|附於|attach.*energy/i.test(eff)) abFlags |= 4;
+    if (/恢復|heal/i.test(eff)) abFlags |= 8;
+    if (/傷害|damage/i.test(eff)) abFlags |= 16;
+  }
+
+  let trainerKind = 0;
+  let effectVal = 0;
+  if (!isPokemon) {
+    const eff = `${card.name || ''} ${card.nameEn || ''} ${card.effect || ''}`;
+    if (card.subtype === 'stadium') {
+      trainerKind = 7; effectVal = 10;
+    } else if (card.subtype === 'tool') {
+      trainerKind = 5;
+      effectVal = /斗蓬|斗篷|Cape|HP\+20|HP\+30/i.test(eff) ? 20 : /頭盔|Helmet|20點傷害/i.test(eff) ? -20 : 10;
+    } else if (/奇異糖果|神奇糖果|Rare Candy/i.test(eff)) {
+      trainerKind = 6; effectVal = 99;
+    } else if (/大木博士|精靈球|模仿少女|奇樹|通訊|Research|Poké Ball|Copycat|Iono|Communication|抽.*張|抽出/i.test(eff)) {
+      trainerKind = 1; effectVal = /大木|Research/i.test(eff) ? 2 : 1;
+    } else if (/傷藥|莉佳|珠貝|莉莉艾|寶可夢中心|Potion|Erika|Irida|Lillie|Center Lady|恢復/i.test(eff)) {
+      trainerKind = 2;
+      const m = eff.match(/(\d+)\s*HP|恢復\s*(\d+)/i);
+      effectVal = m ? Math.min(80, Number(m[1] || m[2]) || 30) : 30;
+    } else if (/娜姿|赤日|古茲馬|夥星|紅牌|Sabrina|Cyrus|Guzma|Mars|Red Card|互換|放回牌庫/i.test(eff)) {
+      trainerKind = 3;
+      effectVal = /赤日|Cyrus/i.test(eff) ? 2 : /夥星|紅牌|Mars|Red Card/i.test(eff) ? 3 : 1;
+    } else if (/坂木|赤紅|夏伯|竹蘭|Giovanni|Red\b|Blaine|Cynthia|\+\d+點/i.test(eff)) {
+      trainerKind = 4; effectVal = /赤紅|Red\b/i.test(eff) ? 20 : 10;
+    } else if (/速度強化|葉子|小光|小霞|小剛|火焰貼片|X Speed|Leaf|Dawn|Misty|Brock|Flame Patch|撤退|能量/i.test(eff)) {
+      trainerKind = 6; effectVal = /能量|Energy|Misty|Brock|Dawn|Patch/i.test(eff) ? 2 : 1;
+    } else {
+      trainerKind = 1; effectVal = 1;
+    }
+  }
+
+  return {
+    isPokemon, stage, typeCode, weakCode, hp, retreat, prize,
+    atkCost: bestCost, atkDmg: bestDmg, atkFlags, abFlags,
+    trainerKind, effectVal, strategyBonus: Number(strategyBonus || 0)
+  };
+}
+
+// 索引 13,500 條策略詞條庫，並為當前牌組 + 對手陣容精準匹配與加權應用策略詞條
+function ensureLexiconIndex(lexicon) {
+  if (!lexicon?.entries) return null;
+  if (lexicon._idx) return lexicon._idx;
+  const byCardId = new Map();
+  const macro = [];
+  for (let i = 0; i < lexicon.entries.length; i++) {
+    const r = lexicon.entries[i];
+    const cardId = r[2];
+    if (cardId) {
+      let arr = byCardId.get(cardId);
+      if (!arr) { arr = []; byCardId.set(cardId, arr); }
+      arr.push(r);
+    } else {
+      macro.push(r);
+    }
+  }
+  lexicon._idx = { byCardId, macro };
+  return lexicon._idx;
+}
+
+export function matchDeckStrategies(deck, lineup = [], lexicon = null, baseWeights = []) {
+  const base = Array.isArray(baseWeights) && baseWeights.length === 22
+    ? baseWeights.map(Number)
+    : Array(22).fill(0);
+  const idx = ensureLexiconIndex(lexicon);
+  if (!idx || !deck?.cards?.length) {
+    return {
+      totalLexiconCount: lexicon?.totalEntries || 0,
+      matchedCount: 0,
+      cardMatchedCount: 0,
+      macroMatchedCount: 0,
+      cardBonusById: {},
+      lexiconSeedWeights: [...base],
+      topActiveStrategies: [],
+      matchedIds: []
+    };
+  }
+
+  const matched = [];
+  const cardBonusSum = new Map();
+  const cardBonusCnt = new Map();
+  const wAccum = Array(22).fill(0);
+  const wHits = Array(22).fill(0);
+  const seenCardIds = new Set();
+
+  // 1. 匹配本牌組內每一張寶可夢卡與訓練家卡對應的所有策略詞條
+  for (const item of deck.cards) {
+    if (!item?.id || seenCardIds.has(item.id)) continue;
+    seenCardIds.add(item.id);
+    const list = idx.byCardId.get(item.id) || [];
+    for (const r of list) {
+      matched.push(r);
+      const b = Number(r[12] || 0);
+      cardBonusSum.set(item.id, (cardBonusSum.get(item.id) || 0) + b);
+      cardBonusCnt.set(item.id, (cardBonusCnt.get(item.id) || 0) + 1);
+      const wi = r[10] || [];
+      const wv = r[11] || [];
+      for (let k = 0; k < wi.length; k++) {
+        const fi = wi[k];
+        if (fi >= 0 && fi < 22) {
+          wAccum[fi] += Number(wv[k] || 0) * (item.count || 1);
+          wHits[fi] += (item.count || 1);
+        }
+      }
+    }
+  }
+  const cardMatchedCount = matched.length;
+
+  // 2. 匹配對陣前十對手與通用環境攻略詞條
+  const oppIdSet = new Set((lineup || []).map((x) => x.entry?.id || x.id).filter(Boolean));
+  let macroMatchedCount = 0;
+  for (const r of idx.macro) {
+    const target = String(r[3] || '');
+    const oppPrefix = target.includes(':') ? target.split(':')[0] : '';
+    const isRelevant = !oppPrefix || oppIdSet.has(oppPrefix);
+    if (!isRelevant) continue;
+    matched.push(r);
+    macroMatchedCount++;
+    const wi = r[10] || [];
+    const wv = r[11] || [];
+    for (let k = 0; k < wi.length; k++) {
+      const fi = wi[k];
+      if (fi >= 0 && fi < 22) {
+        wAccum[fi] += Number(wv[k] || 0) * 0.45;
+        wHits[fi] += 0.45;
+      }
+    }
+  }
+
+  const cardBonusById = {};
+  for (const [cid, sum] of cardBonusSum.entries()) {
+    cardBonusById[cid] = roundW(sum / Math.max(1, cardBonusCnt.get(cid) || 1));
+  }
+
+  // 將匹配策略詞條的 22 維戰術方向平滑融合至基礎模型作為千萬局推演種子權重
+  const lexiconSeedWeights = base.map((b, k) => {
+    const avgShift = wHits[k] > 0 ? wAccum[k] / wHits[k] : 0;
+    return roundW(b + Math.max(-0.45, Math.min(0.45, avgShift * 0.55)));
+  });
+
+  const catLabels = lexicon.catLabelsZh || {};
+  const cats = lexicon.cats || [];
+  const sorted = [...matched].sort((a, b) => (Number(b[8] || 0) + Number(b[7] || 0) * 0.2) - (Number(a[8] || 0) + Number(a[7] || 0) * 0.2));
+  const topActiveStrategies = sorted.slice(0, 12).map((r) => ({
+    id: r[0],
+    cat: cats[r[1]] || 'matchup_macro',
+    catLabel: catLabels[cats[r[1]]] || '策略詞條',
+    cardId: r[2],
+    target: r[3],
+    title: r[4],
+    rule: r[5],
+    games: r[6],
+    wr: r[7],
+    delta: r[8]
+  }));
+
+  return {
+    totalLexiconCount: lexicon.totalEntries || lexicon.entries.length,
+    matchedCount: matched.length,
+    cardMatchedCount,
+    macroMatchedCount,
+    cardBonusById,
+    lexiconSeedWeights,
+    topActiveStrategies,
+    matchedIds: matched.map((r) => r[0])
+  };
+}
+
+export function computeCompositeWinRateFromCompact(compactResults = {}, lineup = [], gamesPerOpponent = GAMES_PER_OPPONENT) {
+  let wins = 0, draws = 0, losses = 0, total = 0;
+  let fWins = 0, fDraws = 0, fLosses = 0, fTotal = 0;
+  let sWins = 0, sDraws = 0, sLosses = 0, sTotal = 0;
+  let turnsSum = 0;
+  let top10TotalShare = 0, completedShare = 0, weightedWinSum = 0, weightedScoreSum = 0;
+  const byOpponent = [];
+
+  for (const item of lineup) {
+    const entry = item.entry || item;
+    const share = Number(entry?.share || 0);
+    if (share > 0) top10TotalShare += share;
+    const rec = compactResults?.[entry.id];
+    const t = rec?.total || 0;
+    const w = rec?.wins || 0;
+    const d = rec?.draws || 0;
+    const l = rec?.losses || 0;
+    wins += w; draws += d; losses += l; total += t;
+    fWins += rec?.firstWins || 0; fDraws += rec?.firstDraws || 0; fLosses += rec?.firstLosses || 0;
+    fTotal += (rec?.firstWins || 0) + (rec?.firstDraws || 0) + (rec?.firstLosses || 0);
+    sWins += rec?.secondWins || 0; sDraws += rec?.secondDraws || 0; sLosses += rec?.secondLosses || 0;
+    sTotal += (rec?.secondWins || 0) + (rec?.secondDraws || 0) + (rec?.secondLosses || 0);
+    turnsSum += rec?.turnsSum || 0;
+    if (t > 0) {
+      const wr = w / t;
+      const sr = (w + 0.5 * d) / t;
+      if (share > 0) {
+        completedShare += share;
+        weightedWinSum += wr * share;
+        weightedScoreSum += sr * share;
+      }
+      byOpponent.push({
+        id: entry.id,
+        name: entry.name,
+        rank: item.rank,
+        share,
+        wins: w,
+        draws: d,
+        losses: l,
+        total: t,
+        winRate: wr,
+        scoreRate: sr
+      });
+    }
+  }
+
+  const ranked = [...byOpponent].sort((a, b) => b.winRate - a.winRate || b.scoreRate - a.scoreRate);
+  return {
+    wins,
+    draws,
+    losses,
+    total,
+    targetTotal: lineup.length * gamesPerOpponent,
+    complete: lineup.length === 10 && total === lineup.length * gamesPerOpponent,
+    equalWinRate: total ? wins / total : null,
+    equalScoreRate: total ? (wins + 0.5 * draws) / total : null,
+    equalCI95: interval(wins, total),
+    weightedWinRate: completedShare > 0 ? weightedWinSum / completedShare : null,
+    weightedScoreRate: completedShare > 0 ? weightedScoreSum / completedShare : null,
+    top10TotalShare,
+    completedShare,
+    first: { wins: fWins, draws: fDraws, losses: fLosses, total: fTotal, winRate: fTotal ? fWins / fTotal : null },
+    second: { wins: sWins, draws: sDraws, losses: sLosses, total: sTotal, winRate: sTotal ? sWins / sTotal : null },
+    avgTurns: total > 0 && turnsSum > 0 ? turnsSum / total : null,
+    byOpponent,
+    bestMatchups: ranked.slice(0, 2),
+    worstMatchups: [...ranked].reverse().slice(0, 2)
   };
 }
 

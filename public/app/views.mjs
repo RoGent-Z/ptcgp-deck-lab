@@ -1006,8 +1006,10 @@ export function renderBattle() {
     : [{ value: 'current', label: activeModelVersion }];
 
   const canRunReal = Boolean(state.engineReady && selectedDeck && deckLegal && engineSupported && lineup.selected.length === 10);
-  const expDone = activeRun?.exploreStats?.completed ?? activeRun?.winningStrategy?.exploreTotal ?? activeRun?.exploreEvents?.length ?? 0;
-  const testDone = activeRun?.events?.length || 0;
+  const expDone = activeRun?.exploreStats?.completed ?? activeRun?.winningStrategy?.exploreTotal ?? 0;
+  const testDone = activeRun?.compactResults
+    ? Object.values(activeRun.compactResults).reduce((s, r) => s + (r?.total || 0), 0)
+    : (activeRun?.events?.length || 0);
   const hasIncompleteRun = Boolean(
     activeRun
     && !activeRun.isDemo
@@ -1015,13 +1017,14 @@ export function renderBattle() {
     && (expDone < EXPLORE_TOTAL_GAMES || testDone < TOTAL_BATCH_GAMES)
   );
   const primaryBtnLabel = hasIncompleteRun
-    ? `繼續剩餘（探索 ${expDone.toLocaleString('zh-TW')}/${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} · 測試 ${testDone.toLocaleString('zh-TW')}/${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')}）`
-    : `開始兩階段勝率測試（先 ${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 探索 → 再 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 測試）`;
+    ? `繼續剩餘（推演 ${expDone.toLocaleString('zh-TW')}/${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} · 測試 ${testDone.toLocaleString('zh-TW')}/${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')}）`
+    : `開始千萬級勝率推演（先 ${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 推演 → 再 ${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 測試）`;
+  const lexTotal = state.strategyIndex?.totalEntries || state.strategyLexicon?.totalEntries || 13500;
 
   return `
     <div class="page-head">
-      <h1>對戰測試與模擬綜合勝率（先 100,000 局探索提煉獲勝策略 → 再 5,000 局測試）</h1>
-      <p class="desc">針對不同卡組的勝率測試，第一階段透過多執行緒並行引擎先採取 <b>${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 次對局</b>（前十對手各 ${EXPLORE_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局多組戰術探索），取其中勝利的局綜合歸納為本牌組專屬「獲勝策略」；第二階段採取該獲勝策略再進行 <b>${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 次正式對局測試</b>（每對手先攻 ${FIRST_SEAT_GAMES} + 後攻 ${FIRST_SEAT_GAMES} = ${GAMES_PER_OPPONENT} 局，每局皆支援完整流程回放；另可對任一對手單獨執行 ${DEEP_EXPLORE_GAMES.toLocaleString('zh-TW')} 探索 + ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局測試）。</p>
+      <h1>對戰測試與模擬綜合勝率（13,500 策略詞條 · 10,000,000 局推演 → 50,000 局測試）</h1>
+      <p class="desc">全卡庫 4,577 張卡每張逐一考察 2,400 局實戰並結合頂尖競技攻略，構建 <b>${lexTotal.toLocaleString('zh-TW')} 條獨立策略詞條</b>並注入引擎：第一階段以多執行緒 WASM 進行 <b>${EXPLORE_TOTAL_GAMES.toLocaleString('zh-TW')} 次對局推演勝利策略</b>（前十對手各 ${EXPLORE_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局），第二階段採用獲勝策略再進行 <b>${TOTAL_BATCH_GAMES.toLocaleString('zh-TW')} 次實際勝率推演</b>（每對手先攻 ${FIRST_SEAT_GAMES.toLocaleString('zh-TW')} + 後攻 ${FIRST_SEAT_GAMES.toLocaleString('zh-TW')} = ${GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）。</p>
     </div>
 
     <div class="battle-setup-grid">
@@ -1065,6 +1068,7 @@ export function renderBattle() {
           <button class="btn btn-primary" type="button" data-action="start-real-battle" ${canRunReal && !uiState.battle.running ? '' : 'disabled'}>
             ${icon('play', 15)}<span>${primaryBtnLabel}</span>
           </button>
+          <button class="btn btn-outline" type="button" data-action="open-strategy-lexicon">瀏覽 ${lexTotal.toLocaleString('zh-TW')} 策略詞條庫</button>
           ${uiState.battle.running ? `<button class="btn btn-outline" type="button" data-action="pause-battle">${icon('pause', 15)}暫停</button>` : ''}
           ${(m?.entries?.length && !uiState.battle.running) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck">${icon('plus', 15)}${decks.length ? '匯入榜首試測' : '一鍵匯入榜首並測試'}</button>` : ''}
           ${state.fixture ? `<button class="btn btn-outline" type="button" data-action="run-fixture-preview" ${uiState.battle.running ? 'disabled' : ''}>展示點陣預覽</button>` : ''}
@@ -1073,7 +1077,7 @@ export function renderBattle() {
       </section>
 
       <section class="panel">
-        <h2>2. 鎖定的前十對手（${lineup.selected.length}/10 · 100,000 探索 + 5,000 測試）</h2>
+        <h2>2. 鎖定的前十對手（${lineup.selected.length}/10 · 10,000,000 推演 + 50,000 測試）</h2>
         <ol class="opponent-preview-list">
           ${lineup.selected.map((x) => `
             <li>
@@ -1091,7 +1095,7 @@ export function renderBattle() {
     <section class="panel block-gap" id="battle-report-area">
       ${activeRun
         ? renderBattleReport(activeRun, lineup.selected, { canReplay: state.engineReady || state.fixture })
-        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>開始對戰測試後，系統將以多執行緒 WASM 引擎先採取 <b>100,000 次探索對局</b>並取其中勝利的局綜合歸納為本牌組專屬「獲勝策略」，後續自動採取該獲勝策略進行 <b>5,000 次正式對局測試</b>（每對手 500 局），即時計算等權與環境加權「模擬綜合勝率」，每一局皆可點擊檢視四階段完整對局流程。</p></div>'}
+        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>開始對戰測試後，系統將自動從 <b>13,500 條策略詞條庫</b>激活本牌組專屬詞條，透過多執行緒 FastSim WASM 先執行 <b>10,000,000 次對局推演勝利策略</b>，後續自動採取該獲勝策略進行 <b>50,000 次實際勝率推演</b>（每對手 5,000 局），即時計算等權與環境加權「模擬綜合勝率」，並支援 DeckGym 四階段完整對局回放。</p></div>'}
     </section>
 
     ${renderTrainingBenchmarkSection()}
