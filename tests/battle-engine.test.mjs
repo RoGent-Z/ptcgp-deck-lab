@@ -5,11 +5,14 @@ import { instantiateBattle } from "../public/battle/runtime.mjs";
 import { instantiateFastSim } from "../public/battle/fastsim-runtime.mjs";
 import {
   buildExplorationCandidates,
+  buildLegalReplacementCandidates,
   createEmptyExploreStats,
   encodeCardForFastSim,
   matchDeckStrategies,
   mergeExploreChunkStats,
-  synthesizeWinningStrategyFromStats
+  replaceDeckCardOnce,
+  synthesizeWinningStrategyFromStats,
+  validateDeck
 } from "../public/app/core.mjs";
 
 const wasm = new URL("../public/battle/deckgym.wasm", import.meta.url);
@@ -336,4 +339,45 @@ test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-lea
   assert.equal(translateEnCardName("Darkrai", cardsAll), "達克萊伊");
   assert.equal(translateEnCardName("Eevee", cardsAll), "伊布");
   assert.equal(translateEnCardName("Igglybuff", cardsAll), "寶寶丁");
+
+  // Verify Deck AI Optimizer legality filtering across all 4,577 cards + WASM optimize_batch execution
+  const targetId = top10[0].representative.cards[0].id;
+  const optPrep = buildLegalReplacementCandidates({
+    deck: { id: "ut-deck", name: "Test", cards: top10[0].representative.cards, energy: top10[0].representative.energy },
+    targetCardId: targetId,
+    allCards: cardsAll,
+    cardsById: cardById,
+    collection: {},
+    cardBonusById: {}
+  });
+  assert.equal(optPrep.totalCatalogCount, 4577);
+  assert.ok(optPrep.totalLegalChecked > 4000, `Expected > 4000 legal replacement cards, got ${optPrep.totalLegalChecked}`);
+  assert.equal(optPrep.candidates[0].isOriginal, true);
+  assert.equal(optPrep.candidates[0].card.id, targetId);
+  // Every candidate replacement deck MUST pass validateDeck() with zero issues!
+  for (const sample of optPrep.candidates.slice(0, 30)) {
+    const replaced = replaceDeckCardOnce(
+      { id: "ut-deck", name: "Test", cards: top10[0].representative.cards, energy: top10[0].representative.energy },
+      targetId,
+      sample.card.id,
+      cardById
+    );
+    assert.deepEqual(validateDeck(replaced, cardById), [], `Candidate ${sample.card.id} failed deck legality`);
+  }
+  const optRes = fastSim({
+    op: "optimize_batch",
+    base_deck: optPrep.baseDeck20,
+    enemies: top10.map((e) => ({ id: e.id, cards: expand(e.representative) })),
+    player_weights: lite.weights,
+    enemy_weights: lite.weights,
+    enemy_weights_list: top10.map((e) => top10Elite.teams[e.id].weights),
+    candidate_cards: optPrep.candidates.slice(0, 8).map((c) => c.encoded),
+    games_per_opp: 20,
+    seed_base: 777
+  });
+  assert.equal(optRes.results.length, 8);
+  for (const r of optRes.results) {
+    assert.equal(r.games, 200);
+    assert.equal(r.wins + r.draws + r.losses, 200);
+  }
 });

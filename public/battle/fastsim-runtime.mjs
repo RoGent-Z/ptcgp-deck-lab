@@ -246,6 +246,63 @@ export async function instantiateFastSim(wasmSource) {
       };
     }
 
+    if (req.op === 'optimize_batch') {
+      const enemies = req.enemies || [];
+      const candCards = req.candidate_cards || [];
+      const nOpps = Math.min(MAX_ENEMIES, enemies.length);
+      const nCands = Math.min(256, candCards.length);
+
+      writeDeck(0, req.base_deck);
+      for (let o = 0; o < nOpps; o++) writeDeck(o + 1, enemies[o].cards);
+
+      const weights = new Int32Array(mem.buffer, ex.get_weights_ptr(), (MAX_ENEMIES + 1) * FEATURES);
+      weights.fill(0);
+      const enemyWeightsList = req.enemy_weights_list || [];
+      for (let o = 0; o < nOpps; o++) {
+        const ew = enemyWeightsList[o] || req.enemy_weights || [];
+        const off = o * FEATURES;
+        for (let k = 0; k < FEATURES; k++) weights[off + k] = Math.round(Number(ew[k] || 0) * 1024);
+      }
+      const pw = req.player_weights || [];
+      for (let k = 0; k < FEATURES; k++) weights[MAX_ENEMIES * FEATURES + k] = Math.round(Number(pw[k] || 0) * 1024);
+
+      const cBuf = new Int32Array(mem.buffer, ex.get_cand_cards_ptr(), 256 * CARD_STRIDE);
+      const cBonus = new Int32Array(mem.buffer, ex.get_cand_bonus_ptr(), 256);
+      for (let i = 0; i < nCands; i++) {
+        const c = candCards[i];
+        const o = i * CARD_STRIDE;
+        cBuf[o] = c.isPokemon | 0;
+        cBuf[o + 1] = c.stage | 0;
+        cBuf[o + 2] = c.typeCode | 0;
+        cBuf[o + 3] = c.weakCode | 0;
+        cBuf[o + 4] = c.hp | 0;
+        cBuf[o + 5] = c.retreat | 0;
+        cBuf[o + 6] = c.prize | 0;
+        cBuf[o + 7] = c.atkCost | 0;
+        cBuf[o + 8] = c.atkDmg | 0;
+        cBuf[o + 9] = c.atkFlags | 0;
+        cBuf[o + 10] = c.abFlags | 0;
+        cBuf[o + 11] = c.trainerKind | 0;
+        cBuf[o + 12] = c.effectVal | 0;
+        cBuf[o + 13] = 19;
+        cBonus[i] = Math.round(Number(c.strategyBonus || 0) * 1024);
+      }
+
+      ex.run_optimize_batch(nCands, nOpps, req.games_per_opp >>> 0, req.seed_base >>> 0);
+      const u32 = new Uint32Array(mem.buffer, ex.get_out_u32_ptr(), nCands * 4);
+      const results = [];
+      for (let i = 0; i < nCands; i++) {
+        const o = i * 4;
+        results.push({
+          games: u32[o],
+          wins: u32[o + 1],
+          draws: u32[o + 2],
+          losses: u32[o + 3]
+        });
+      }
+      return { results };
+    }
+
     throw Error(`Unknown fastsim op: ${req.op}`);
   };
 }

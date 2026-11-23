@@ -1205,4 +1205,291 @@ export function getPokemonCategorySearchTerms(id) {
   return POKE_CATEGORY_BY_ID.get(id)?.searchTerms || '';
 }
 
+const TRAINER_TYPE_RESTRICTIONS = [
+  ['grass', /草屬性|草能量|Grass\s+Pok[eé]mon|Grass\s+Energy/i],
+  ['fire', /火屬性|火能量|Fire\s+Pok[eé]mon|Fire\s+Energy/i],
+  ['water', /水屬性|水能量|Water\s+Pok[eé]mon|Water\s+Energy/i],
+  ['lightning', /雷屬性|雷能量|Lightning\s+Pok[eé]mon|Lightning\s+Energy/i],
+  ['psychic', /超屬性|超能量|Psychic\s+Pok[eé]mon|Psychic\s+Energy/i],
+  ['fighting', /鬥屬性|鬥能量|Fighting\s+Pok[eé]mon|Fighting\s+Energy/i],
+  ['darkness', /惡屬性|惡能量|Darkness\s+Pok[eé]mon|Darkness\s+Energy/i],
+  ['metal', /鋼屬性|鋼能量|Metal\s+Pok[eé]mon|Metal\s+Energy/i]
+];
+
+function normCardNameKey(s) {
+  return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export function replaceDeckCardOnce(deck, oldCardId, newCardId, cardsById = null) {
+  const nextCards = [];
+  let removed = false;
+  let merged = false;
+  for (const item of deck?.cards || []) {
+    if (!removed && item.id === oldCardId) {
+      removed = true;
+      const left = Number(item.count || 1) - 1;
+      if (left > 0) nextCards.push({ id: item.id, count: left });
+    } else {
+      nextCards.push({ id: item.id, count: Number(item.count || 1) });
+    }
+  }
+  for (const item of nextCards) {
+    if (item.id === newCardId) {
+      item.count += 1;
+      merged = true;
+      break;
+    }
+  }
+  if (!merged) nextCards.push({ id: newCardId, count: 1 });
+  const nextDeck = {
+    ...structuredClone(deck),
+    cards: nextCards,
+    updatedAt: new Date().toISOString()
+  };
+  if (cardsById) {
+    const issues = validateDeck(nextDeck, cardsById);
+    if (issues.length > 0) throw Error(issues[0]);
+  }
+  return nextDeck;
+}
+
+export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
+  const base = encodeCardForFastSim(card, strategyBonus);
+  if (!card || !ctx) return base;
+
+  const { deckEnergySet, remainingTypes, remainingNames, validStage2Keys } = ctx;
+  if (card.type === 'pokemon') {
+    // Check attack energy compatibility with deck.energy
+    const attacks = Array.isArray(card.attacks) ? card.attacks : [];
+    if (attacks.length > 0 && deckEnergySet?.size > 0) {
+      let playableDmg = 0;
+      let playableCost = 99;
+      for (const atk of attacks) {
+        const costs = Array.isArray(atk.cost) ? atk.cost : [];
+        const canPay = costs.every((sym) => {
+          const k = String(sym || '').toLowerCase();
+          return !k || k === 'colorless' || deckEnergySet.has(k);
+        });
+        if (canPay) {
+          const dmgNum = parseInt(String(atk.damage || '0').replace(/[^0-9]/g, ''), 10) || 0;
+          const costLen = Math.max(1, Math.min(5, costs.length || 1));
+          if (dmgNum > playableDmg || (dmgNum === playableDmg && costLen < playableCost)) {
+            playableDmg = dmgNum;
+            playableCost = costLen;
+          }
+        }
+      }
+      if (playableCost === 99) {
+        base.atkDmg = 0;
+        base.atkFlags = 0;
+      } else {
+        base.atkDmg = playableDmg;
+        base.atkCost = playableCost;
+      }
+    }
+
+    // Check evolution chain availability in the remaining 19 cards
+    if (card.stage === 'stage1') {
+      const preKey = normCardNameKey(card.evolvesFrom);
+      if (!preKey || !remainingNames.has(preKey)) {
+        base.stage = 99; // Unplayable orphan Stage 1
+      }
+    } else if (card.stage === 'stage2') {
+      const preKey = normCardNameKey(card.evolvesFrom);
+      const myKey = normCardNameKey(card.limitName || card.nameEn || card.name);
+      if ((!preKey || !remainingNames.has(preKey)) && !validStage2Keys.has(myKey)) {
+        base.stage = 99; // Unplayable orphan Stage 2
+      }
+    }
+  } else if (card.type === 'trainer') {
+    const eff = `${card.effect || ''}`;
+    for (const [typeKey, rx] of TRAINER_TYPE_RESTRICTIONS) {
+      if (rx.test(eff) && !remainingTypes.has(typeKey) && !deckEnergySet.has(typeKey)) {
+        base.trainerKind = 0;
+        base.effectVal = 0;
+        base.strategyBonus = 0;
+        break;
+      }
+    }
+    // Named-Pokémon trainer synergy check (e.g. 「九尾」「大岩蛇」)
+    if (base.trainerKind !== 0) {
+      const quoted = [...eff.matchAll(/「([^」]{2,14})」/g)].map((m) => m[1]).filter((w) => !/硬幣|正面|反面|能量|進化|道具|基礎|支援者|物品|競技場|手牌|牌庫|戰鬥場|備戰區/.test(w));
+      if (quoted.length > 0) {
+        const hasAny = quoted.some((q) => {
+          const nk = normCardNameKey(q);
+          for (const rn of remainingNames) {
+            if (rn.includes(nk) || nk.includes(rn)) return true;
+          }
+          return false;
+        });
+        if (!hasAny) {
+          base.trainerKind = 0;
+          base.effectVal = 0;
+          base.strategyBonus = 0;
+        }
+      }
+    }
+  }
+  return base;
+}
+
+function rarityPreferenceScore(card, collection = {}) {
+  let score = 0;
+  if (collection && Number(collection[card.id] || 0) > 0) score += 100;
+  const r = String(card.rarity || '');
+  if (/^◇{1,4}$/.test(r)) score += 40;
+  else if (r === '★') score += 20;
+  if (!String(card.id || '').startsWith('P-')) score += 10;
+  return score;
+}
+
+export function buildLegalReplacementCandidates({
+  deck,
+  targetCardId,
+  allCards = [],
+  cardsById = new Map(),
+  collection = {},
+  cardBonusById = {}
+}) {
+  const remainingEntries = [];
+  let removed = false;
+  for (const item of deck?.cards || []) {
+    if (!removed && item.id === targetCardId) {
+      removed = true;
+      const left = Number(item.count || 1) - 1;
+      if (left > 0) remainingEntries.push({ id: item.id, count: left });
+    } else {
+      remainingEntries.push({ id: item.id, count: Number(item.count || 1) });
+    }
+  }
+  if (!removed) throw Error('所選卡牌不在此牌組中');
+
+  const remainingNameCounts = new Map();
+  const remainingNames = new Set();
+  const remainingTypes = new Set();
+  let remainingBasics = 0;
+  let hasRareCandy = false;
+
+  for (const entry of remainingEntries) {
+    const c = cardsById.get(entry.id);
+    if (!c) continue;
+    const limitKey = c.limitName || c.nameEn || c.name;
+    remainingNameCounts.set(limitKey, (remainingNameCounts.get(limitKey) || 0) + entry.count);
+    for (const nm of [c.name, c.nameEn, c.limitName]) {
+      const nk = normCardNameKey(nm);
+      if (nk) remainingNames.add(nk);
+    }
+    if (c.type === 'pokemon') {
+      if (c.stage === 'basic') remainingBasics += entry.count;
+      for (const t of c.types || []) remainingTypes.add(String(t || '').toLowerCase());
+    } else if (/神奇糖果|Rare Candy/i.test(`${c.name || ''} ${c.nameEn || ''}`)) {
+      hasRareCandy = true;
+    }
+  }
+
+  // Build Rare Candy Stage 2 allow-list from Basic -> Stage 1 -> Stage 2 relationships in allCards
+  const validStage2Keys = new Set();
+  if (hasRareCandy) {
+    const stage1FromRemainingBasics = new Set();
+    for (const c of allCards) {
+      if (c.type === 'pokemon' && c.stage === 'stage1' && remainingNames.has(normCardNameKey(c.evolvesFrom))) {
+        for (const nm of [c.name, c.nameEn, c.limitName]) {
+          const nk = normCardNameKey(nm);
+          if (nk) stage1FromRemainingBasics.add(nk);
+        }
+      }
+    }
+    for (const c of allCards) {
+      if (c.type === 'pokemon' && c.stage === 'stage2' && stage1FromRemainingBasics.has(normCardNameKey(c.evolvesFrom))) {
+        const mk = normCardNameKey(c.limitName || c.nameEn || c.name);
+        if (mk) validStage2Keys.add(mk);
+      }
+    }
+  }
+
+  const deckEnergySet = new Set((deck?.energy || []).map((e) => String(e || '').toLowerCase()));
+  const optCtx = { deckEnergySet, remainingTypes, remainingNames, validStage2Keys };
+
+  // Build fixed 19-card base deck array for FastSim / WebGPU
+  const baseCards19 = [];
+  for (const entry of remainingEntries) {
+    const card = cardsById.get(entry.id);
+    const enc = encodeCardForFastSim(card, Number(cardBonusById[entry.id] || 0));
+    for (let k = 0; k < entry.count; k++) {
+      if (baseCards19.length < 19) baseCards19.push(enc);
+    }
+  }
+  const origCard = cardsById.get(targetCardId);
+  const origEnc = encodeCardForOptimizer(origCard, Number(cardBonusById[targetCardId] || 0), optCtx);
+  const baseDeck20 = [...baseCards19, origEnc];
+
+  const groups = new Map();
+  let totalLegalChecked = 0;
+
+  // Always insert original card first as baseline (#0)
+  const origGroupKey = `__ORIG__:${targetCardId}`;
+  groups.set(origGroupKey, {
+    card: origCard,
+    encoded: origEnc,
+    isOriginal: true,
+    representedCount: 1,
+    prefScore: 9999
+  });
+
+  const origLimitKey = origCard ? (origCard.limitName || origCard.nameEn || origCard.name) : '';
+
+  for (const card of allCards) {
+    if (!card || card.legal === false || card.playable === false) continue;
+    const limitKey = card.limitName || card.nameEn || card.name;
+    if ((remainingNameCounts.get(limitKey) || 0) >= 2) continue;
+    if (remainingBasics === 0 && !(card.type === 'pokemon' && card.stage === 'basic')) continue;
+
+    totalLegalChecked++;
+    if (card.id === targetCardId) continue;
+
+    const bonus = Number(cardBonusById[card.id] || 0);
+    const enc = encodeCardForOptimizer(card, bonus, optCtx);
+
+    // Skip functionally identical reprints of the exact same card already being replaced
+    if (limitKey === origLimitKey && enc.hp === origEnc.hp && enc.atkDmg === origEnc.atkDmg && enc.atkCost === origEnc.atkCost && enc.trainerKind === origEnc.trainerKind && enc.effectVal === origEnc.effectVal) {
+      groups.get(origGroupKey).representedCount++;
+      continue;
+    }
+
+    const fKey = [
+      limitKey, enc.isPokemon, enc.stage, enc.typeCode, enc.weakCode,
+      enc.hp, enc.retreat, enc.prize, enc.atkCost, enc.atkDmg,
+      enc.atkFlags, enc.abFlags, enc.trainerKind, enc.effectVal
+    ].join('|');
+
+    const pref = rarityPreferenceScore(card, collection);
+    const existing = groups.get(fKey);
+    if (!existing) {
+      groups.set(fKey, {
+        card,
+        encoded: enc,
+        isOriginal: false,
+        representedCount: 1,
+        prefScore: pref
+      });
+    } else {
+      existing.representedCount++;
+      if (pref > existing.prefScore) {
+        existing.card = card;
+        existing.encoded = enc;
+        existing.prefScore = pref;
+      }
+    }
+  }
+
+  return {
+    baseDeck20,
+    origCard,
+    totalCatalogCount: allCards.length,
+    totalLegalChecked,
+    candidates: [...groups.values()]
+  };
+}
+
+
 

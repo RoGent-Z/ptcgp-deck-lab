@@ -12,9 +12,12 @@ const MAX_ENEMIES: usize = 10;
 const MAX_CANDS: usize = 40;
 const STEP_STRIDE: usize = 24;
 const MAX_REPLAY_STEPS: usize = 1024;
+const MAX_OPT_CARDS: usize = 256;
 
 static mut DECKS_BUF: [i32; MAX_DECKS * 20 * CARD_STRIDE] = [0; MAX_DECKS * 20 * CARD_STRIDE];
 static mut BONUS_BUF: [i32; MAX_DECKS * 20] = [0; MAX_DECKS * 20]; // Q10 fixed-point (* 1024)
+static mut CAND_CARDS_BUF: [i32; MAX_OPT_CARDS * CARD_STRIDE] = [0; MAX_OPT_CARDS * CARD_STRIDE];
+static mut CAND_BONUS_BUF: [i32; MAX_OPT_CARDS] = [0; MAX_OPT_CARDS];
 // WEIGHTS_BUF layout (all Q10 i32):
 // [0 .. 10*22]       = enemy_weights[0..10] (each opponent's own 10M-trained elite weights!)
 // [10*22 .. 50*22]   = candidates[0..40] (or player test weights at cand 0)
@@ -27,6 +30,8 @@ static mut REPLAY_LEN: u32 = 0;
 
 #[no_mangle] pub extern "C" fn get_decks_ptr() -> *mut i32 { unsafe { DECKS_BUF.as_mut_ptr() } }
 #[no_mangle] pub extern "C" fn get_bonus_ptr() -> *mut i32 { unsafe { BONUS_BUF.as_mut_ptr() } }
+#[no_mangle] pub extern "C" fn get_cand_cards_ptr() -> *mut i32 { unsafe { CAND_CARDS_BUF.as_mut_ptr() } }
+#[no_mangle] pub extern "C" fn get_cand_bonus_ptr() -> *mut i32 { unsafe { CAND_BONUS_BUF.as_mut_ptr() } }
 #[no_mangle] pub extern "C" fn get_weights_ptr() -> *mut i32 { unsafe { WEIGHTS_BUF.as_mut_ptr() } }
 #[no_mangle] pub extern "C" fn get_out_u32_ptr() -> *mut u32 { unsafe { OUT_U32.as_mut_ptr() } }
 #[no_mangle] pub extern "C" fn get_out_f64_ptr() -> *mut f64 { unsafe { OUT_F64.as_mut_ptr() } }
@@ -887,4 +892,97 @@ pub extern "C" fn run_replay_game(
         OUT_U32[4] = pts[1] as u32;
         REPLAY_LEN
     }
+}
+
+/// Evaluate up to 256 candidate replacement cards (placed at slot 19 of deck 0) against Top-10 opponents.
+/// Outputs 4 u32 per candidate into OUT_U32[ci*4 .. ci*4+4]: [games, wins, draws, losses].
+#[no_mangle]
+pub extern "C" fn run_optimize_batch(
+    n_cands: u32,
+    n_enemies: u32,
+    games_per_opp: u32,
+    seed_base: u32,
+) -> u32 {
+    let nc = (n_cands as usize).clamp(1, MAX_OPT_CARDS);
+    let n_opps = (n_enemies as usize).clamp(1, MAX_ENEMIES);
+    let gpo = (games_per_opp as usize).max(2);
+    let half = (gpo / 2).max(1);
+
+    let mut d0 = read_deck(0);
+    let mut enemies = [[CompactCard::default(); 20]; MAX_ENEMIES];
+    let mut w_enemies = [[0i32; FEATURES]; MAX_ENEMIES];
+    let mut w_player = [0i32; FEATURES];
+    unsafe {
+        for o in 0..n_opps {
+            enemies[o] = read_deck(o + 1);
+            let off = o * FEATURES;
+            w_enemies[o].copy_from_slice(&WEIGHTS_BUF[off..off + FEATURES]);
+        }
+        w_player.copy_from_slice(&WEIGHTS_BUF[MAX_ENEMIES * FEATURES..(MAX_ENEMIES + 1) * FEATURES]);
+    }
+
+    let mut dummy = [0.0f32; FEATURES];
+    let mut pts_dummy = [0u8; 2];
+
+    unsafe {
+        for ci in 0..nc {
+            let off = ci * CARD_STRIDE;
+            let atk_dmg = CAND_CARDS_BUF[off + 8] as i16;
+            d0[19] = CompactCard {
+                slot_id: 19,
+                is_pokemon: CAND_CARDS_BUF[off] as u8,
+                stage: CAND_CARDS_BUF[off + 1] as u8,
+                type_code: CAND_CARDS_BUF[off + 2] as u8,
+                weak_code: CAND_CARDS_BUF[off + 3] as u8,
+                hp: CAND_CARDS_BUF[off + 4] as i16,
+                retreat: CAND_CARDS_BUF[off + 5] as u8,
+                prize: (CAND_CARDS_BUF[off + 6] as u8).max(1),
+                atk_cost: (CAND_CARDS_BUF[off + 7] as u8).max(1),
+                atk_dmg,
+                atk_flags: CAND_CARDS_BUF[off + 9] as u8,
+                ab_flags: CAND_CARDS_BUF[off + 10] as u8,
+                trainer_kind: CAND_CARDS_BUF[off + 11] as u8,
+                effect_val: CAND_CARDS_BUF[off + 12] as i16,
+                power_q: ((atk_dmg as i32) * 1024) / 100,
+                bonus_q: CAND_BONUS_BUF[ci],
+            };
+
+            let mut tot = 0u32;
+            let mut wins = 0u32;
+            let mut draws = 0u32;
+            let mut losses = 0u32;
+
+            for o in 0..n_opps {
+                let opp_mix = seed_base ^ ((o as u32 + 1).wrapping_mul(1_000_003));
+                for idx in 0..gpo {
+                    let first = if idx < half { 0 } else { 1 };
+                    let seed_slot = (idx % half) as u32;
+                    let seed = opp_mix ^ seed_slot.wrapping_mul(2654435761);
+                    let (code, _, _) = simulate_i32_impl::<false>(
+                        &d0,
+                        &enemies[o],
+                        &w_player,
+                        &w_enemies[o],
+                        seed,
+                        first,
+                        false,
+                        &mut dummy,
+                        &mut pts_dummy,
+                    );
+                    tot += 1;
+                    match code {
+                        1 => wins += 1,
+                        2 => draws += 1,
+                        _ => losses += 1,
+                    }
+                }
+            }
+            let out_o = ci * 4;
+            OUT_U32[out_o] = tot;
+            OUT_U32[out_o + 1] = wins;
+            OUT_U32[out_o + 2] = draws;
+            OUT_U32[out_o + 3] = losses;
+        }
+    }
+    nc as u32
 }

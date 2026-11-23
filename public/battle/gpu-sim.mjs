@@ -772,6 +772,100 @@ fn main(
 }
 `;
 
+// Deck AI Optimizer Batch Kernel: tests up to 256 candidate replacement cards at slot 19 vs Top-10 opponents in parallel!
+const WGSL_OPTIMIZE = WGSL_SHARED_HEADER + /* wgsl */ `
+@group(0) @binding(4) var<storage, read> cand_cards_buf: array<i32>;
+var<workgroup> wg_opt: array<atomic<u32>, 4>;
+
+fn load_cand_vram(ci: u32) -> Card {
+  let o = ci * CARD_STRIDE;
+  var c: Card;
+  c.is_pokemon = cand_cards_buf[o];
+  c.stage = cand_cards_buf[o + 1u];
+  c.type_code = cand_cards_buf[o + 2u];
+  c.weak_code = cand_cards_buf[o + 3u];
+  c.hp = cand_cards_buf[o + 4u];
+  c.retreat = cand_cards_buf[o + 5u];
+  c.prize = max(1, cand_cards_buf[o + 6u]);
+  c.atk_cost = max(1, cand_cards_buf[o + 7u]);
+  c.atk_dmg = cand_cards_buf[o + 8u];
+  c.atk_flags = cand_cards_buf[o + 9u];
+  c.ab_flags = cand_cards_buf[o + 10u];
+  c.trainer_kind = cand_cards_buf[o + 11u];
+  c.effect_val = cand_cards_buf[o + 12u];
+  c.power_q = (c.atk_dmg * 1024) / 100;
+  c.bonus_q = cand_cards_buf[o + 14u];
+  return c;
+}
+
+@compute @workgroup_size(128)
+fn main(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_id) lid: vec3<u32>
+) {
+  let n_opps = params.n_opps;
+  let n_cands = params.n_cands;
+  let ci = gid.y / n_opps;
+  let opp_idx = gid.y % n_opps;
+
+  if (ci < n_cands && opp_idx < n_opps) {
+    if (lid.x < 19u) {
+      wg_cards[lid.x] = load_card_vram(0u, lid.x);
+    } else if (lid.x == 19u) {
+      wg_cards[19u] = load_cand_vram(ci);
+    } else if (lid.x < 40u) {
+      wg_cards[lid.x] = load_card_vram(opp_idx + 1u, lid.x - 20u);
+    } else if (lid.x < 62u) {
+      let k = lid.x - 40u;
+      wg_w0[k] = weights_buf[MAX_ENEMIES * FEATURES + k];
+    } else if (lid.x < 84u) {
+      let k = lid.x - 62u;
+      wg_w1[k] = weights_buf[opp_idx * FEATURES + k];
+    }
+  }
+  if (lid.x < 4u) { atomicStore(&wg_opt[lid.x], 0u); }
+  workgroupBarrier();
+
+  let gpo = params.games_per_opp;
+  let half = max(1u, gpo / 2u);
+  let gpt = params.games_per_thread;
+  let base_k = gid.x * gpt;
+  let end_k = min(gpo, base_k + gpt);
+
+  var loc_tot = 0u;
+  var loc_w = 0u;
+  var loc_d = 0u;
+  var loc_l = 0u;
+
+  if (ci < n_cands && opp_idx < n_opps && base_k < gpo) {
+    let opp_mix = params.seed_base ^ ((opp_idx + 1u) * 1000003u);
+    for (var idx = base_k; idx < end_k; idx = idx + 1u) {
+      let first = select(1u, 0u, idx < half);
+      let seed_slot = idx % half;
+      let seed = opp_mix ^ (seed_slot * 2654435761u);
+      let res = sim_game(seed, first);
+      loc_tot = loc_tot + 1u;
+      if (res.x == 1u) { loc_w = loc_w + 1u; }
+      else if (res.x == 2u) { loc_d = loc_d + 1u; }
+      else { loc_l = loc_l + 1u; }
+    }
+  }
+
+  if (loc_tot > 0u) {
+    atomicAdd(&wg_opt[0], loc_tot);
+    atomicAdd(&wg_opt[1], loc_w);
+    atomicAdd(&wg_opt[2], loc_d);
+    atomicAdd(&wg_opt[3], loc_l);
+  }
+  workgroupBarrier();
+
+  if (lid.x < 4u && ci < n_cands && opp_idx < n_opps) {
+    let v = atomicLoad(&wg_opt[lid.x]);
+    if (v > 0u) { atomicAdd(&out_u32[ci * 4u + lid.x], v); }
+  }
+}
+`;
+
 let gpuEngineInstance = null;
 let gpuProbePromise = null;
 
@@ -828,8 +922,10 @@ export async function probeWebGPU() {
 
       const exploreModule = device.createShaderModule({ code: WGSL_EXPLORE });
       const testModule = device.createShaderModule({ code: WGSL_TEST });
+      const optimizeModule = device.createShaderModule({ code: WGSL_OPTIMIZE });
       await checkShaderModule(exploreModule, 'EXPLORE');
       await checkShaderModule(testModule, 'TEST');
+      await checkShaderModule(optimizeModule, 'OPTIMIZE');
 
       const explorePipeline = await device.createComputePipelineAsync({
         layout: 'auto',
@@ -839,6 +935,10 @@ export async function probeWebGPU() {
         layout: 'auto',
         compute: { module: testModule, entryPoint: 'main' }
       });
+      const optimizePipeline = await device.createComputePipelineAsync({
+        layout: 'auto',
+        compute: { module: optimizeModule, entryPoint: 'main' }
+      });
 
       // Persistent VRAM buffers (allocated once in GPU memory)
       const uniformBuf = device.createBuffer({
@@ -847,6 +947,10 @@ export async function probeWebGPU() {
       });
       const decksBuf = device.createBuffer({
         size: 12 * 20 * CARD_STRIDE * 4,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
+      });
+      const candCardsBuf = device.createBuffer({
+        size: 256 * CARD_STRIDE * 4,
         usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST
       });
       const weightsBuf = device.createBuffer({
@@ -893,10 +997,22 @@ export async function probeWebGPU() {
           { binding: 4, resource: { buffer: outSampleBuf } }
         ]
       });
+      // Optimize bind group has bindings 0..4 matching WGSL_OPTIMIZE!
+      const optimizeBindGroup = device.createBindGroup({
+        layout: optimizePipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: uniformBuf } },
+          { binding: 1, resource: { buffer: decksBuf } },
+          { binding: 2, resource: { buffer: weightsBuf } },
+          { binding: 3, resource: { buffer: outU32Buf } },
+          { binding: 4, resource: { buffer: candCardsBuf } }
+        ]
+      });
 
       const zeroU32 = new Uint32Array(4096);
       const zeroSample = new Uint32Array(512);
       const decksHost = new Int32Array(12 * 20 * CARD_STRIDE);
+      const candCardsHost = new Int32Array(256 * CARD_STRIDE);
       const weightsHost = new Int32Array((MAX_ENEMIES + MAX_CANDS) * FEATURES);
       const uniformHost = new Uint32Array(8);
 
@@ -1091,6 +1207,85 @@ export async function probeWebGPU() {
             sampleTurns[i] = (sampleRaw[i] >> 8) & 0xff;
           }
           return { ...agg, sampleOutcomes, sampleTurns };
+        },
+
+        uploadOptimizeContext({ baseDeck, enemies, playerWeights, enemyWeightsList }) {
+          packDeckToI32(decksHost, 0, baseDeck);
+          for (let o = 0; o < enemies.length; o++) packDeckToI32(decksHost, o + 1, enemies[o].cards);
+          device.queue.writeBuffer(decksBuf, 0, decksHost);
+
+          weightsHost.fill(0);
+          for (let o = 0; o < enemies.length; o++) {
+            const ew = (enemyWeightsList && enemyWeightsList[o]) || enemyWeightsList?.[0] || [];
+            for (let k = 0; k < FEATURES; k++) weightsHost[o * FEATURES + k] = Math.round(Number(ew[k] || 0) * 1024);
+          }
+          for (let k = 0; k < FEATURES; k++) {
+            weightsHost[MAX_ENEMIES * FEATURES + k] = Math.round(Number(playerWeights[k] || 0) * 1024);
+          }
+          device.queue.writeBuffer(weightsBuf, 0, weightsHost);
+        },
+
+        async runOptimizeBatch({ candidateCards, nOpps, gamesPerOpp, seedBase }) {
+          const nCands = Math.min(256, candidateCards.length);
+          for (let i = 0; i < nCands; i++) {
+            const c = candidateCards[i];
+            const o = i * CARD_STRIDE;
+            candCardsHost[o] = c.isPokemon | 0;
+            candCardsHost[o + 1] = c.stage | 0;
+            candCardsHost[o + 2] = c.typeCode | 0;
+            candCardsHost[o + 3] = c.weakCode | 0;
+            candCardsHost[o + 4] = c.hp | 0;
+            candCardsHost[o + 5] = c.retreat | 0;
+            candCardsHost[o + 6] = c.prize | 0;
+            candCardsHost[o + 7] = c.atkCost | 0;
+            candCardsHost[o + 8] = c.atkDmg | 0;
+            candCardsHost[o + 9] = c.atkFlags | 0;
+            candCardsHost[o + 10] = c.abFlags | 0;
+            candCardsHost[o + 11] = c.trainerKind | 0;
+            candCardsHost[o + 12] = c.effectVal | 0;
+            candCardsHost[o + 13] = 19;
+            candCardsHost[o + 14] = Math.round(Number(c.strategyBonus || 0) * 1024);
+            candCardsHost[o + 15] = 0;
+          }
+          device.queue.writeBuffer(candCardsBuf, 0, candCardsHost.subarray(0, nCands * CARD_STRIDE));
+
+          const gpt = 8;
+          const wgX = Math.ceil(Math.ceil(gamesPerOpp / gpt) / 128);
+          const wgY = nCands * nOpps;
+          const outCount = nCands * 4;
+          const outBytes = outCount * 4;
+
+          uniformHost[0] = nOpps >>> 0;
+          uniformHost[1] = nCands >>> 0;
+          uniformHost[2] = gamesPerOpp >>> 0;
+          uniformHost[3] = 0;
+          uniformHost[4] = gamesPerOpp >>> 0;
+          uniformHost[5] = seedBase >>> 0;
+          uniformHost[6] = gpt;
+          uniformHost[7] = gamesPerOpp >>> 0;
+
+          device.queue.writeBuffer(uniformBuf, 0, uniformHost);
+          device.queue.writeBuffer(outU32Buf, 0, zeroU32.subarray(0, outCount));
+
+          const encoder = device.createCommandEncoder();
+          const pass = encoder.beginComputePass();
+          pass.setPipeline(optimizePipeline);
+          pass.setBindGroup(0, optimizeBindGroup);
+          pass.dispatchWorkgroups(wgX, wgY, 1);
+          pass.end();
+          encoder.copyBufferToBuffer(outU32Buf, 0, readU32Buf, 0, outBytes);
+          device.queue.submit([encoder.finish()]);
+
+          await readU32Buf.mapAsync(GPUMapMode.READ, 0, outBytes);
+          const u32 = new Uint32Array(readU32Buf.getMappedRange(0, outBytes).slice(0));
+          readU32Buf.unmap();
+
+          const results = [];
+          for (let i = 0; i < nCands; i++) {
+            const o = i * 4;
+            results.push({ games: u32[o], wins: u32[o + 1], draws: u32[o + 2], losses: u32[o + 3] });
+          }
+          return { results };
         }
       };
 

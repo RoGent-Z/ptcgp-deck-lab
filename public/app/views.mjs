@@ -802,6 +802,7 @@ export function renderDecks() {
       <div class="actions spaced block-gap">
         <div class="actions">
           <button class="btn btn-primary" type="button" data-action="open-deck-showcase" data-id="${esc(selected.id)}">沉浸大螢幕預覽</button>
+          <button class="btn btn-primary" type="button" data-action="open-deck-optimizer" data-id="${esc(selected.id)}" ${isValid ? '' : 'disabled'}>牌組 AI 優化</button>
           <button class="btn btn-outline" type="button" data-action="deck-to-battle" data-id="${esc(selected.id)}">${icon('battle', 16)}前往對戰測試</button>
           <button class="btn btn-outline" type="button" data-action="load-to-draft" data-id="${esc(selected.id)}">載入至草稿編輯</button>
           <button class="btn btn-outline" type="button" data-action="feature-deck" data-id="${esc(selected.id)}">${isFeatured ? '★ 已陳列於首頁' : '☆ 設為首頁陳列'}</button>
@@ -1078,6 +1079,7 @@ export function renderBattle() {
           <button class="btn btn-primary" type="button" data-action="start-real-battle" ${canRunReal && !uiState.battle.running ? '' : 'disabled'}>
             ${icon('play', 15)}<span>${primaryBtnLabel}</span>
           </button>
+          <button class="btn btn-outline" type="button" data-action="open-deck-optimizer" data-id="${esc(selectedDeck?.id || '')}" ${selectedDeck && deckLegal && !uiState.battle.running ? '' : 'disabled'}>牌組 AI 優化</button>
           <button class="btn btn-outline" type="button" data-action="open-strategy-lexicon">策略詞條庫 (${lexTotal.toLocaleString('zh-TW')})</button>
           ${uiState.battle.running ? `<button class="btn btn-outline" type="button" data-action="pause-battle">${icon('pause', 15)}暫停</button>` : ''}
           ${(m?.entries?.length && !uiState.battle.running) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck">${icon('plus', 15)}${decks.length ? '匯入榜首試測' : '匯入榜首並測試'}</button>` : ''}

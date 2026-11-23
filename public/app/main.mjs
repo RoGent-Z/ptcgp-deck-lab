@@ -5,9 +5,11 @@ import {
   GAMES_PER_OPPONENT,
   isAndroidOrMobileEnv,
   normalizeFeaturedPokemon,
+  replaceDeckCardOnce,
   resolveModelSimProfile,
   titleCase,
-  TOTAL_BATCH_GAMES
+  TOTAL_BATCH_GAMES,
+  validateDeck
 } from './core.mjs';
 import {
   bindCardImageFallback,
@@ -49,11 +51,13 @@ import {
   buildStrategyLexiconModal,
   ensureCardCoverage,
   executeBattleBatch,
+  executeDeckCardOptimize,
   executeFixturePreviewBatch,
   executeSingleOpponentDeep,
   fnv1a32,
   probeEngine,
   renderBattleReport,
+  renderDeckOptimizerModal,
   renderSingleOpponentDeepModal,
   renderSingleOpponentDeepProgress,
   resolveOpponentLineup
@@ -723,6 +727,150 @@ async function handleAction(el) {
     return;
   }
 
+  if (action === 'open-deck-optimizer') {
+    const deck = state.decks.find((d) => d.id === id)
+      || state.decks.find((d) => d.id === uiState.battle.deckId)
+      || state.decks[0];
+    if (!deck) { showNotice('請先選擇一套牌組'); return; }
+    const issues = state.cardsMissing ? [] : validateDeck(deck, state.cardsById);
+    if (issues.length > 0) { showNotice(issues[0]); return; }
+    uiState.battle.optAbortCtrl?.abort();
+    const firstCardId = deck.cards?.[0]?.id || '';
+    uiState.battle.optimizer = {
+      deckId: deck.id,
+      selectedCardId: firstCardId,
+      running: false,
+      progress: null,
+      result: null
+    };
+    openModal('牌組 AI 優化', renderDeckOptimizerModal({ ...uiState.battle.optimizer, deck }), { wide: true });
+    return;
+  }
+
+  if (action === 'select-optimize-card') {
+    const opt = uiState.battle.optimizer;
+    if (!opt || opt.running) return;
+    opt.selectedCardId = el.dataset.cardId || '';
+    opt.result = null;
+    const deck = state.decks.find((d) => d.id === opt.deckId);
+    if (dialogEl.open && deck) {
+      dialogBodyEl.innerHTML = renderDeckOptimizerModal({ ...opt, deck });
+    }
+    return;
+  }
+
+  if (action === 'reset-deck-optimize') {
+    const opt = uiState.battle.optimizer;
+    if (!opt) return;
+    uiState.battle.optAbortCtrl?.abort();
+    opt.running = false;
+    opt.progress = null;
+    opt.result = null;
+    const deck = state.decks.find((d) => d.id === opt.deckId);
+    if (dialogEl.open && deck) {
+      dialogBodyEl.innerHTML = renderDeckOptimizerModal({ ...opt, deck });
+    }
+    return;
+  }
+
+  if (action === 'cancel-deck-optimize') {
+    uiState.battle.optAbortCtrl?.abort();
+    const opt = uiState.battle.optimizer;
+    if (opt) {
+      opt.running = false;
+      opt.progress = null;
+      const deck = state.decks.find((d) => d.id === opt.deckId);
+      if (dialogEl.open && deck) {
+        dialogBodyEl.innerHTML = renderDeckOptimizerModal({ ...opt, deck });
+      }
+    }
+    showNotice('已取消優化');
+    return;
+  }
+
+  if (action === 'start-deck-optimize') {
+    const opt = uiState.battle.optimizer;
+    if (!opt || opt.running || !opt.selectedCardId) return;
+    const deck = state.decks.find((d) => d.id === opt.deckId);
+    if (!deck) { showNotice('找不到目標牌組'); return; }
+    const lineup = resolveOpponentLineup(state.meta, null).selected;
+    if (lineup.length < 10) { showNotice('賽事環境資料尚未就緒'); return; }
+
+    uiState.battle.optAbortCtrl?.abort();
+    const ctrl = new AbortController();
+    uiState.battle.optAbortCtrl = ctrl;
+    opt.running = true;
+    opt.result = null;
+    opt.progress = { stage: 'screen', done: 0, total: state.cards.length || 4577 };
+    dialogBodyEl.innerHTML = renderDeckOptimizerModal({ ...opt, deck });
+
+    try {
+      const res = await executeDeckCardOptimize({
+        deck,
+        targetCardId: opt.selectedCardId,
+        lineup,
+        signal: ctrl.signal,
+        onProgress: (info) => {
+          opt.progress = info;
+          if (dialogEl.open && !ctrl.signal.aborted) {
+            dialogBodyEl.innerHTML = renderDeckOptimizerModal({ ...opt, deck });
+          }
+        }
+      });
+      if (!res || ctrl.signal.aborted) return;
+      opt.running = false;
+      opt.progress = null;
+      opt.result = res;
+      if (dialogEl.open) {
+        dialogBodyEl.innerHTML = renderDeckOptimizerModal({ ...opt, deck });
+      }
+    } catch (err) {
+      opt.running = false;
+      opt.progress = null;
+      if (dialogEl.open) {
+        dialogBodyEl.innerHTML = renderDeckOptimizerModal({ ...opt, deck });
+      }
+      showNotice(err?.message || '優化過程中斷');
+    }
+    return;
+  }
+
+  if (action === 'apply-deck-optimize') {
+    const opt = uiState.battle.optimizer;
+    const newId = el.dataset.newId;
+    const mode = el.dataset.mode || 'replace';
+    if (!opt || !newId) return;
+    const deck = state.decks.find((d) => d.id === opt.deckId);
+    if (!deck) { showNotice('找不到目標牌組'); return; }
+    try {
+      const nextDeck = replaceDeckCardOnce(deck, opt.selectedCardId, newId, state.cardsById);
+      nextDeck.cards = sortDeckEntriesPtcgpDefault(nextDeck.cards, state.cardsById);
+      nextDeck.featuredPokemon = resolveFeaturedPokemon(nextDeck, state.cardsById, state.spriteMap).map((x) => x.slug);
+      nextDeck.customOrder = true;
+      const newCardName = state.cardsById.get(newId)?.name || newId;
+      if (mode === 'copy') {
+        const copied = await saveDeck({
+          ...nextDeck,
+          id: crypto.randomUUID(),
+          name: `${deck.name} (AI 優化)`
+        });
+        state.selectedDeckId = copied.id;
+        uiState.battle.deckId = copied.id;
+        if (dialogEl.open) dialogEl.close();
+        renderRoute();
+        showNotice(`已另存為「${copied.name}」（換入 ${newCardName}）`);
+      } else {
+        await saveDeck(nextDeck);
+        if (dialogEl.open) dialogEl.close();
+        renderRoute();
+        showNotice(`已替換為「${newCardName}」並儲存牌組`);
+      }
+    } catch (err) {
+      showNotice('無法替換：' + (err?.message || '不符合牌組規則'));
+    }
+    return;
+  }
+
   if (action === 'open-deck-showcase') {
     const d = state.decks.find((x) => x.id === id);
     if (!d) return;
@@ -1265,6 +1413,7 @@ document.getElementById('dialog-close')?.addEventListener('click', () => dialogE
 dialogEl?.addEventListener('click', (e) => { if (e.target === dialogEl) dialogEl.close(); });
 dialogEl?.addEventListener('close', () => {
   uiState.battle.deepAbortCtrl?.abort();
+  uiState.battle.optAbortCtrl?.abort();
   dialogEl.classList.remove('is-wide');
   dialogBodyEl.innerHTML = '';
 });

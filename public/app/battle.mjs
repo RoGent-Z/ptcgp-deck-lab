@@ -1,6 +1,7 @@
 import {
   aggregate,
   buildExplorationCandidates,
+  buildLegalReplacementCandidates,
   computeCompositeWinRate,
   computeCompositeWinRateFromCompact,
   createEmptyExploreStats,
@@ -23,7 +24,7 @@ import {
   TOTAL_BATCH_GAMES,
   validOutcomes
 } from './core.mjs';
-import { esc, renderEnergyToken, renderPokemonSprites, resolveFeaturedPokemon } from './cardface.mjs';
+import { cardPrimaryTypes, esc, renderCardImgTag, renderEnergyToken, renderPokemonSprites, resolveFeaturedPokemon } from './cardface.mjs';
 import { ensureStrategyLexicon, saveRunRecord, state } from './data.mjs';
 import { probeWebGPU } from '../battle/gpu-sim.mjs';
 
@@ -2036,7 +2037,6 @@ export async function executeBattleBatch({ run, deck, lineup, weights, simProfil
   onTick(run);
   return run;
 }
-
 // 僅在 ?fixture=1 下用於 UI 樣式驗收的演示生成器（依模型自動切換 1B5M / 1M5Q）
 export async function executeFixturePreviewBatch({ run, lineup, onTick, signal }) {
   const profile = resolveModelSimProfile(run);
@@ -2098,4 +2098,359 @@ export async function executeFixturePreviewBatch({ run, lineup, onTick, signal }
   await saveRunRecord(run);
   onTick(run);
   return run;
+}
+
+// ============================================================================
+// 牌組 AI 優化（底層採用 1M5Q 輕量模型遍歷全卡庫所有合法替換方案並測算實戰勝率）
+// ============================================================================
+export async function executeDeckCardOptimize({ deck, targetCardId, lineup, onProgress, signal }) {
+  const { ready, fastSim, gpuSim, error } = await probeEngine();
+  if (!ready) throw Error(error || '模擬引擎尚未就緒');
+  if (!lineup?.length) throw Error('尚未載入賽事環境資料');
+
+  const liteModel = state.modelsById?.get?.('lite-1m5q')
+    || state.modelsById?.get?.('v3')
+    || state.modelInfo;
+  const playerWeights = liteModel?.weights || Array(22).fill(0);
+  const enemyWeightsList = lineup.map((item) => getOpponentEliteWeights(item.entry.id, playerWeights));
+
+  const cardBonusById = {};
+  const priorsById = state.cardPriors?.byCardId || {};
+  for (const [cid, info] of Object.entries(priorsById)) {
+    cardBonusById[cid] = Number(info?.p || 0);
+  }
+
+  const fastEnemies = lineup.map((item) => ({
+    id: item.entry.id,
+    cards: expandDeckForFastSim(item.entry.representative, cardBonusById)
+  }));
+
+  const prep = buildLegalReplacementCandidates({
+    deck,
+    targetCardId,
+    allCards: state.cards,
+    cardsById: state.cardsById,
+    collection: state.collection,
+    cardBonusById
+  });
+
+  const { baseDeck20, origCard, totalCatalogCount, totalLegalChecked, candidates } = prep;
+  const nOpps = fastEnemies.length;
+  const useGpu = Boolean(gpuSim?.ready);
+  const screenSeedBase = fnv1a32(`opt-screen:${deck.id}:${targetCardId}`);
+  const verifySeedBase = fnv1a32(`opt-verify:${deck.id}:${targetCardId}`);
+
+  // 第一輪：遍歷全卡庫所有合法候選卡
+  const screenGamesPerOpp = useGpu ? 100 : 20;
+  const batchSize = useGpu ? 64 : 32;
+  const scored = new Array(candidates.length);
+  let checkedCards = 0;
+
+  onProgress?.({ stage: 'screen', done: 0, total: totalLegalChecked });
+
+  if (useGpu) {
+    gpuSim.uploadOptimizeContext({
+      baseDeck: baseDeck20,
+      enemies: fastEnemies,
+      playerWeights,
+      enemyWeightsList
+    });
+    for (let start = 0; start < candidates.length; start += batchSize) {
+      if (signal?.aborted) return null;
+      const slice = candidates.slice(start, start + batchSize);
+      const res = await gpuSim.runOptimizeBatch({
+        candidateCards: slice.map((x) => x.encoded),
+        nOpps,
+        gamesPerOpp: screenGamesPerOpp,
+        seedBase: screenSeedBase
+      });
+      for (let i = 0; i < slice.length; i++) {
+        const r = res.results[i];
+        scored[start + i] = {
+          ...slice[i],
+          games: r.games,
+          wins: r.wins,
+          draws: r.draws,
+          losses: r.losses,
+          winRate: r.games ? r.wins / r.games : 0
+        };
+        checkedCards += slice[i].representedCount || 1;
+      }
+      onProgress?.({ stage: 'screen', done: Math.min(totalLegalChecked, checkedCards), total: totalLegalChecked });
+    }
+  } else {
+    const tasks = [];
+    for (let start = 0; start < candidates.length; start += batchSize) {
+      const slice = candidates.slice(start, start + batchSize);
+      tasks.push({
+        start,
+        slice,
+        request: {
+          op: 'optimize_batch',
+          base_deck: baseDeck20,
+          enemies: fastEnemies,
+          player_weights: playerWeights,
+          enemy_weights: playerWeights,
+          enemy_weights_list: enemyWeightsList,
+          candidate_cards: slice.map((x) => x.encoded),
+          games_per_opp: screenGamesPerOpp,
+          seed_base: screenSeedBase
+        }
+      });
+    }
+    await runFastTasks(tasks, {
+      fastSim,
+      signal,
+      onResult: (res, task) => {
+        for (let i = 0; i < task.slice.length; i++) {
+          const r = res.results[i];
+          scored[task.start + i] = {
+            ...task.slice[i],
+            games: r.games,
+            wins: r.wins,
+            draws: r.draws,
+            losses: r.losses,
+            winRate: r.games ? r.wins / r.games : 0
+          };
+          checkedCards += task.slice[i].representedCount || 1;
+        }
+        onProgress?.({ stage: 'screen', done: Math.min(totalLegalChecked, checkedCards), total: totalLegalChecked });
+      }
+    });
+  }
+  if (signal?.aborted) return null;
+
+  // 第二輪：對前段高勝率候選（前 24 名 + 原卡）以 1M5Q 完整 5,000 局（10 對手 × 500 局）複核定榜
+  const origItem = scored[0];
+  const othersRanked = scored.slice(1).filter(Boolean).sort((a, b) => b.winRate - a.winRate || b.wins - a.wins);
+  const finalists = [origItem, ...othersRanked.slice(0, 24)].filter(Boolean);
+  const verifyGamesPerOpp = 500; // 10 * 500 = 5,000 局完整輕量模型實測
+
+  onProgress?.({ stage: 'verify', done: 0, total: finalists.length });
+
+  let verified = [];
+  if (useGpu) {
+    const res = await gpuSim.runOptimizeBatch({
+      candidateCards: finalists.map((x) => x.encoded),
+      nOpps,
+      gamesPerOpp: verifyGamesPerOpp,
+      seedBase: verifySeedBase
+    });
+    verified = finalists.map((item, i) => {
+      const r = res.results[i];
+      return {
+        ...item,
+        games: r.games,
+        wins: r.wins,
+        draws: r.draws,
+        losses: r.losses,
+        winRate: r.games ? r.wins / r.games : 0
+      };
+    });
+    onProgress?.({ stage: 'verify', done: finalists.length, total: finalists.length });
+  } else {
+    const vTasks = finalists.map((item, idx) => ({
+      idx,
+      item,
+      request: {
+        op: 'optimize_batch',
+        base_deck: baseDeck20,
+        enemies: fastEnemies,
+        player_weights: playerWeights,
+        enemy_weights: playerWeights,
+        enemy_weights_list: enemyWeightsList,
+        candidate_cards: [item.encoded],
+        games_per_opp: verifyGamesPerOpp,
+        seed_base: verifySeedBase
+      }
+    }));
+    const vOut = new Array(finalists.length);
+    let vDone = 0;
+    await runFastTasks(vTasks, {
+      fastSim,
+      signal,
+      onResult: (res, task) => {
+        const r = res.results[0];
+        vOut[task.idx] = {
+          ...task.item,
+          games: r.games,
+          wins: r.wins,
+          draws: r.draws,
+          losses: r.losses,
+          winRate: r.games ? r.wins / r.games : 0
+        };
+        vDone++;
+        onProgress?.({ stage: 'verify', done: vDone, total: finalists.length });
+      }
+    });
+    verified = vOut.filter(Boolean);
+  }
+  if (signal?.aborted) return null;
+
+  const baseline = verified.find((x) => x.isOriginal) || verified[0];
+  const ranked = [...verified].sort((a, b) => b.winRate - a.winRate || (a.isOriginal ? -1 : 1));
+  const best = ranked[0] || baseline;
+  const topList = ranked.slice(0, 10);
+
+  return {
+    deckId: deck.id,
+    deckName: deck.name,
+    targetCardId,
+    origCard,
+    totalCatalogCount,
+    totalLegalChecked,
+    baseline,
+    best,
+    topList
+  };
+}
+
+// 玩家友善版「牌組 AI 優化」彈窗（零技術術語，僅呈現操作與結果）
+export function renderDeckOptimizerModal(optState) {
+  const { deck, selectedCardId, running, progress, result } = optState;
+  if (!deck) {
+    return '<div class="empty-box is-dashed"><strong>請先選擇一套合法的 20 張牌組</strong></div>';
+  }
+
+  const deckEntries = (deck.cards || []).map((entry) => ({
+    ...entry,
+    card: state.cardsById.get(entry.id)
+  })).filter((x) => x.card);
+
+  if (running) {
+    const isVerify = progress?.stage === 'verify';
+    const done = Number(progress?.done || 0);
+    const total = Math.max(1, Number(progress?.total || 1));
+    const pct = Math.min(100, (done / total) * 100).toFixed(1);
+    const targetName = state.cardsById.get(selectedCardId)?.name || '所選卡牌';
+    return `
+      <div class="opt-modal">
+        <div class="opt-progress-box">
+          <div class="opt-progress-head">
+            <div>
+              <strong>${isVerify ? '正在精細比較前段推薦卡牌…' : `正在為「${esc(targetName)}」尋找最佳替換卡牌…`}</strong>
+              <p class="sub">${isVerify
+                ? `正在複核前 ${total} 張高勝率候選卡（${done} / ${total}）`
+                : `已評估 ${done.toLocaleString('zh-TW')} / ${total.toLocaleString('zh-TW')} 張符合規則的卡牌（${pct}%）`}</p>
+            </div>
+            <button class="btn btn-outline" type="button" data-action="cancel-deck-optimize">取消</button>
+          </div>
+          <div class="progress-track">
+            <i style="width:${pct}%"></i>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (result) {
+    const baseWr = (result.baseline.winRate * 100).toFixed(1);
+    const bestWr = (result.best.winRate * 100).toFixed(1);
+    const delta = (result.best.winRate - result.baseline.winRate) * 100;
+    const isSameBest = result.best.isOriginal || result.best.card.id === result.targetCardId;
+    const deltaText = isSameBest
+      ? '已是最佳配置'
+      : `${delta >= 0 ? '+' : ''}${delta.toFixed(1)}% 預估勝率`;
+
+    const topRows = result.topList.map((item, idx) => {
+      const c = item.card;
+      const wr = (item.winRate * 100).toFixed(1);
+      const diff = (item.winRate - result.baseline.winRate) * 100;
+      const diffStr = item.isOriginal ? '目前使用' : `${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
+      const typesHtml = cardPrimaryTypes(c).map((t) => renderEnergyToken(t.key, 'sm')).join('');
+      const thumb = renderCardImgTag(c, 'opt-row-thumb', false);
+      return `
+        <li class="opt-rank-row ${idx === 0 ? 'is-best' : ''} ${item.isOriginal ? 'is-orig' : ''}">
+          <span class="rank-num">#${idx + 1}</span>
+          <span class="opt-row-thumb-wrap">${thumb}</span>
+          <div class="opt-row-info">
+            <div class="opt-row-title">
+              <strong>${esc(c.name)}</strong>
+              <span class="tokens-inline">${typesHtml}</span>
+              ${item.isOriginal ? '<span class="pill-sub">原卡</span>' : ''}
+            </div>
+            <span class="sub">${esc(c.setName || c.set || '')}</span>
+          </div>
+          <div class="opt-row-stat">
+            <strong>${wr}%</strong>
+            <small class="${diff > 0.05 ? 'is-up' : ''}">${diffStr}</small>
+          </div>
+          <div class="opt-row-act">
+            ${item.isOriginal
+              ? '<span class="muted">目前牌組</span>'
+              : `<button class="mini" type="button" data-action="apply-deck-optimize" data-new-id="${esc(c.id)}" data-mode="replace">採用此卡</button>`}
+          </div>
+        </li>
+      `;
+    }).join('');
+
+    return `
+      <div class="opt-modal">
+        <div class="opt-compare-card">
+          <div class="opt-compare-side">
+            <span class="opt-side-tag">原本卡牌</span>
+            <div class="opt-card-preview">${renderCardImgTag(result.origCard, 'opt-hero-img', false)}</div>
+            <strong>${esc(result.origCard?.name || '')}</strong>
+            <span class="opt-wr-num">${baseWr}%</span>
+          </div>
+          <div class="opt-compare-mid">
+            <span class="opt-arrow" aria-hidden="true">→</span>
+            <span class="opt-delta-pill ${isSameBest ? 'is-same' : delta >= 0 ? 'is-pos' : 'is-neg'}">${deltaText}</span>
+          </div>
+          <div class="opt-compare-side is-recommend">
+            <span class="opt-side-tag is-accent">AI 建議填入</span>
+            <div class="opt-card-preview">${renderCardImgTag(result.best.card, 'opt-hero-img', false)}</div>
+            <strong>${esc(result.best.card?.name || '')}</strong>
+            <span class="opt-wr-num is-accent">${bestWr}%</span>
+          </div>
+        </div>
+
+        <div class="actions opt-hero-actions">
+          ${isSameBest
+            ? '<button class="btn btn-primary" type="button" data-action="reset-deck-optimize">挑選其他卡牌優化</button>'
+            : `<button class="btn btn-primary" type="button" data-action="apply-deck-optimize" data-new-id="${esc(result.best.card.id)}" data-mode="replace">一鍵替換並儲存</button>
+               <button class="btn btn-outline" type="button" data-action="apply-deck-optimize" data-new-id="${esc(result.best.card.id)}" data-mode="copy">另存為新牌組</button>
+               <button class="btn btn-outline" type="button" data-action="reset-deck-optimize">改選其他卡牌</button>`}
+        </div>
+
+        <div class="opt-rank-section">
+          <h3>高勝率替換推薦（前 ${result.topList.length} 名）</h3>
+          <ul class="opt-rank-list">${topRows}</ul>
+          <p class="sub opt-footnote">已為您遍歷檢驗全部 ${result.totalLegalChecked.toLocaleString('zh-TW')} 張符合組牌規則的卡牌。</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const chosenCard = selectedCardId ? state.cardsById.get(selectedCardId) : null;
+  const pickCardsHtml = deckEntries.map((entry) => {
+    const c = entry.card;
+    const isSel = selectedCardId === c.id;
+    return `
+      <button
+        type="button"
+        class="opt-pick-card ${isSel ? 'is-selected' : ''}"
+        data-action="select-optimize-card"
+        data-card-id="${esc(c.id)}"
+        aria-pressed="${isSel ? 'true' : 'false'}"
+      >
+        <div class="opt-pick-img-wrap">
+          ${renderCardImgTag(c, 'opt-pick-img', false)}
+          <span class="opt-pick-qty">×${entry.count}</span>
+        </div>
+        <span class="opt-pick-name">${esc(c.name)}</span>
+      </button>
+    `;
+  }).join('');
+
+  return `
+    <div class="opt-modal">
+      <p class="desc opt-intro">點選下方「<b>${esc(deck.name)}</b>」中的任一張卡牌，AI 會自動替換並檢驗全卡庫所有合法卡牌的實戰勝率，選出最適合填入的建議卡。</p>
+      <div class="opt-pick-grid">${pickCardsHtml}</div>
+      <div class="opt-start-bar">
+        <span class="sub">${chosenCard ? `已選擇欲優化卡牌：<b>${esc(chosenCard.name)}</b>` : '請先點選一張欲優化的卡牌'}</span>
+        <button class="btn btn-primary" type="button" data-action="start-deck-optimize" ${chosenCard ? '' : 'disabled'}>開始 AI 優化</button>
+      </div>
+    </div>
+  `;
 }
