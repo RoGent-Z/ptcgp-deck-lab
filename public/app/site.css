@@ -2367,6 +2367,8 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.72); }
   .draft-sidebar { position: static; }
   .battle-row { grid-template-columns: minmax(0, 1fr); }
   .battle-row > * { min-width: 0; max-width: 100%; }
+  .battle-strip-col { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .report-shell { max-width: 100%; overflow-x: hidden; }
   .battle-opp-stat { text-align: left; }
   .game-strip.is-500 { flex-direction: column; align-items: flex-start; gap: 5px; }
   .strip-gap.is-500 { width: 173px; height: 2px; }

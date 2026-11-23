@@ -41,50 +41,59 @@
         "score": 0.6157407407407407,
         "winRate": 0.6083333333333333,
         "wins": 1314
+      },
+      "simProfile": {
+        "id": "1b5m",
+        "label": "1B5M全量模型",
+        "exploreLabel": "10 億局",
+        "testLabel": "500 萬局",
+        "exploreTotalGames": 1000000000,
+        "exploreGamesPerOpponent": 100000000,
+        "gamesPerOpponent": 500000,
+        "firstSeatGames": 250000,
+        "totalBatchGames": 5000000,
+        "deepExploreGames": 1000000000,
+        "deepGamesPerOpponent": 5000000
       }
     },
     {
-      "id": "v1",
-      "file": "battle/models/v1.json",
-      "version": "selfplay-cem-v1",
-      "label": "selfplay-cem-v1（18,432 局第一代保留模型）",
-      "badge": "V1 基準",
-      "trainedGames": 18432,
-      "cumulativeTrainingGames": 18432,
+      "id": "lite-1m5q",
+      "file": "battle/models/lite-1m5q.json",
+      "version": "lite-1m5q",
+      "label": "1M5Q轻量模型",
+      "badge": "1M5Q轻量模型",
+      "derivedFrom": "v3",
+      "trainedGames": 11645480,
+      "cumulativeTrainingGames": 11737640,
+      "cardPoolEvaluated": {
+        "minDecisionsPerCard": 2400,
+        "minGamesPerCard": 1200,
+        "totalCardDecisionEvaluations": 10984800,
+        "totalCardEvaluationGames": 5492400,
+        "totalDistinctCards": 4577
+      },
       "vsBaseline": {
+        "draws": 32,
         "games": 2160,
-        "wins": 1289,
-        "draws": 41,
-        "losses": 830,
-        "winRate": 0.5967592592592592,
-        "score": 0.60625
+        "losses": 814,
+        "opponent": "baseline-v0",
+        "score": 0.6157407407407407,
+        "winRate": 0.6083333333333333,
+        "wins": 1314
+      },
+      "simProfile": {
+        "id": "1m5q",
+        "label": "1M5Q轻量模型",
+        "exploreLabel": "100 萬局",
+        "testLabel": "5,000 局",
+        "exploreTotalGames": 1000000,
+        "exploreGamesPerOpponent": 100000,
+        "gamesPerOpponent": 500,
+        "firstSeatGames": 250,
+        "totalBatchGames": 5000,
+        "deepExploreGames": 1000000,
+        "deepGamesPerOpponent": 5000
       }
-    },
-    {
-      "id": "v2",
-      "file": "battle/models/v2.json",
-      "version": "selfplay-cem-v2",
-      "label": "selfplay-cem-v2（92,160 局第二代續訓實驗）",
-      "badge": "V2 實驗",
-      "trainedGames": 73728,
-      "cumulativeTrainingGames": 92160,
-      "vsBaseline": {
-        "games": 2160,
-        "wins": 1252,
-        "draws": 35,
-        "losses": 873,
-        "winRate": 0.5796296296296296,
-        "score": 0.5877314814814815
-      }
-    },
-    {
-      "id": "baseline-v0",
-      "file": "battle/models/baseline-v0.json",
-      "version": "baseline-v0",
-      "label": "baseline-v0（啟發式規則基線）",
-      "badge": "基線",
-      "trainedGames": 0,
-      "cumulativeTrainingGames": 0
     }
   ],
   "benchmark": {
@@ -390,5 +399,6 @@
         }
       ]
     }
-  }
+  },
+  "mobileDefaultModelId": "lite-1m5q"
 }

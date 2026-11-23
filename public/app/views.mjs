@@ -10,8 +10,10 @@ import {
   getPokemonCategories,
   getPokemonCategoryLabel,
   interval,
+  isAndroidOrMobileEnv,
   matchesPokemonCategoryFilter,
   POKEMON_CATEGORY_GROUPS,
+  resolveModelSimProfile,
   titleCase,
   TOTAL_BATCH_GAMES,
   validateDeck
@@ -969,14 +971,17 @@ export function renderBattle() {
   if (selectedDeck && uiState.battle.deckId !== selectedDeck.id) uiState.battle.deckId = selectedDeck.id;
 
   const modelList = state.modelManifest?.models || [];
-  const defaultModelId = state.modelManifest?.defaultModelId || 'v3';
+  const preferredDefaultId = isAndroidOrMobileEnv()
+    ? (state.modelManifest?.mobileDefaultModelId || 'lite-1m5q')
+    : (state.modelManifest?.defaultModelId || 'v3');
   if (!uiState.battle.modelId || (modelList.length && !state.modelsById.has(uiState.battle.modelId))) {
-    uiState.battle.modelId = state.modelsById.has(defaultModelId) ? defaultModelId : (modelList[0]?.id || 'current');
+    uiState.battle.modelId = state.modelsById.has(preferredDefaultId) ? preferredDefaultId : (modelList[0]?.id || 'v3');
   }
   const activeModel = state.modelsById.get(uiState.battle.modelId) || state.modelInfo;
   const activeModelMeta = activeModel?.metaEntry || modelList.find((x) => x.id === uiState.battle.modelId) || null;
   const activeModelVersion = activeModel?.version || 'selfplay-cem-v3';
-  const activeModelDisplay = activeModelMeta?.label || activeModelVersion;
+  const activeModelProfile = resolveModelSimProfile(activeModel || activeModelMeta);
+  const activeModelDisplay = activeModelMeta?.label || activeModelProfile.label || activeModelVersion;
 
   if (state.engineReady && state.runtimeFn) {
     const coverIds = [
@@ -1015,11 +1020,11 @@ export function renderBattle() {
     activeRun
     && !activeRun.isDemo
     && (expDone > 0 || testDone > 0)
-    && (expDone < EXPLORE_TOTAL_GAMES || testDone < TOTAL_BATCH_GAMES)
+    && (expDone < activeModelProfile.exploreTotalGames || testDone < activeModelProfile.totalBatchGames)
   );
   const primaryBtnLabel = hasIncompleteRun
     ? `繼續剩餘（探索 ${expDone.toLocaleString('zh-TW')} · 實測 ${testDone.toLocaleString('zh-TW')}）`
-    : '開始勝率模擬（10 億探索 → 500 萬實測）';
+    : `開始勝率模擬（${activeModelProfile.exploreLabel}探索 → ${activeModelProfile.testLabel}實測）`;
   const lexTotal = state.strategyIndex?.totalEntries || state.strategyLexicon?.totalEntries || 13500;
   const hwModeLabel = state.gpuReady
     ? `GPU 顯存加速${state.gpuAdapterName ? ` · ${state.gpuAdapterName}` : ''}`
@@ -1029,7 +1034,7 @@ export function renderBattle() {
   return `
     <div class="page-head">
       <h1>對戰測試與勝率模擬</h1>
-      <p class="desc">10 億局策略探索 → 500 萬局實測 · 前十對手均採千萬局互博最佳策略。</p>
+      <p class="desc">${esc(activeModelDisplay)} · ${esc(activeModelProfile.exploreLabel)}策略探索 → ${esc(activeModelProfile.testLabel)}實測 · 前十對手均採千萬局互博最佳策略。</p>
     </div>
 
     <div class="battle-setup-grid">
@@ -1100,7 +1105,7 @@ export function renderBattle() {
     <section class="panel block-gap" id="battle-report-area">
       ${activeRun
         ? renderBattleReport(activeRun, lineup.selected, { canReplay: state.engineReady || state.fixture })
-        : '<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>點擊「開始勝率模擬」，以顯存/記憶體並行執行 10 億局策略探索與 500 萬局實測。</p></div>'}
+        : `<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>點擊「開始勝率模擬」，以 ${esc(activeModelDisplay)} 執行 ${esc(activeModelProfile.exploreLabel)}探索與 ${esc(activeModelProfile.testLabel)}實測。</p></div>`}
     </section>
 
     ${renderTrainingBenchmarkSection()}

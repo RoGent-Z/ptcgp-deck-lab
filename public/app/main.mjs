@@ -3,7 +3,9 @@ import {
   DEEP_GAMES_PER_OPPONENT,
   EXPLORE_TOTAL_GAMES,
   GAMES_PER_OPPONENT,
+  isAndroidOrMobileEnv,
   normalizeFeaturedPokemon,
+  resolveModelSimProfile,
   titleCase,
   TOTAL_BATCH_GAMES
 } from './core.mjs';
@@ -147,12 +149,18 @@ function applySwissSelectValue(selectId, value) {
 }
 
 function getSelectedBattleModel() {
-  const id = uiState.battle.modelId || state.modelManifest?.defaultModelId || 'v3';
+  const defaultId = isAndroidOrMobileEnv()
+    ? (state.modelManifest?.mobileDefaultModelId || 'lite-1m5q')
+    : (state.modelManifest?.defaultModelId || 'v3');
+  const id = uiState.battle.modelId || defaultId;
   const model = state.modelsById.get(id) || state.modelInfo;
+  const simProfile = resolveModelSimProfile(model || { id });
   return {
     id,
-    version: model?.version || 'selfplay-cem-v3',
-    weights: model?.weights || Array(22).fill(0)
+    version: model?.version || (id === 'lite-1m5q' ? 'lite-1m5q' : 'selfplay-cem-v3'),
+    label: model?.metaEntry?.label || simProfile.label,
+    weights: model?.weights || Array(22).fill(0),
+    simProfile
   };
 }
 
@@ -815,14 +823,16 @@ async function handleAction(el) {
     if (lineup.length < 10) { showNotice('目前不足 10 個有效對手'); return; }
 
     const model = getSelectedBattleModel();
+    const profile = model.simProfile;
     const targetVersion = isDemo ? '展示樣板' : model.version;
 
     const isIncomplete = (r) => {
+      const rp = resolveModelSimProfile(r);
       const testDone = r.compactResults
         ? Object.values(r.compactResults).reduce((s, rec) => s + (rec?.total || 0), 0)
         : (r.events?.length || 0);
-      return (r.exploreStats?.completed ?? r.winningStrategy?.exploreTotal ?? 0) < EXPLORE_TOTAL_GAMES
-        || testDone < TOTAL_BATCH_GAMES;
+      return (r.exploreStats?.completed ?? r.winningStrategy?.exploreTotal ?? 0) < rp.exploreTotalGames
+        || testDone < rp.totalBatchGames;
     };
 
     let run = state.runs.find((r) => r.runId === uiState.battle.activeRunId && r.deckId === deck.id && (r.isDemo || r.modelVersion === targetVersion))
@@ -834,7 +844,9 @@ async function handleAction(el) {
         deckId: deck.id,
         deckName: deck.name,
         season: state.meta?.season || 'C1',
+        modelId: model.id,
         modelVersion: targetVersion,
+        simProfile: profile,
         isDemo,
         exploreStats: null,
         winningStrategy: null,
@@ -865,12 +877,13 @@ async function handleAction(el) {
           deck,
           lineup,
           weights: model.weights,
+          simProfile: profile,
           onTick: updateView,
           signal: uiState.battle.abortCtrl.signal
         });
       }
       if (!uiState.battle.abortCtrl.signal.aborted) {
-        showNotice(`模擬完成：10 億局策略探索 → 500 萬局實測`);
+        showNotice(`模擬完成：${profile.label}（${profile.exploreLabel}探索 → ${profile.testLabel}實測）`);
       }
     } catch (err) {
       showNotice(err?.message || '模擬中斷');
@@ -888,22 +901,24 @@ async function handleAction(el) {
     if (!opp || !deck) { showNotice('找不到參戰牌組或目標對手'); return; }
     if (!state.engineReady) { showNotice('對戰模擬引擎尚未就緒'); return; }
     const model = getSelectedBattleModel();
+    const profile = model.simProfile;
     uiState.battle.deepAbortCtrl?.abort();
     const ctrl = new AbortController();
     uiState.battle.deepAbortCtrl = ctrl;
 
     openModal(
-      `單組深度模擬（10 億探索 → 500 萬實測）· 對陣 ${opp.name}`,
+      `單組深度模擬（${profile.exploreLabel}探索 → ${profile.testLabel}實測）· 對陣 ${opp.name}`,
       renderSingleOpponentDeepProgress({
         opp,
         phase: 'explore',
         done: 0,
-        total: DEEP_EXPLORE_GAMES,
+        total: profile.deepExploreGames,
         wins: 0,
         gamesPerSec: 0,
         mode: state.gpuReady ? 'gpu' : 'cpu',
         adapter: state.gpuAdapterName,
-        workers: Math.min(16, navigator.hardwareConcurrency || 4)
+        workers: Math.min(16, navigator.hardwareConcurrency || 4),
+        profile
       }),
       { wide: true }
     );
@@ -913,6 +928,7 @@ async function handleAction(el) {
         opp,
         deck,
         baseWeights: model.weights,
+        simProfile: profile,
         signal: ctrl.signal,
         onProgress: (info) => {
           if (dialogEl.open && !ctrl.signal.aborted) {
@@ -926,8 +942,8 @@ async function handleAction(el) {
       }
       uiState.battle.lastSingleDeep = deepRes;
       const html = renderSingleOpponentDeepModal(deepRes, 0);
-      openModal(`單組深度模擬（10 億探索 → 500 萬實測）· 對陣 ${opp.name}（第 1 / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
-      showNotice(`已完成對「${opp.name}」的 10 億局探索 + 500 萬局實測`);
+      openModal(`單組深度模擬（${profile.exploreLabel}探索 → ${profile.testLabel}實測）· 對陣 ${opp.name}（第 1 / ${profile.deepGamesPerOpponent.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+      showNotice(`已完成對「${opp.name}」的 ${profile.exploreLabel}探索 + ${profile.testLabel}實測`);
     } catch (err) {
       showNotice(err?.message || '單組深度模擬失敗');
     }
@@ -969,10 +985,11 @@ async function handleAction(el) {
 
   if (action === 'replay-single-deep') {
     const deepRes = uiState.battle.lastSingleDeep;
-    if (!deepRes) { showNotice('請先執行單組 10 億探索 + 500 萬實測'); return; }
+    if (!deepRes) { showNotice('請先執行單組深度模擬'); return; }
+    const p = resolveModelSimProfile(deepRes.profile);
     const idx = Number(el.dataset.idx) || 0;
     const html = renderSingleOpponentDeepModal(deepRes, idx);
-    openModal(`單組深度模擬（10 億探索 → 500 萬實測）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${DEEP_GAMES_PER_OPPONENT.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+    openModal(`單組深度模擬（${p.exploreLabel}探索 → ${p.testLabel}實測）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${p.deepGamesPerOpponent.toLocaleString('zh-TW')} 局）`, html, { wide: true });
     return;
   }
 
@@ -995,7 +1012,9 @@ async function handleAction(el) {
         deckId: deck.id,
         deckName: deck.name,
         season: state.meta?.season || 'C1',
+        modelId: model.id,
         modelVersion: model.version,
+        simProfile: model.simProfile,
         isDemo: false,
         exploreStats: null,
         winningStrategy: null,
@@ -1019,8 +1038,9 @@ async function handleAction(el) {
     const opp = (state.meta?.entries || []).find((e) => e.id === oppId);
     const deck = state.decks.find((d) => d.id === run?.deckId) || state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0];
     const weights = getWeightsForVersion(run?.modelVersion);
+    const p = resolveModelSimProfile(run);
     const html = buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights });
-    openModal(`完整對局流程 · 對陣 ${opp?.name || oppId}（第 ${idx + 1} / ${GAMES_PER_OPPONENT} 局）`, html, { wide: true });
+    openModal(`完整對局流程 · 對陣 ${opp?.name || oppId}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${p.gamesPerOpponent.toLocaleString('zh-TW')} 局）`, html, { wide: true });
   }
 }
 

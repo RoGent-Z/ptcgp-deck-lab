@@ -17,6 +17,7 @@ import {
   isEngineImplementedStatus,
   matchDeckStrategies,
   mergeExploreChunkStats,
+  resolveModelSimProfile,
   synthesizeWinningStrategyFromStats,
   TOTAL_BATCH_GAMES,
   validOutcomes
@@ -451,9 +452,10 @@ function formatPerfBadge(perf) {
 }
 
 function renderWinningStrategyBanner(run, summary) {
+  const profile = resolveModelSimProfile(run);
   const ws = run.winningStrategy || null;
   const expCount = run.exploreStats?.completed ?? ws?.exploreTotal ?? 0;
-  const expTarget = EXPLORE_TOTAL_GAMES;
+  const expTarget = profile.exploreTotalGames;
   const expPct = Math.min(100, (expCount / expTarget) * 100).toFixed(1);
   const perfBadge = formatPerfBadge(run._livePerf);
 
@@ -461,7 +463,7 @@ function renderWinningStrategyBanner(run, summary) {
     return `
       <div class="strategy-synth-banner is-pending">
         <div class="strategy-synth-head">
-          <strong>第 1 階段 · 10 億局策略探索 → 第 2 階段 · 500 萬局實測</strong>
+          <strong>第 1 階段 · ${esc(profile.exploreLabel)}策略探索 → 第 2 階段 · ${esc(profile.testLabel)}實測</strong>
           <span>待啟動</span>
         </div>
       </div>
@@ -592,8 +594,11 @@ function buildSampleEventsFromCompact(oppId, rec, gamesPerOpp = GAMES_PER_OPPONE
 }
 
 export function renderBattleReport(run, lineup, options = {}) {
-  const gamesPerOpp = GAMES_PER_OPPONENT;
+  const profile = resolveModelSimProfile(run);
+  const gamesPerOpp = profile.gamesPerOpponent;
+  const firstSeatPerOpp = profile.firstSeatGames;
   const totalTarget = lineup.length * gamesPerOpp;
+  const halfTotalTarget = lineup.length * firstSeatPerOpp;
   const oppIds = lineup.map((x) => x.entry.id);
   const hasCompact = Boolean(run.compactResults && Object.keys(run.compactResults).length > 0);
   const legacyEvents = hasCompact ? [] : validOutcomes(run.events || [], oppIds, gamesPerOpp);
@@ -674,12 +679,12 @@ export function renderBattleReport(run, lineup, options = {}) {
             <span>後攻 ${agg2.wins.toLocaleString('zh-TW')}-${agg2.losses.toLocaleString('zh-TW')}-${agg2.draws.toLocaleString('zh-TW')} (${f2Pct})</span>
           </div>
           <div class="battle-opp-actions">
-            ${!run.isDemo && options.canReplay ? `<button class="mini" type="button" data-action="run-single-opponent-deep" data-opp="${esc(opp.id)}">單組 10 億探索 + 500 萬實測</button>` : ''}
+            ${!run.isDemo && options.canReplay ? `<button class="mini" type="button" data-action="run-single-opponent-deep" data-opp="${esc(opp.id)}">單組 ${esc(profile.exploreLabel)}探索 + ${esc(profile.testLabel)}實測</button>` : ''}
             ${aggAll.total > 0 && options.canReplay ? `<button class="mini" type="button" data-action="replay-game" data-opp="${esc(opp.id)}" data-idx="0">檢視完整流程 (1–${aggAll.total.toLocaleString('zh-TW')}局)</button>` : ''}
           </div>
         </div>
         <div class="battle-strip-col">
-          ${renderGameStrip(opp.id, stripEvents, Boolean(options.canReplay), 500, 'replay-game', 0, 500, gamesPerOpp, hasCompact ? FIRST_SEAT_GAMES : 250)}
+          ${renderGameStrip(opp.id, stripEvents, Boolean(options.canReplay), 500, 'replay-game', 0, 500, gamesPerOpp, hasCompact ? firstSeatPerOpp : 250)}
         </div>
         <div class="battle-opp-stat">
           <strong class="num-lg">${winPct}</strong>
@@ -699,9 +704,9 @@ export function renderBattleReport(run, lineup, options = {}) {
       ${renderWinningStrategyBanner(run, summary)}
       <div class="report-hero">
         <div class="report-kpi">
-          <span class="report-kpi-label">${summary.complete ? `第 2 階段 · 正式綜合勝率（5,000,000 局實測 · 對陣前十千萬局最佳化策略）` : `第 2 階段 · 實測中（${summary.total.toLocaleString('zh-TW')} / ${totalTarget.toLocaleString('zh-TW')} 局）`}</span>
+          <span class="report-kpi-label">${summary.complete ? `第 2 階段 · 正式綜合勝率（${totalTarget.toLocaleString('zh-TW')} 局實測 · 對陣前十千萬局最佳化策略）` : `第 2 階段 · 實測中（${summary.total.toLocaleString('zh-TW')} / ${totalTarget.toLocaleString('zh-TW')} 局）`}</span>
           <strong class="report-kpi-num">${overallRate}</strong>
-          <span class="report-kpi-ci">95% 信賴區間 ${summary.equalCI95} · 積分率 ${scoreRateText} · 模型 ${esc(run.modelVersion === 'selfplay-cem-v3' ? '1B5M全量模型' : (run.modelVersion || '—'))}</span>
+          <span class="report-kpi-ci">95% 信賴區間 ${summary.equalCI95} · 積分率 ${scoreRateText} · 模型 ${esc(profile.label || run.modelVersion || '—')}</span>
         </div>
         <div class="report-totals">
           <div class="tot-box is-win"><b>${summary.wins.toLocaleString('zh-TW')}</b><span>勝</span></div>
@@ -716,12 +721,12 @@ export function renderBattleReport(run, lineup, options = {}) {
           <small class="comp-sub">依前十占比（${(summary.top10TotalShare * 100).toFixed(1)}%）加權${weightedDeltaText ? ` · ${weightedDeltaText}` : ''}</small>
         </div>
         <div class="comp-card">
-          <span class="comp-label">先攻勝率（250 萬局）</span>
+          <span class="comp-label">先攻勝率（${halfTotalTarget.toLocaleString('zh-TW')} 局）</span>
           <strong class="comp-val">${firstRate}</strong>
           <small class="comp-sub">${summary.first.wins.toLocaleString('zh-TW')}勝 ${summary.first.draws.toLocaleString('zh-TW')}和 ${summary.first.losses.toLocaleString('zh-TW')}敗</small>
         </div>
         <div class="comp-card">
-          <span class="comp-label">後攻勝率（250 萬局）</span>
+          <span class="comp-label">後攻勝率（${halfTotalTarget.toLocaleString('zh-TW')} 局）</span>
           <strong class="comp-val">${secondRate}</strong>
           <small class="comp-sub">${summary.second.wins.toLocaleString('zh-TW')}勝 ${summary.second.draws.toLocaleString('zh-TW')}和 ${summary.second.losses.toLocaleString('zh-TW')}敗</small>
         </div>
@@ -731,7 +736,7 @@ export function renderBattleReport(run, lineup, options = {}) {
           <small class="comp-sub">最優：${esc(bestText)}<br>苦戰：${esc(worstText)}</small>
         </div>
       </div>
-      <div class="progress-track" aria-label="第二階段 5,000,000 局實測進度 ${summary.total} / ${totalTarget}">
+      <div class="progress-track" aria-label="第二階段 ${totalTarget.toLocaleString('zh-TW')} 局實測進度 ${summary.total} / ${totalTarget}">
         <i style="width:${Math.min(100, (summary.total / Math.max(1, totalTarget)) * 100).toFixed(1)}%"></i>
       </div>
       <div class="battle-matrix">${rowsHtml}</div>
@@ -1160,6 +1165,7 @@ export function buildFullGameFlowModal({
   run,
   deck,
   weights,
+  customSimProfile = null,
   customGamesPerOpp = null,
   customWeights = null,
   customEnemyWeights = null,
@@ -1169,12 +1175,14 @@ export function buildFullGameFlowModal({
   customOppFastDeck = null,
   replayAction = 'replay-game'
 }) {
-  const gamesPerOpp = customGamesPerOpp || GAMES_PER_OPPONENT;
+  const profile = resolveModelSimProfile(customSimProfile || run);
+  const gamesPerOpp = customGamesPerOpp || profile.gamesPerOpponent;
   const half = Math.floor(gamesPerOpp / 2);
+  const testSeedTag = profile.id === '1m5q' ? 'test5q' : 'test5m';
   const seedBase = customSeedBase ?? (
     customSeedPrefix
       ? fnv1a32(`${customSeedPrefix}:${oppId}`)
-      : fnv1a32(`${run?.runId || 'demo'}:test5m:${oppId}`)
+      : fnv1a32(`${run?.runId || 'demo'}:${testSeedTag}:${oppId}`)
   );
   const first = idx < half ? 0 : 1;
   const sideText = first === 0
@@ -1241,7 +1249,7 @@ export function buildFullGameFlowModal({
 
   const renderStepRow = (s) => {
     const actorBadge = s.actor === 0
-      ? '<span class="flow-actor is-me">我方（十億局獲勝策略）</span>'
+      ? `<span class="flow-actor is-me">我方（${esc(profile.exploreLabel)}獲勝策略）</span>`
       : `<span class="flow-actor is-opp">對手（${hasOppElite ? '千萬局互博最佳策略' : '環境策略'}）</span>`;
     const actionZh = formatFastSimStepZh(s, myCards20, oppCards20);
     const b0 = s.board?.[0];
@@ -1302,7 +1310,7 @@ export function buildFullGameFlowModal({
 
       <div class="flow-stage-card">
         <h3>階段一 · 對局配置</h3>
-        <p class="sub">我方：<b>${esc(deck.name)}</b>（${esc(translateEnergyListZh(deck.energy))} · 十億局獲勝策略）　對陣　對手：<b>${esc(opp.name)}</b>（${esc(translateEnergyListZh(opp.representative.energy))} · ${hasOppElite ? '千萬局互博最佳策略' : '環境策略'}）</p>
+        <p class="sub">我方：<b>${esc(deck.name)}</b>（${esc(translateEnergyListZh(deck.energy))} · ${esc(profile.label)}獲勝策略）　對陣　對手：<b>${esc(opp.name)}</b>（${esc(translateEnergyListZh(opp.representative.energy))} · ${hasOppElite ? '千萬局互博最佳策略' : '環境策略'}）</p>
       </div>
 
       <div class="flow-stage-card">
@@ -1332,10 +1340,13 @@ function sampleArrayToStr(arr500) {
   return out;
 }
 
-// 單一對手卡組專項「先 1,000,000,000 (1B) 探索 → 後 5,000,000 (5M) 實測」（GPU 顯存加速 + 多核記憶體備援）
-export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProgress, signal }) {
+// 單一對手卡組專項兩階段執行器（依模型配置自動切換 1B→5M 全量 或 1M→5Q 輕量）
+export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simProfile = null, onProgress, signal }) {
   const { ready, fastSim, gpuSim, error } = await probeEngine();
   if (!ready) throw Error(error);
+  const profile = resolveModelSimProfile(simProfile);
+  const expTarget = profile.deepExploreGames;
+  const testCount = profile.deepGamesPerOpponent;
   const lexicon = await ensureStrategyLexicon();
   const oppEliteWeights = getOpponentEliteWeights(opp.id, baseWeights);
   const matched = matchDeckStrategies(deck, [{ rank: 1, entry: opp }], lexicon, baseWeights);
@@ -1343,9 +1354,9 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
 
   const myFastDeck = expandDeckForFastSim(deck, matched.cardBonusById);
   const oppFastDeck = expandDeckForFastSim(opp.representative, oppMatched.cardBonusById);
-  const candidates = buildExplorationCandidates(matched.lexiconSeedWeights, `single1b:${deck.id}:${opp.id}`, EXPLORE_CANDIDATE_COUNT);
+  const candidates = buildExplorationCandidates(matched.lexiconSeedWeights, `single-${profile.id}:${deck.id}:${opp.id}`, EXPLORE_CANDIDATE_COUNT);
   const stats = createEmptyExploreStats([opp.id], candidates.length);
-  const seedBase = fnv1a32(`single1b-exp:${deck.id}:${opp.id}`);
+  const seedBase = fnv1a32(`single-${profile.id}-exp:${deck.id}:${opp.id}`);
 
   const useGpu = Boolean(gpuSim?.ready);
   const tExp0 = performance.now();
@@ -1358,8 +1369,8 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
       enemyWeightsList: [oppEliteWeights],
       candidates
     });
-    const pairsPerOpp = Math.floor(DEEP_EXPLORE_GAMES / candidates.length);
-    let pairSlice = 25000; // 25,000 * 40 = 1,000,000 games warm-up dispatch
+    const pairsPerOpp = Math.floor(expTarget / candidates.length);
+    let pairSlice = Math.min(25000, pairsPerOpp);
     let lastTick = 0;
     for (let startPair = 0; startPair < pairsPerOpp; ) {
       if (signal?.aborted) return null;
@@ -1368,7 +1379,7 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
       const res = await gpuSim.runExplorePairSlice({
         nOpps: 1,
         nCands: candidates.length,
-        gamesPerOpp: DEEP_EXPLORE_GAMES,
+        gamesPerOpp: expTarget,
         startPair,
         pairCount: countPairs,
         seedBase,
@@ -1377,25 +1388,26 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
       const dtMs = Math.max(5, performance.now() - dt0);
       mergeExploreChunkStats(stats, res);
       startPair += countPairs;
-      pairSlice = Math.max(10000, Math.min(500000, Math.round(countPairs * (240 / dtMs))));
+      pairSlice = Math.max(5000, Math.min(500000, Math.round(countPairs * (240 / dtMs))));
       const now = performance.now();
       if (now - lastTick >= 100 || startPair >= pairsPerOpp) {
         lastTick = now;
         onProgress?.({
           phase: 'explore',
           done: stats.completed,
-          total: DEEP_EXPLORE_GAMES,
+          total: expTarget,
           wins: stats.wins,
           gamesPerSec: stats.completed / Math.max(0.05, (now - tExp0) / 1000),
           mode: 'gpu',
-          adapter: gpuSim.adapterName
+          adapter: gpuSim.adapterName,
+          profile
         });
       }
     }
   } else {
-    const exploreChunkSize = 500000;
+    const exploreChunkSize = Math.min(500000, Math.max(50000, Math.floor(expTarget / 20)));
     const exploreTasks = [];
-    for (let start = 0; start < DEEP_EXPLORE_GAMES; start += exploreChunkSize) {
+    for (let start = 0; start < expTarget; start += exploreChunkSize) {
       exploreTasks.push({
         start,
         request: {
@@ -1405,9 +1417,9 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
           candidates,
           enemy_weights: oppEliteWeights,
           enemy_weights_list: [oppEliteWeights],
-          games_per_opponent: DEEP_EXPLORE_GAMES,
+          games_per_opponent: expTarget,
           start_game: start,
-          count: Math.min(exploreChunkSize, DEEP_EXPLORE_GAMES - start),
+          count: Math.min(exploreChunkSize, expTarget - start),
           seed_base: seedBase
         }
       });
@@ -1419,16 +1431,17 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
       onResult: (res) => {
         mergeExploreChunkStats(stats, res);
         const now = performance.now();
-        if (now - lastTick >= 100 || stats.completed >= DEEP_EXPLORE_GAMES) {
+        if (now - lastTick >= 100 || stats.completed >= expTarget) {
           lastTick = now;
           onProgress?.({
             phase: 'explore',
             done: stats.completed,
-            total: DEEP_EXPLORE_GAMES,
+            total: expTarget,
             wins: stats.wins,
             gamesPerSec: stats.completed / Math.max(0.05, (now - tExp0) / 1000),
             mode: 'cpu',
-            workers: fastWorkerPool?.size || 1
+            workers: fastWorkerPool?.size || 1,
+            profile
           });
         }
       }
@@ -1439,9 +1452,7 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
   const strategy = synthesizeWinningStrategyFromStats(stats, baseWeights, candidates);
   const winningWeights = strategy.byOpponent[opp.id]?.weights || strategy.weights;
 
-  // 第二階段：5,000,000 (5M) 局正式實測（先攻 2,500,000 + 後攻 2,500,000）
-  const testCount = DEEP_GAMES_PER_OPPONENT;
-  const seedPrefix = `single5m-test:${deck.id}`;
+  const seedPrefix = `single-${profile.id}-test:${deck.id}`;
   const testSeedBase = fnv1a32(`${seedPrefix}:${opp.id}`);
   const agg = { total: 0, wins: 0, draws: 0, losses: 0, firstWins: 0, firstDraws: 0, firstLosses: 0, secondWins: 0, secondDraws: 0, secondLosses: 0, turnsSum: 0 };
   const tTest0 = performance.now();
@@ -1463,7 +1474,8 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
           total: testCount,
           gamesPerSec: curAgg.total / elapsedSec,
           mode: 'gpu',
-          adapter: gpuSim.adapterName
+          adapter: gpuSim.adapterName,
+          profile
         });
         return true;
       }
@@ -1476,7 +1488,7 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
       turnsSum: res.turnsSum
     });
   } else {
-    const testChunkSize = 50000;
+    const testChunkSize = Math.min(50000, Math.max(500, Math.floor(testCount / 10)));
     const testTasks = [];
     for (let start = 0; start < testCount; start += testChunkSize) {
       testTasks.push({
@@ -1517,7 +1529,8 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
           total: testCount,
           gamesPerSec: agg.total / elapsedSec,
           mode: 'cpu',
-          workers: workersUsed
+          workers: workersUsed,
+          profile
         });
       }
     });
@@ -1527,6 +1540,7 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
   return {
     opp,
     deck,
+    profile,
     baseWeights,
     oppEliteWeights,
     winningWeights,
@@ -1543,7 +1557,8 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, onProg
   };
 }
 
-export function renderSingleOpponentDeepProgress({ opp, phase, done, total, wins, gamesPerSec, workers, mode, adapter }) {
+export function renderSingleOpponentDeepProgress({ opp, phase, done, total, wins, gamesPerSec, workers, mode, adapter, profile }) {
+  const p = resolveModelSimProfile(profile);
   const pct = Math.min(100, (done / Math.max(1, total)) * 100).toFixed(1);
   const isExplore = phase === 'explore';
   const hwLabel = mode === 'gpu'
@@ -1554,7 +1569,7 @@ export function renderSingleOpponentDeepProgress({ opp, phase, done, total, wins
       <div class="strategy-synth-banner is-running">
         <div class="strategy-synth-head">
           <div>
-            <strong>${isExplore ? `第 1 階段 · 對陣「${esc(opp.name)}」10 億局探索` : `第 2 階段 · 500 萬局實測`}</strong>
+            <strong>${isExplore ? `第 1 階段 · 對陣「${esc(opp.name)}」${esc(p.exploreLabel)}探索` : `第 2 階段 · ${esc(p.testLabel)}實測`}</strong>
             <p class="sub">${done.toLocaleString('zh-TW')} / ${total.toLocaleString('zh-TW')} 局（${pct}%）${isExplore && wins != null ? ` · 勝 ${wins.toLocaleString('zh-TW')}` : ''} · ${hwLabel} · <b>${Math.round(gamesPerSec || 0).toLocaleString('zh-TW')}</b> 局/秒</p>
           </div>
           <button class="btn btn-outline" type="button" data-action="cancel-single-deep">中止</button>
@@ -1568,7 +1583,10 @@ export function renderSingleOpponentDeepProgress({ opp, phase, done, total, wins
 }
 
 export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
-  const { opp, deck, baseWeights, oppEliteWeights, winningWeights, strategy, agg, seedPrefix, testSeedBase, myFastDeck, oppFastDeck } = deepResult;
+  const { opp, deck, profile, baseWeights, oppEliteWeights, winningWeights, strategy, agg, seedPrefix, testSeedBase, myFastDeck, oppFastDeck } = deepResult;
+  const p = resolveModelSimProfile(profile);
+  const testTotal = p.deepGamesPerOpponent;
+  const halfTest = Math.floor(testTotal / 2);
   const testWr = agg.total ? ((agg.wins / agg.total) * 100).toFixed(2) + '%' : '—';
   const expWr = ((strategy.exploreWinRate || 0) * 100).toFixed(2) + '%';
   const deltaPct = agg.total
@@ -1578,11 +1596,11 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
     `<span class="card-prior-chip"><b>${esc(a.labelZh)}</b> <small>${a.delta >= 0 ? '+' : ''}${a.delta.toFixed(3)}</small></span>`
   ).join('');
 
-  // 10 個快速區段分頁（每頁 500 格，涵蓋先攻 1..2,500,000 與後攻 2,500,001..5,000,000，按需即時產生不佔記憶體）
   const pageSize = 500;
-  const segmentStarts = [0, 500000, 1000000, 1500000, 2000000, 2500000, 3000000, 3500000, 4000000, 4500000];
+  const segStep = Math.max(pageSize, Math.floor(testTotal / 10));
+  const segmentStarts = Array.from({ length: 10 }, (_, idx) => idx * segStep);
   let pageStart = Math.floor(activeReplayIdx / pageSize) * pageSize;
-  pageStart = Math.min(DEEP_GAMES_PER_OPPONENT - pageSize, Math.max(0, pageStart));
+  pageStart = Math.min(Math.max(0, testTotal - pageSize), Math.max(0, pageStart));
 
   const pageEvents = [];
   if (state.fastSimFn) {
@@ -1595,7 +1613,7 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
       enemy_weights: oppEliteWeights || baseWeights,
       start_idx: pageStart,
       count: pageSize,
-      total_per_opp: DEEP_GAMES_PER_OPPONENT,
+      total_per_opp: testTotal,
       seed_base: testSeedBase
     });
     for (let k = 0; k < sliceRes.outcomes.length; k++) {
@@ -1604,17 +1622,18 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
       pageEvents.push({
         opponentId: opp.id,
         index: idx,
-        first: idx < DEEP_GAMES_PER_OPPONENT / 2 ? 0 : 1,
+        first: idx < halfTest ? 0 : 1,
         outcome: code === 1 ? 'win' : code === 0 ? 'loss' : 'draw',
         turns: sliceRes.turns[k] || 0
       });
     }
   }
 
-  const pageTabs = segmentStarts.map((s, p) => {
-    const active = activeReplayIdx >= s && activeReplayIdx < s + 500000;
-    const side = p < 5 ? '先' : '後';
-    return `<button class="mini ${active ? 'is-active' : ''}" type="button" data-action="replay-single-deep" data-opp="${esc(opp.id)}" data-idx="${s}">${side} ${(s / 10000).toFixed(0)}萬+</button>`;
+  const pageTabs = segmentStarts.map((s, idx) => {
+    const active = activeReplayIdx >= s && activeReplayIdx < s + segStep;
+    const side = idx < 5 ? '先' : '後';
+    const label = testTotal >= 100000 ? `${side} ${(s / 10000).toFixed(0)}萬+` : `${side} ${s + 1}–${s + pageSize}`;
+    return `<button class="mini ${active ? 'is-active' : ''}" type="button" data-action="replay-single-deep" data-opp="${esc(opp.id)}" data-idx="${s}">${label}</button>`;
   }).join('');
 
   const f1Total = agg.firstWins + agg.firstDraws + agg.firstLosses;
@@ -1624,10 +1643,11 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
     opp,
     oppId: opp.id,
     idx: activeReplayIdx,
-    run: { modelVersion: state.modelInfo?.version || 'selfplay-cem-v3' },
+    run: { modelVersion: p.id === '1m5q' ? 'lite-1m5q' : 'selfplay-cem-v3', simProfile: p },
     deck,
     weights: baseWeights,
-    customGamesPerOpp: DEEP_GAMES_PER_OPPONENT,
+    customSimProfile: p,
+    customGamesPerOpp: testTotal,
     customWeights: winningWeights,
     customEnemyWeights: oppEliteWeights || baseWeights,
     customSeedPrefix: seedPrefix,
@@ -1642,18 +1662,18 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
       <div class="strategy-synth-banner is-complete">
         <div class="strategy-synth-head">
           <div>
-            <strong>第 1 階段 · 10 億局探索（勝率 ${expWr}）</strong>
+            <strong>第 1 階段 · ${esc(p.exploreLabel)}探索（勝率 ${expWr}）</strong>
           </div>
-          <span class="strategy-gain-pill ${Number(deltaPct) >= 0 ? 'is-pos' : 'is-neg'}">500 萬局實測 ${testWr}（${Number(deltaPct) >= 0 ? '+' : ''}${deltaPct}%）</span>
+          <span class="strategy-gain-pill ${Number(deltaPct) >= 0 ? 'is-pos' : 'is-neg'}">${esc(p.testLabel)}實測 ${testWr}（${Number(deltaPct) >= 0 ? '+' : ''}${deltaPct}%）</span>
         </div>
         <div class="card-prior-chips">${topChips}</div>
       </div>
 
       <div class="flow-stage-card">
-        <h3>第 2 階段 · 5,000,000 局實測（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗 · ${testWr} · CI ${interval(agg.wins, agg.total)}）</h3>
-        <p class="sub">先攻 250 萬局 ${((agg.firstWins / Math.max(1, f1Total)) * 100).toFixed(2)}% · 後攻 250 萬局 ${((agg.secondWins / Math.max(1, f2Total)) * 100).toFixed(2)}% — 點擊任一格檢視回放：</p>
+        <h3>第 2 階段 · ${testTotal.toLocaleString('zh-TW')} 局實測（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗 · ${testWr} · CI ${interval(agg.wins, agg.total)}）</h3>
+        <p class="sub">先攻 ${halfTest.toLocaleString('zh-TW')} 局 ${((agg.firstWins / Math.max(1, f1Total)) * 100).toFixed(2)}% · 後攻 ${halfTest.toLocaleString('zh-TW')} 局 ${((agg.secondWins / Math.max(1, f2Total)) * 100).toFixed(2)}% — 點擊任一格檢視回放：</p>
         <div class="deep-page-tabs">${pageTabs}</div>
-        ${renderGameStrip(opp.id, pageEvents, true, pageSize, 'replay-single-deep', pageStart, pageSize, DEEP_GAMES_PER_OPPONENT)}
+        ${renderGameStrip(opp.id, pageEvents, true, pageSize, 'replay-single-deep', pageStart, pageSize, testTotal)}
       </div>
 
       ${flowHtml}
@@ -1661,12 +1681,20 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
   `;
 }
 
-// 執行兩階段十億級真實勝率推演（WebGPU 顯存加速為主，多執行緒記憶體 WASM 為備援；前十對手均採千萬局互博最佳策略）：
-// 第 1 階段：1,000,000,000 (1B) 局策略探索（10 對手 × 100,000,000 局）
-// 第 2 階段：5,000,000 (5M) 局正式實測（10 對手 × 500,000 局，每對手先攻 250,000 + 後攻 250,000）
-export async function executeBattleBatch({ run, deck, lineup, weights, onTick, signal }) {
+// 執行兩階段真實勝率推演（WebGPU 顯存加速為主，多執行緒記憶體 WASM 為備援；支援 1B5M 全量與 1M5Q 輕量雙模型）：
+export async function executeBattleBatch({ run, deck, lineup, weights, simProfile = null, onTick, signal }) {
   const { ready, fastSim, gpuSim, error } = await probeEngine();
   if (!ready) throw Error(error);
+
+  const profile = resolveModelSimProfile(simProfile || run);
+  run.simProfile = profile;
+  const expTotal = profile.exploreTotalGames;
+  const expPerOpp = profile.exploreGamesPerOpponent;
+  const gamesPerOpp = profile.gamesPerOpponent;
+  const halfPerOpp = profile.firstSeatGames;
+  const totalBatch = profile.totalBatchGames;
+  const exploreSeedTag = profile.id === '1m5q' ? 'exp1m' : 'exp1b';
+  const testSeedTag = profile.id === '1m5q' ? 'test5q' : 'test5m';
 
   const lexicon = await ensureStrategyLexicon();
   const enemyWeightsList = lineup.map((item) => getOpponentEliteWeights(item.entry.id, weights));
@@ -1694,7 +1722,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
   const oppIds = fastEnemies.map((e) => e.id);
   const candidates = buildExplorationCandidates(
     matched.lexiconSeedWeights,
-    `batch1b:${deck.id}:${run.season || 'C1'}`,
+    `batch-${profile.id}:${deck.id}:${run.season || 'C1'}`,
     EXPLORE_CANDIDATE_COUNT
   );
 
@@ -1705,12 +1733,12 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
   delete run.exploreEvents;
 
   const useGpu = Boolean(gpuSim?.ready);
-  const exploreSeedBase = fnv1a32(`${run.runId}:exp1b`);
+  const exploreSeedBase = fnv1a32(`${run.runId}:${exploreSeedTag}`);
 
   // ============================================================================
-  // 第一階段：1,000,000,000 (1B) 局策略探索
+  // 第一階段：策略探索（1B5M = 1,000,000,000 局；1M5Q = 1,000,000 局）
   // ============================================================================
-  if ((run.exploreStats.completed || 0) < EXPLORE_TOTAL_GAMES) {
+  if ((run.exploreStats.completed || 0) < expTotal) {
     const t0 = performance.now();
     const baseDone = run.exploreStats.completed || 0;
     let lastUiTick = 0;
@@ -1722,9 +1750,9 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
         enemyWeightsList,
         candidates
       });
-      const pairsPerOpp = Math.floor(EXPLORE_GAMES_PER_OPPONENT / candidates.length);
+      const pairsPerOpp = Math.floor(expPerOpp / candidates.length);
       let startPair = Number(run.exploreStats.nextPairStart || 0);
-      let pairSlice = 2500; // 2,500 * 10 * 40 = 1,000,000 局熱身批次，隨後依顯卡速率動態調優
+      let pairSlice = Math.min(2500, pairsPerOpp);
       let batchesSinceSave = 0;
 
       while (startPair < pairsPerOpp) {
@@ -1734,7 +1762,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
         const res = await gpuSim.runExplorePairSlice({
           nOpps: fastEnemies.length,
           nCands: candidates.length,
-          gamesPerOpp: EXPLORE_GAMES_PER_OPPONENT,
+          gamesPerOpp: expPerOpp,
           startPair,
           pairCount: countPairs,
           seedBase: exploreSeedBase,
@@ -1767,9 +1795,9 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
       }
     } else {
       const completedChunks = new Set(run.exploreStats.completedChunks || []);
-      const exploreChunkSize = 500000;
+      const exploreChunkSize = Math.min(500000, Math.max(50000, Math.floor(expTotal / 20)));
       const exploreTasks = [];
-      for (let start = 0; start < EXPLORE_TOTAL_GAMES; start += exploreChunkSize) {
+      for (let start = 0; start < expTotal; start += exploreChunkSize) {
         if (completedChunks.has(start)) continue;
         exploreTasks.push({
           start,
@@ -1780,9 +1808,9 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
             candidates,
             enemy_weights: weights,
             enemy_weights_list: enemyWeightsList,
-            games_per_opponent: EXPLORE_GAMES_PER_OPPONENT,
+            games_per_opponent: expPerOpp,
             start_game: start,
-            count: Math.min(exploreChunkSize, EXPLORE_TOTAL_GAMES - start),
+            count: Math.min(exploreChunkSize, expTotal - start),
             seed_base: exploreSeedBase
           }
         });
@@ -1803,11 +1831,11 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
             gamesPerSec: deltaGames / Math.max(0.05, (now - t0) / 1000),
             phase: 'explore'
           };
-          if (chunksSinceSave >= 16 || run.exploreStats.completed >= EXPLORE_TOTAL_GAMES) {
+          if (chunksSinceSave >= 16 || run.exploreStats.completed >= expTotal) {
             chunksSinceSave = 0;
             await saveRunRecord(run);
           }
-          if (now - lastUiTick >= 120 || run.exploreStats.completed >= EXPLORE_TOTAL_GAMES) {
+          if (now - lastUiTick >= 120 || run.exploreStats.completed >= expTotal) {
             lastUiTick = now;
             onTick(run);
           }
@@ -1827,10 +1855,8 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
   onTick(run);
 
   // ============================================================================
-  // 第二階段：5,000,000 (5M) 局正式實測（10 對手 × 500,000 局，每對手均用千萬局互博最佳策略）
+  // 第二階段：正式實測（1B5M = 5,000,000 局；1M5Q = 5,000 局）
   // ============================================================================
-  const gamesPerOpp = GAMES_PER_OPPONENT;
-  const halfPerOpp = FIRST_SEAT_GAMES;
   const tTest0 = performance.now();
   let testDone = Object.values(run.compactResults).reduce((s, r) => s + (r?.total || 0), 0);
   const baseTestDone = testDone;
@@ -1845,7 +1871,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
       const oppStrategyWeights = run.winningStrategy?.byOpponent?.[opp.id]?.weights
         || run.winningStrategy?.weights
         || weights;
-      const seedBase = fnv1a32(`${run.runId}:test5m:${opp.id}`);
+      const seedBase = fnv1a32(`${run.runId}:${testSeedTag}:${opp.id}`);
 
       const res = await gpuSim.runTestOpponent({
         deck: myFastDeck,
@@ -1890,7 +1916,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
       }
     }
   } else {
-    const testChunkSize = 50000;
+    const testChunkSize = Math.min(50000, gamesPerOpp);
     const testTasks = [];
     for (let o = 0; o < lineup.length; o++) {
       const opp = lineup[o].entry;
@@ -1899,7 +1925,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
       const oppStrategyWeights = run.winningStrategy?.byOpponent?.[opp.id]?.weights
         || run.winningStrategy?.weights
         || weights;
-      const seedBase = fnv1a32(`${run.runId}:test5m:${opp.id}`);
+      const seedBase = fnv1a32(`${run.runId}:${testSeedTag}:${opp.id}`);
       for (let start = 0; start < gamesPerOpp; start += testChunkSize) {
         testTasks.push({
           oppId: opp.id,
@@ -1982,7 +2008,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
             gamesPerSec: (testDone - baseTestDone) / Math.max(0.05, (now - tTest0) / 1000),
             phase: 'test'
           };
-          if (now - lastUiTick >= 100 || testDone >= TOTAL_BATCH_GAMES) {
+          if (now - lastUiTick >= 100 || testDone >= totalBatch) {
             lastUiTick = now;
             onTick(run);
           }
@@ -1997,31 +2023,39 @@ export async function executeBattleBatch({ run, deck, lineup, weights, onTick, s
   return run;
 }
 
-// 僅在 ?fixture=1 下用於 UI 樣式驗收的演示生成器（1B 探索 + 5M 實測緊湊格式）
+// 僅在 ?fixture=1 下用於 UI 樣式驗收的演示生成器（依模型自動切換 1B5M / 1M5Q）
 export async function executeFixturePreviewBatch({ run, lineup, onTick, signal }) {
+  const profile = resolveModelSimProfile(run);
+  run.simProfile = profile;
+  const expTotal = profile.exploreTotalGames;
+  const expPerOpp = profile.exploreGamesPerOpponent;
+  const gamesPerOpp = profile.gamesPerOpponent;
+  const halfPerOpp = profile.firstSeatGames;
   const oppIds = lineup.map((x) => x.entry.id);
   const baseW = Array(22).fill(0.5);
-  const candidates = buildExplorationCandidates(baseW, 'fixture1b', EXPLORE_CANDIDATE_COUNT);
+  const candidates = buildExplorationCandidates(baseW, `fixture-${profile.id}`, EXPLORE_CANDIDATE_COUNT);
   const stats = createEmptyExploreStats(oppIds, candidates.length);
-  stats.completed = EXPLORE_TOTAL_GAMES;
-  stats.wins = 485000000;
-  stats.draws = 25000000;
-  stats.losses = 490000000;
+  stats.completed = expTotal;
+  stats.wins = Math.round(expTotal * 0.485);
+  stats.draws = Math.round(expTotal * 0.025);
+  stats.losses = expTotal - stats.wins - stats.draws;
+  const perCand = Math.floor(expTotal / candidates.length);
   stats.byCandidate.forEach((c, idx) => {
-    c.games = 25000000;
-    c.wins = 11500000 + (idx % 5) * 450000;
-    c.draws = 625000;
+    c.games = perCand;
+    c.wins = Math.round(perCand * (0.46 + (idx % 5) * 0.018));
+    c.draws = Math.round(perCand * 0.025);
     c.losses = c.games - c.wins - c.draws;
   });
+  const perOppCand = Math.floor(expPerOpp / candidates.length);
   stats.byOpponent.forEach((o, idx) => {
-    o.games = EXPLORE_GAMES_PER_OPPONENT;
-    o.wins = 46000000 + (idx % 5) * 1800000;
-    o.draws = 2500000;
+    o.games = expPerOpp;
+    o.wins = Math.round(expPerOpp * (0.46 + (idx % 5) * 0.018));
+    o.draws = Math.round(expPerOpp * 0.025);
     o.losses = o.games - o.wins - o.draws;
     o.byCandidate.forEach((bc, cIdx) => {
-      bc.games = 2500000;
-      bc.wins = 1150000 + (cIdx % 5) * 45000;
-      bc.draws = 62500;
+      bc.games = perOppCand;
+      bc.wins = Math.round(perOppCand * (0.46 + (cIdx % 5) * 0.018));
+      bc.draws = Math.round(perOppCand * 0.025);
       bc.losses = bc.games - bc.wins - bc.draws;
     });
   });
@@ -2037,13 +2071,13 @@ export async function executeFixturePreviewBatch({ run, lineup, onTick, signal }
       const r = (seed % 1000) / 1000;
       sampleStr += r < (i < 250 ? 0.54 : 0.49) ? 'W' : r < 0.96 ? 'L' : 'D';
     }
-    const fw = 135000, fd = 10000, fl = 105000;
-    const sw = 122500, sd = 10000, sl = 117500;
+    const fw = Math.round(halfPerOpp * 0.54), fd = Math.round(halfPerOpp * 0.04), fl = halfPerOpp - fw - fd;
+    const sw = Math.round(halfPerOpp * 0.49), sd = Math.round(halfPerOpp * 0.04), sl = halfPerOpp - sw - sd;
     run.compactResults[oppId] = {
-      total: GAMES_PER_OPPONENT, wins: fw + sw, draws: fd + sd, losses: fl + sl,
+      total: gamesPerOpp, wins: fw + sw, draws: fd + sd, losses: fl + sl,
       firstWins: fw, firstDraws: fd, firstLosses: fl,
       secondWins: sw, secondDraws: sd, secondLosses: sl,
-      turnsSum: GAMES_PER_OPPONENT * 9,
+      turnsSum: gamesPerOpp * 9,
       sampleOutcomesStr: sampleStr
     };
   }

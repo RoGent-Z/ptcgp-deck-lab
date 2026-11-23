@@ -18,6 +18,7 @@ import {
   synthesizeWinningStrategyFromStats,
   matchDeckStrategies,
   encodeCardForFastSim,
+  resolveModelSimProfile,
   EXPLORE_TOTAL_GAMES,
   EXPLORE_GAMES_PER_OPPONENT,
   GAMES_PER_OPPONENT,
@@ -41,6 +42,15 @@ test('computeCompositeWinRate and two-stage 1B-explore + 5M-test strategy synthe
   assert.equal(TOTAL_BATCH_GAMES,5000000);
   assert.equal(DEEP_EXPLORE_GAMES,1000000000);
   assert.equal(DEEP_GAMES_PER_OPPONENT,5000000);
+  const pFull = resolveModelSimProfile({ id: 'v3' });
+  const pLite = resolveModelSimProfile({ id: 'lite-1m5q' });
+  assert.equal(pFull.exploreTotalGames, 1000000000);
+  assert.equal(pFull.totalBatchGames, 5000000);
+  assert.equal(pLite.exploreTotalGames, 1000000);
+  assert.equal(pLite.exploreGamesPerOpponent, 100000);
+  assert.equal(pLite.gamesPerOpponent, 500);
+  assert.equal(pLite.firstSeatGames, 250);
+  assert.equal(pLite.totalBatchGames, 5000);
   assert.equal(isEngineImplementedStatus('Fully implemented'),true);
   assert.equal(isEngineImplementedStatus('Unknown card'),false);
   const lineup=[{rank:1,entry:{id:'a',name:'A',share:0.3}},{rank:2,entry:{id:'b',name:'B',share:0.1}}];

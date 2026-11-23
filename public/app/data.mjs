@@ -107,8 +107,8 @@ export async function loadInitialData(forceRefresh = false) {
     fetchJsonOptional('data/cards.json', forceRefresh).catch(() => null),
     fetchJsonOptional('data/catalog.json', forceRefresh).catch(() => null),
     fetchJsonOptional('battle/models/manifest.json', forceRefresh).catch(() => null),
-    fetchJsonOptional('battle/models/current.json', forceRefresh)
-      .then((d) => d || fetchJsonOptional('battle/models/baseline-v0.json', forceRefresh))
+    fetchJsonOptional('battle/models/v3.json', forceRefresh)
+      .then((d) => d || fetchJsonOptional('battle/models/lite-1m5q.json', forceRefresh))
       .catch(() => null),
     fetchJsonOptional('battle/models/card-priors.json', forceRefresh).catch(() => null),
     fetchJsonOptional('battle/strategies/index.json', forceRefresh).catch(() => null),

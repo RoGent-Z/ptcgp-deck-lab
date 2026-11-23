@@ -353,5 +353,19 @@
     1.027907,
     1.50236,
     2.175203
-  ]
+  ],
+  "name": "1B5M全量模型",
+  "simProfile": {
+    "id": "1b5m",
+    "label": "1B5M全量模型",
+    "exploreLabel": "10 億局",
+    "testLabel": "500 萬局",
+    "exploreTotalGames": 1000000000,
+    "exploreGamesPerOpponent": 100000000,
+    "gamesPerOpponent": 500000,
+    "firstSeatGames": 250000,
+    "totalBatchGames": 5000000,
+    "deepExploreGames": 1000000000,
+    "deepGamesPerOpponent": 5000000
+  }
 }

@@ -64,6 +64,54 @@ export const TOTAL_BATCH_GAMES = 5000000;
 export const DEEP_EXPLORE_GAMES = 1000000000;
 export const DEEP_GAMES_PER_OPPONENT = 5000000;
 
+export const FULL_MODEL_PROFILE = Object.freeze({
+  id: '1b5m',
+  label: '1B5M全量模型',
+  exploreLabel: '10 億局',
+  testLabel: '500 萬局',
+  exploreTotalGames: 1000000000,
+  exploreGamesPerOpponent: 100000000,
+  gamesPerOpponent: 500000,
+  firstSeatGames: 250000,
+  totalBatchGames: 5000000,
+  deepExploreGames: 1000000000,
+  deepGamesPerOpponent: 5000000
+});
+
+export const LITE_MODEL_PROFILE = Object.freeze({
+  id: '1m5q',
+  label: '1M5Q轻量模型',
+  exploreLabel: '100 萬局',
+  testLabel: '5,000 局',
+  exploreTotalGames: 1000000,
+  exploreGamesPerOpponent: 100000,
+  gamesPerOpponent: 500,
+  firstSeatGames: 250,
+  totalBatchGames: 5000,
+  deepExploreGames: 1000000,
+  deepGamesPerOpponent: 5000
+});
+
+export function resolveModelSimProfile(modelOrRun) {
+  const sp = modelOrRun?.simProfile || modelOrRun?.metaEntry?.simProfile;
+  if (sp && Number(sp.exploreTotalGames) > 0 && Number(sp.totalBatchGames) > 0) {
+    return {
+      ...FULL_MODEL_PROFILE,
+      ...sp,
+      firstSeatGames: sp.firstSeatGames ?? Math.floor(sp.gamesPerOpponent / 2)
+    };
+  }
+  const tag = String(modelOrRun?.id || modelOrRun?.modelId || modelOrRun?.version || modelOrRun?.modelVersion || '').toLowerCase();
+  if (tag.includes('1m5q') || tag.includes('lite')) return { ...LITE_MODEL_PROFILE };
+  return { ...FULL_MODEL_PROFILE };
+}
+
+export function isAndroidOrMobileEnv() {
+  if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()) return true;
+  if (typeof navigator !== 'undefined' && /Android|Mobile/i.test(navigator.userAgent || '')) return true;
+  return false;
+}
+
 export const FEATURE_NAMES_22 = [
   'endTurn', 'noop', 'place', 'activePower', 'evolve', 'evolutionPower',
   'abilityOrStadium', 'trainer', 'drawAtLowHand', 'attack', 'baseDamage',

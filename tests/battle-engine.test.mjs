@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 import { instantiateBattle } from "../public/battle/runtime.mjs";
 import { instantiateFastSim } from "../public/battle/fastsim-runtime.mjs";
@@ -39,10 +39,20 @@ test("seeded first and second seat games resolve by the rules and replay exactly
   }
 });
 
-test("deployed trained models (v3/v1/v2), top10 100M-league elite strategies, 13,500+ strategy lexicon, and 1B-explore + 5M-test WASM engines execute deterministically", async () => {
+test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-league elite strategies, 13,500+ strategy lexicon, and WASM engines execute deterministically", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/battle/models/manifest.json", import.meta.url), "utf8"));
   assert.equal(manifest.defaultModelId, "v3");
+  assert.equal(manifest.mobileDefaultModelId, "lite-1m5q");
+  assert.equal(manifest.models.length, 2, "Only 1B5M全量模型 and 1M5Q轻量模型 should exist");
+  assert.equal(manifest.models[0].id, "v3");
   assert.equal(manifest.models[0].label, "1B5M全量模型");
+  assert.equal(manifest.models[0].simProfile.exploreTotalGames, 1000000000);
+  assert.equal(manifest.models[0].simProfile.totalBatchGames, 5000000);
+  assert.equal(manifest.models[1].id, "lite-1m5q");
+  assert.equal(manifest.models[1].label, "1M5Q轻量模型");
+  assert.equal(manifest.models[1].simProfile.exploreTotalGames, 1000000);
+  assert.equal(manifest.models[1].simProfile.totalBatchGames, 5000);
+  assert.equal(manifest.models[1].simProfile.gamesPerOpponent, 500);
   assert.ok(manifest.strategyLexiconEntries >= 10000);
   assert.equal(manifest.top10GamesPerTeam, 10000000);
   assert.equal(manifest.top10TotalLeagueGames, 100000000);
@@ -51,6 +61,11 @@ test("deployed trained models (v3/v1/v2), top10 100M-league elite strategies, 13
   assert.equal(manifest.totalBatchGames, 5000000);
   assert.equal(manifest.deepExploreGames, 1000000000);
   assert.equal(manifest.deepTestGamesPerOpponent, 5000000);
+
+  // Ensure obsolete model files are removed
+  for (const removed of ["v1.json", "v2.json", "baseline-v0.json", "current.json"]) {
+    await assert.rejects(() => access(new URL(`../public/battle/models/${removed}`, import.meta.url)));
+  }
 
   // Verify Top-10 100,000,000-game co-evolved elite strategies (10M games/team)
   const top10Elite = JSON.parse(await readFile(new URL("../public/battle/models/top10-elite.json", import.meta.url), "utf8"));
@@ -76,14 +91,16 @@ test("deployed trained models (v3/v1/v2), top10 100M-league elite strategies, 13
   assert.equal(uniqIds.size, lexDoc.entries.length);
 
   const v3 = JSON.parse(await readFile(new URL("../public/battle/models/v3.json", import.meta.url), "utf8"));
-  const v1 = JSON.parse(await readFile(new URL("../public/battle/models/v1.json", import.meta.url), "utf8"));
-  const v2 = JSON.parse(await readFile(new URL("../public/battle/models/v2.json", import.meta.url), "utf8"));
+  const lite = JSON.parse(await readFile(new URL("../public/battle/models/lite-1m5q.json", import.meta.url), "utf8"));
   assert.equal(v3.weights.length, 22);
   assert.ok(v3.trainedGames >= 10_000_000, `Expected >= 10M trained games, got ${v3.trainedGames}`);
   assert.equal(v3.cardPoolEvaluated.totalDistinctCards, 4577);
   assert.ok(v3.cardPoolEvaluated.minGamesPerCard >= 1000);
-  assert.equal(v1.weights.length, 22);
-  assert.equal(v2.weights.length, 22);
+  assert.equal(lite.name, "1M5Q轻量模型");
+  assert.equal(lite.derivedFrom, "v3");
+  assert.deepEqual(lite.weights, v3.weights);
+  assert.equal(lite.simProfile.exploreTotalGames, 1000000);
+  assert.equal(lite.simProfile.totalBatchGames, 5000);
 
   const priors = JSON.parse(await readFile(new URL("../public/battle/models/card-priors.json", import.meta.url), "utf8"));
   assert.equal(priors.totalCards, 4577);

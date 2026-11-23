@@ -111,8 +111,20 @@ jobs:
               "assets/public/index.html",
               "assets/public/data/cards.json",
               "assets/public/assets/mark.svg",
+              "assets/public/battle/models/manifest.json",
+              "assets/public/battle/models/v3.json",
+              "assets/public/battle/models/lite-1m5q.json",
+              "assets/public/battle/models/top10-elite.json",
+              "assets/public/battle/fastsim.wasm",
+              "assets/public/battle/gpu-sim.mjs",
           ):
               assert req in names, f"missing bundled asset in APK: {req}"
+          for removed in (
+              "assets/public/battle/models/v1.json",
+              "assets/public/battle/models/v2.json",
+              "assets/public/battle/models/baseline-v0.json",
+          ):
+              assert removed not in names, f"removed model still bundled in APK: {removed}"
           print("Verified bundled web assets inside APK:", len(names), "entries")
           PY
           PKG_VER="$(node -p "require('./package.json').version")"
