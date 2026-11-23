@@ -814,6 +814,10 @@ export async function probeWebGPU() {
 
   gpuProbePromise = (async () => {
     if (typeof navigator === 'undefined' || !navigator.gpu) return null;
+    // Skip WebGPU compute shaders in Android WebView / Capacitor APK (prevents Mali/Immortalis Vulkan GPU process crashes on Dimensity/Android 15)
+    const isAndroidWebView = (typeof window !== 'undefined' && (window.Capacitor?.isNativePlatform?.() || typeof window.PocketLabNative !== 'undefined'))
+      || /Android/i.test(navigator.userAgent || '');
+    if (isAndroidWebView) return null;
     try {
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
       if (!adapter) return null;

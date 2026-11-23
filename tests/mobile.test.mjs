@@ -72,4 +72,18 @@ test('Public HTML links manifest and keeps relative URLs compatible with Android
   assert.match(html, /<link\s+rel="manifest"\s+href="manifest\.webmanifest">/);
   assert.match(html, /<link\s+rel="icon"\s+href="assets\/mark\.svg"/);
   assert.match(html, /<link\s+rel="apple-touch-icon"\s+href="assets\/icons\/icon-192\.png">/);
+
+  // Android 15 / Dimensity stability guards
+  const manifestXml = fs.readFileSync(path.join(ROOT, 'android/app/src/main/AndroidManifest.xml'), 'utf8');
+  assert.match(manifestXml, /android:largeHeap="true"/);
+  assert.match(manifestXml, /android:hardwareAccelerated="true"/);
+
+  const stylesXml = fs.readFileSync(path.join(ROOT, 'android/app/src/main/res/values/styles.xml'), 'utf8');
+  assert.match(stylesXml, /postSplashScreenTheme/);
+  assert.doesNotMatch(stylesXml, /name="android:background">@color\/swissBackground/);
+
+  const mainAct = fs.readFileSync(path.join(ROOT, 'android/app/src/main/java/io/github/rogentz/pocketlab/MainActivity.java'), 'utf8');
+  assert.match(mainAct, /onRenderProcessGone/);
+  assert.match(mainAct, /SplashScreen\.installSplashScreen/);
+  assert.doesNotMatch(mainAct, /setDefaultNightMode/);
 });

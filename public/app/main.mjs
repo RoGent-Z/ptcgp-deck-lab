@@ -281,8 +281,14 @@ function renderRoute(moveFocus = false) {
   else if (route === 'catalog') html = renderCatalog();
   else if (route === 'decks') html = renderDecks();
   else if (route === 'meta') html = renderMeta();
-  else if (route === 'battle') html = renderBattle();
-  else if (route === 'sources') html = renderSources();
+  else if (route === 'battle') {
+    if (!state.engineReady && !state.engineError) {
+      probeEngine().then(() => {
+        if (currentRoute() === 'battle') renderRoute();
+      });
+    }
+    html = renderBattle();
+  } else if (route === 'sources') html = renderSources();
 
   mainEl.innerHTML = `<div class="route-stage">${html}</div>`;
   bindFoilEffects(mainEl);
@@ -1312,7 +1318,7 @@ async function boot() {
     const banner = document.getElementById('fixture-banner');
     if (banner) banner.hidden = false;
   }
-  await Promise.all([loadInitialData(false), probeEngine()]);
+  await loadInitialData(false);
   renderRoute();
   initCloudSessionAndSync()
     .then((sess) => {

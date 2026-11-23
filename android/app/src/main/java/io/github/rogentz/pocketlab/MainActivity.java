@@ -6,13 +6,14 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import androidx.activity.OnBackPressedCallback;
-import androidx.appcompat.app.AppCompatDelegate;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
+import androidx.core.splashscreen.SplashScreen;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -43,65 +44,92 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_NO);
+        try {
+            SplashScreen.installSplashScreen(this);
+        } catch (Throwable ignored) {
+        }
         super.onCreate(savedInstanceState);
 
-        getWindow().getDecorView().setBackgroundColor(0xFFF6F6F4);
-        WindowInsetsControllerCompat insetsController =
-            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        if (insetsController != null) {
-            insetsController.setAppearanceLightStatusBars(true);
-            insetsController.setAppearanceLightNavigationBars(true);
+        try {
+            if (getWindow() != null && getWindow().getDecorView() != null) {
+                getWindow().getDecorView().setBackgroundColor(0xFFF6F6F4);
+                WindowInsetsControllerCompat insetsController =
+                    WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+                if (insetsController != null) {
+                    insetsController.setAppearanceLightStatusBars(true);
+                    insetsController.setAppearanceLightNavigationBars(true);
+                }
+            }
+        } catch (Throwable ignored) {
         }
 
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            WebView webView = getBridge().getWebView();
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                webView.setForceDarkAllowed(false);
-            }
-            String ua = webView.getSettings().getUserAgentString();
-            if (ua != null && ua.contains("; wv)")) {
-                webView.getSettings().setUserAgentString(
-                    ua.replace("; wv)", ")").replace("Version/4.0 ", "")
-                );
-            }
-            webView.addJavascriptInterface(new PocketLabNativeBridge(), "PocketLabNative");
-
-            getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
-                @Override
-                public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                    Uri uri = request != null ? request.getUrl() : null;
-                    if (uri != null) {
-                        String host = uri.getHost();
-                        String path = uri.getPath();
-                        if ("game.pokemontcgpocket.app".equalsIgnoreCase(host)) {
-                            return proxyPrimaryZhImage(uri.toString());
-                        }
-                        if ("localhost".equalsIgnoreCase(host) && path != null && path.startsWith("/__52poke_card/")) {
-                            return fetch52PokeCard(path);
-                        }
+        try {
+            if (getBridge() != null && getBridge().getWebView() != null) {
+                WebView webView = getBridge().getWebView();
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    try {
+                        webView.setForceDarkAllowed(false);
+                    } catch (Throwable ignored) {
                     }
-                    return super.shouldInterceptRequest(view, request);
                 }
-            });
+                try {
+                    String ua = webView.getSettings().getUserAgentString();
+                    if (ua != null && ua.contains("; wv)")) {
+                        webView.getSettings().setUserAgentString(
+                            ua.replace("; wv)", ")").replace("Version/4.0 ", "")
+                        );
+                    }
+                } catch (Throwable ignored) {
+                }
+                webView.addJavascriptInterface(new PocketLabNativeBridge(), "PocketLabNative");
 
-            ViewCompat.setOnApplyWindowInsetsListener(webView, (view, windowInsets) -> {
-                Insets bars = windowInsets.getInsets(
-                    WindowInsetsCompat.Type.systemBars()
-                        | WindowInsetsCompat.Type.displayCutout()
-                        | WindowInsetsCompat.Type.ime()
-                );
-                ViewGroup.MarginLayoutParams lp = (ViewGroup.MarginLayoutParams) view.getLayoutParams();
-                if (lp != null) {
-                    lp.leftMargin = bars.left;
-                    lp.topMargin = bars.top;
-                    lp.rightMargin = bars.right;
-                    lp.bottomMargin = bars.bottom;
-                    view.setLayoutParams(lp);
+                getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                    @Override
+                    public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                        Uri uri = request != null ? request.getUrl() : null;
+                        if (uri != null) {
+                            String host = uri.getHost();
+                            String path = uri.getPath();
+                            if ("game.pokemontcgpocket.app".equalsIgnoreCase(host)) {
+                                return proxyPrimaryZhImage(uri.toString());
+                            }
+                            if ("localhost".equalsIgnoreCase(host) && path != null && path.startsWith("/__52poke_card/")) {
+                                return fetch52PokeCard(path);
+                            }
+                        }
+                        return super.shouldInterceptRequest(view, request);
+                    }
+
+                    @Override
+                    public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                        // Prevent Android 15 / Dimensity WebView GPU process hiccups from killing the whole app
+                        if (view != null) {
+                            view.post(() -> {
+                                try {
+                                    view.reload();
+                                } catch (Throwable ignored) {
+                                }
+                            });
+                        }
+                        return true;
+                    }
+                });
+
+                ViewGroup parentView = webView.getParent() instanceof ViewGroup ? (ViewGroup) webView.getParent() : null;
+                if (parentView != null) {
+                    ViewCompat.setOnApplyWindowInsetsListener(parentView, (v, windowInsets) -> {
+                        Insets bars = windowInsets.getInsets(
+                            WindowInsetsCompat.Type.systemBars()
+                                | WindowInsetsCompat.Type.displayCutout()
+                                | WindowInsetsCompat.Type.ime()
+                        );
+                        v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                        return WindowInsetsCompat.CONSUMED;
+                    });
+                    ViewCompat.requestApplyInsets(parentView);
                 }
-                return WindowInsetsCompat.CONSUMED;
-            });
-            ViewCompat.requestApplyInsets(webView);
+            }
+        } catch (Throwable ignored) {
         }
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {

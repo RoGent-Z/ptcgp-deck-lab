@@ -14,6 +14,7 @@ import {
   FIRST_SEAT_GAMES,
   GAMES_PER_OPPONENT,
   interval,
+  isAndroidOrMobileEnv,
   isEngineImplementedStatus,
   matchDeckStrategies,
   mergeExploreChunkStats,
@@ -40,58 +41,71 @@ export function fnv1a32(str) {
   return h >>> 0;
 }
 
-// 探測三層加速引擎：WebGPU 顯存計算 + FastSim 定點數 WASM（多核記憶體並行 + 一致回放）+ DeckGym 覆蓋率校驗
+// 探測加速引擎：桌面端啟用 WebGPU 顯存 + FastSim WASM + DeckGym；Android/行動端僅載入 165KB FastSim WASM（避免天璣/安卓15 WebView GPU 崩潰與冷啟動 OOM）
+let engineProbePromise = null;
 export async function probeEngine() {
-  if (state.runtimeFn && state.fastSimFn) {
+  if (state.fastSimFn && state.engineReady) {
     return { ready: true, runtime: state.runtimeFn, fastSim: state.fastSimFn, gpuSim: state.gpuSim };
   }
-  try {
-    const [modRes, wasmRes, fastModRes, fastWasmRes, gpuEngine] = await Promise.all([
-      import('../battle/runtime.mjs'),
-      fetch('battle/deckgym.wasm'),
-      import('../battle/fastsim-runtime.mjs'),
-      fetch('battle/fastsim.wasm'),
-      probeWebGPU().catch(() => null)
-    ]);
-    if (!wasmRes.ok) throw Error(`未找到 deckgym.wasm (${wasmRes.status})`);
-    if (!fastWasmRes.ok) throw Error(`未找到 fastsim.wasm (${fastWasmRes.status})`);
-    const [bytes, fastBytes] = await Promise.all([wasmRes.arrayBuffer(), fastWasmRes.arrayBuffer()]);
-    const [compiled, fastCompiled] = await Promise.all([
-      WebAssembly.compile(bytes),
-      WebAssembly.compile(fastBytes)
-    ]);
-    const [fn, fastFn] = await Promise.all([
-      modRes.instantiateBattle(compiled),
-      fastModRes.instantiateFastSim(fastCompiled)
-    ]);
-    state.wasmModule = compiled;
-    state.wasmBytes = bytes;
-    state.runtimeFn = fn;
-    state.fastSimModule = fastCompiled;
-    state.fastSimFn = fastFn;
-    state.fastSimReady = true;
-    state.gpuSim = gpuEngine || null;
-    state.gpuReady = Boolean(gpuEngine?.ready);
-    state.gpuAdapterName = gpuEngine?.adapterName || '';
-    state.engineReady = true;
-    state.engineError = '';
-    ensureStrategyLexicon().catch(() => null);
-    return { ready: true, runtime: fn, fastSim: fastFn, gpuSim: state.gpuSim };
-  } catch (err) {
-    state.engineReady = false;
-    state.engineError = `對戰模擬引擎尚未載入（${err?.message || 'WASM 初始化失敗'}）。`;
-    return { ready: false, error: state.engineError };
-  }
+  if (engineProbePromise) return engineProbePromise;
+  engineProbePromise = (async () => {
+    try {
+      const mobile = isAndroidOrMobileEnv();
+      const [fastModRes, fastWasmRes, gpuEngine] = await Promise.all([
+        import('../battle/fastsim-runtime.mjs'),
+        fetch('battle/fastsim.wasm'),
+        mobile ? Promise.resolve(null) : probeWebGPU().catch(() => null)
+      ]);
+      if (!fastWasmRes.ok) throw Error(`未找到 fastsim.wasm (${fastWasmRes.status})`);
+      const fastBytes = await fastWasmRes.arrayBuffer();
+      const fastCompiled = await WebAssembly.compile(fastBytes);
+      const fastFn = await fastModRes.instantiateFastSim(fastCompiled);
+
+      state.fastSimModule = fastCompiled;
+      state.fastSimFn = fastFn;
+      state.fastSimReady = true;
+      state.gpuSim = gpuEngine || null;
+      state.gpuReady = Boolean(gpuEngine?.ready);
+      state.gpuAdapterName = gpuEngine?.adapterName || '';
+      state.engineReady = true;
+      state.engineError = '';
+
+      if (!mobile) {
+        // 桌面端背景補充載入 DeckGym 覆蓋率引擎與詞條庫，不阻塞啟動
+        Promise.all([import('../battle/runtime.mjs'), fetch('battle/deckgym.wasm')])
+          .then(async ([modRes, wasmRes]) => {
+            if (!wasmRes.ok) return;
+            const bytes = await wasmRes.arrayBuffer();
+            const compiled = await WebAssembly.compile(bytes);
+            const fn = await modRes.instantiateBattle(compiled);
+            state.wasmModule = compiled;
+            state.wasmBytes = bytes;
+            state.runtimeFn = fn;
+          })
+          .catch(() => null);
+        ensureStrategyLexicon().catch(() => null);
+      }
+      return { ready: true, runtime: state.runtimeFn, fastSim: fastFn, gpuSim: state.gpuSim };
+    } catch (err) {
+      state.engineReady = false;
+      state.engineError = `對戰模擬引擎尚未載入（${err?.message || 'WASM 初始化失敗'}）。`;
+      return { ready: false, error: state.engineError };
+    } finally {
+      engineProbePromise = null;
+    }
+  })();
+  return engineProbePromise;
 }
 
-// 多執行緒 FastSim Web Worker 並行池（專攻千萬級探索與五萬級正式勝率推演）
+// 多執行緒 FastSim Web Worker 並行池（行動端上限 4 核以節省記憶體、桌面端上限 16 核）
 let fastWorkerPool = null;
 let fastWorkerPoolPromise = null;
 
 async function spawnFastWorkerPool() {
   if (typeof Worker === 'undefined') return null;
   const hw = Number(globalThis.navigator?.hardwareConcurrency || 4);
-  const count = Math.max(2, Math.min(16, hw));
+  const maxWorkers = isAndroidOrMobileEnv() ? 4 : 16;
+  const count = Math.max(2, Math.min(maxWorkers, hw));
   const workerUrl = new URL('../battle/worker.mjs', import.meta.url);
   const fastWasmUrl = new URL('../battle/fastsim.wasm', import.meta.url).href;
 

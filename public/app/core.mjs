@@ -107,7 +107,7 @@ export function resolveModelSimProfile(modelOrRun) {
 }
 
 export function isAndroidOrMobileEnv() {
-  if (typeof window !== 'undefined' && window.Capacitor?.isNativePlatform?.()) return true;
+  if (typeof window !== 'undefined' && (window.Capacitor?.isNativePlatform?.() || typeof window.PocketLabNative !== 'undefined')) return true;
   if (typeof navigator !== 'undefined' && /Android|Mobile/i.test(navigator.userAgent || '')) return true;
   return false;
 }
