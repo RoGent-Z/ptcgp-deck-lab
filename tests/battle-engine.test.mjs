@@ -222,4 +222,36 @@ test("deployed trained models (v3/v1/v2), 13,500+ strategy lexicon, and 10M-expl
   assert.equal(fTest.completed, 1000);
   assert.equal(fTest.outcomes.length, 1000);
   assert.equal(fTest.wins + fTest.draws + fTest.losses, 1000);
+
+  // Verify pure-Chinese replay action & card name translation (zero English action/name/HP leaks)
+  const { translateActionLabel, translateEnCardName } = await import("../public/app/battle.mjs");
+  const sampleActions = [
+    "EndTurn",
+    "Place(Corphish, 0)",
+    "Place(Darkrai, 0)",
+    "Place(Eevee, 1)",
+    "Place(Igglybuff, 2)",
+    "Evolve(Mega Charizard Y ex, 0, from_deck: false)",
+    "Play(A1 225 Sabrina)",
+    "Play(P-A 005 Poké Ball)",
+    'Attach("(1, Fire, 0)", true)',
+    "AttachTool(0, Giant Cape)",
+    "Attack(Crimson Dive)",
+    "UseAbility(0)",
+    "Retreat(1)",
+    "Heal(0, 30, cure:true)",
+    "ApplyDamage(attacker:(0, 0), targets:[(30, 1, 0), (20, 1, 1)], from_active:true)"
+  ];
+  for (const act of sampleActions) {
+    const zh = translateActionLabel(act, {
+      actor: 0,
+      prevBoard: [{ active: { name: "Mega Charizard Y ex" }, bench: [] }, { active: { name: "Darkrai" }, bench: [] }],
+      cardsList: cardsAll
+    });
+    assert.ok(!/\b(Place|EndTurn|Play|Attach|Attack|Evolve|Retreat|Heal|ApplyDamage|Corphish|Darkrai|Eevee|Igglybuff|Sabrina|Giant Cape|Fire|Water|HP)\b/.test(zh), `Unexpected English in: ${zh}`);
+  }
+  assert.equal(translateEnCardName("Corphish", cardsAll), "龍蝦小兵");
+  assert.equal(translateEnCardName("Darkrai", cardsAll), "達克萊伊");
+  assert.equal(translateEnCardName("Eevee", cardsAll), "伊布");
+  assert.equal(translateEnCardName("Igglybuff", cardsAll), "寶寶丁");
 });

@@ -10,7 +10,7 @@ import {
 import { getPokemonCategories, getPokemonCategorySearchTerms, normalizeFeaturedPokemon, normalizeSearch, readDeckFile } from './core.mjs';
 import { all, get, put, remove } from './storage.mjs';
 
-export const isFixtureMode = () => new URLSearchParams(location.search).get('fixture') === '1';
+export const isFixtureMode = () => (typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fixture') === '1' : false);
 
 export const state = {
   fixture: isFixtureMode(),

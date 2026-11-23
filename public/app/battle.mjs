@@ -7,6 +7,7 @@ import {
   DEEP_EXPLORE_GAMES,
   DEEP_GAMES_PER_OPPONENT,
   encodeCardForFastSim,
+  energyNames,
   EXPLORE_CANDIDATE_COUNT,
   EXPLORE_GAMES_PER_OPPONENT,
   EXPLORE_TOTAL_GAMES,
@@ -722,31 +723,343 @@ export function renderBattleReport(run, lineup, options = {}) {
   `;
 }
 
-function translateActionLabel(raw) {
-  const s = String(raw || '');
-  if (s === 'EndTurn') return '結束回合 (EndTurn)';
-  if (s === 'Noop') return '跳過 / 保持現狀 (Noop)';
-  if (s === 'UseStadium') return '發動競技場效果 (UseStadium)';
-  if (s.startsWith('Place(')) return `放置基礎寶可夢至場上 · ${s}`;
-  if (s.startsWith('Evolve')) return `進化場上寶可夢 · ${s}`;
-  if (s.startsWith('Attach')) return `自能量區附著能量 · ${s}`;
-  if (s.startsWith('Play')) return `施放訓練家卡 · ${s}`;
-  if (s.startsWith('UseAbility')) return `發動寶可夢特性 · ${s}`;
-  if (s.startsWith('Retreat')) return `撤退戰鬥場寶可夢 · ${s}`;
-  if (s.startsWith('Attack')) return `發動招式攻擊 · ${s}`;
-  if (s.startsWith('Activate') || s.startsWith('ApplyDamage') || s.startsWith('Heal')) return `選擇效果目標 · ${s}`;
-  return s;
+const ENERGY_ZH_MAP = {
+  grass: '草', fire: '火', water: '水', lightning: '雷', psychic: '超',
+  fighting: '鬥', darkness: '惡', metal: '鋼', dragon: '龍', colorless: '無色'
+};
+
+const STATUS_ZH_MAP = {
+  poisoned: '中毒', poison: '中毒',
+  burned: '灼傷', burn: '灼傷',
+  asleep: '睡眠', sleep: '睡眠',
+  paralyzed: '麻痺', paralysis: '麻痺',
+  confused: '混亂', confusion: '混亂'
+};
+
+let cachedZhMaps = null;
+let cachedZhCardsLen = -1;
+
+function normEnKey(s) {
+  return String(s || '').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 }
 
-function formatBoardSide(b) {
+function getZhLookupMaps(cardsList = state.cards) {
+  const arr = Array.isArray(cardsList) ? cardsList : [];
+  if (cachedZhMaps && cachedZhCardsLen === arr.length && arr === state.cards) return cachedZhMaps;
+  const byEnName = new Map();
+  const byCardId = new Map();
+  for (const c of arr) {
+    if (!c) continue;
+    if (c.id) {
+      byCardId.set(c.id.toUpperCase(), c);
+      byCardId.set(c.id.toUpperCase().replace(/-/g, ' '), c);
+      if (c.id.startsWith('PROMO-')) {
+        const shortId = c.id.replace(/^PROMO-/, 'P-');
+        byCardId.set(shortId.toUpperCase(), c);
+        byCardId.set(shortId.toUpperCase().replace(/-/g, ' '), c);
+      }
+    }
+    if (c.nameEn && c.name) {
+      const k = normEnKey(c.nameEn);
+      if (k && !byEnName.has(k)) byEnName.set(k, c);
+    }
+  }
+  const maps = { byEnName, byCardId };
+  if (arr === state.cards) {
+    cachedZhMaps = maps;
+    cachedZhCardsLen = arr.length;
+  }
+  return maps;
+}
+
+export function translateEnCardName(rawName, cardsList = state.cards) {
+  const s = String(rawName || '').trim();
+  if (!s) return '未知卡牌';
+  const { byEnName, byCardId } = getZhLookupMaps(cardsList);
+
+  // 先嘗試解析像 "A1 225 Sabrina" 或 "P-A 005 Poké Ball" 或 "Pokemon(A4a 010 Entei ex)"
+  const wrapped = s.match(/^(?:Pokemon|Trainer)\((.+)\)$/i);
+  const inner = wrapped ? wrapped[1].trim() : s;
+  const idMatch = inner.match(/^([A-Za-z0-9-]+)\s+(\d{1,3})\s+(.+)$/);
+  if (idMatch) {
+    const setCode = idMatch[1].toUpperCase();
+    const numPad = idMatch[2].padStart(3, '0');
+    const c = byCardId.get(`${setCode}-${numPad}`) || byCardId.get(`${setCode} ${numPad}`);
+    if (c?.name) return c.name;
+    const byName = byEnName.get(normEnKey(idMatch[3]));
+    if (byName?.name) return byName.name;
+  }
+
+  const direct = byEnName.get(normEnKey(inner));
+  if (direct?.name) return direct.name;
+
+  // 處理去掉前後贅詞或 ex 變體
+  const noEx = inner.replace(/\s+ex$/i, '').trim();
+  if (noEx !== inner) {
+    const baseCard = byEnName.get(normEnKey(noEx));
+    if (baseCard?.name) return `${baseCard.name}ex`;
+  }
+  return inner;
+}
+
+function slotLabelZh(idx) {
+  const n = Number(idx);
+  if (n === 0) return '戰鬥場';
+  if (Number.isInteger(n) && n > 0) return `備戰區第 ${n} 格`;
+  return '場上';
+}
+
+function playerSideZh(playerIdx) {
+  return Number(playerIdx) === 0 ? '我方' : '對手';
+}
+
+function translateEnergyZh(raw) {
+  const key = String(raw || '').trim().toLowerCase();
+  return ENERGY_ZH_MAP[key] || energyNames[raw] || '無色';
+}
+
+function translateStatusZh(raw) {
+  const key = String(raw || '').trim().toLowerCase();
+  return STATUS_ZH_MAP[key] || '異常狀態';
+}
+
+function translateEnergyListZh(list) {
+  if (!Array.isArray(list) || !list.length) return '無指定能量';
+  return list.map((e) => `${translateEnergyZh(e)}系`).join('／');
+}
+
+function findCardForBoardSlot(boardSide, slotIdx, ctx) {
+  if (!boardSide) return null;
+  const rawName = Number(slotIdx) === 0
+    ? boardSide.active?.name
+    : boardSide.bench?.[Number(slotIdx) - 1]?.name;
+  if (!rawName) return null;
+  const key = normEnKey(rawName);
+  return ctx?.matchCardsByEn?.get(key) || getZhLookupMaps(ctx?.cardsList).byEnName.get(key) || null;
+}
+
+export function translateActionLabel(raw, ctx = {}) {
+  const s = String(raw || '').trim();
+  const cardsList = ctx.cardsList || state.cards;
+  const actor = ctx.actor ?? 0;
+  const actorBoard = ctx.prevBoard?.[actor] || ctx.board?.[actor];
+
+  if (s === 'EndTurn') return '結束回合';
+  if (s === 'Noop') return '跳過本次可選動作';
+  if (s === 'UseStadium') return '發動競技場效果';
+  if (s === 'DiscardActiveStadium') return '丟棄場上的競技場卡';
+  if (s === 'ApplyEeveeBagDamageBoost') return '發動伊布背包效果：本回合招式傷害增加';
+  if (s === 'HealAllEeveeEvolutions') return '發動伊布背包效果：恢復場上所有伊布進化型體力';
+  if (s === 'DiscardRandomOpponentActiveEnergy') return '隨機丟棄對手戰鬥場寶可夢的 1 顆能量';
+  if (s === 'ShuffleOwnDeck') return '重洗己方牌庫';
+  if (s === 'ShuffleRandomOwnHandCardIntoDeck') return '隨機將 1 張己方手牌洗回牌庫';
+
+  let m;
+  if ((m = s.match(/^Place\((.+),\s*(\d+)\)$/))) {
+    return `將「${translateEnCardName(m[1], cardsList)}」放置於${slotLabelZh(m[2])}`;
+  }
+  if ((m = s.match(/^Evolve\((.+),\s*(\d+),\s*from_deck:\s*(true|false)\)$/))) {
+    const fromDeck = m[3] === 'true' ? '（從牌庫檢索）' : '';
+    return `將${slotLabelZh(m[2])}的寶可夢進化為「${translateEnCardName(m[1], cardsList)}」${fromDeck}`;
+  }
+  if ((m = s.match(/^Play\((.+)\)$/))) {
+    return `施放訓練家卡「${translateEnCardName(m[1], cardsList)}」`;
+  }
+  if ((m = s.match(/^Attach\("(.+)",\s*(true|false)\)$/))) {
+    const isTurn = m[2] === 'true';
+    const parts = [];
+    for (const seg of m[1].matchAll(/\((\d+),\s*([A-Za-z]+),\s*(\d+)\)/g)) {
+      parts.push(`為${slotLabelZh(seg[3])}附著 ${seg[1]} 顆${translateEnergyZh(seg[2])}能量`);
+    }
+    const prefix = isTurn ? '從能量區' : '透過卡牌效果';
+    return parts.length ? `${prefix}${parts.join('、')}` : `${prefix}附著能量`;
+  }
+  if ((m = s.match(/^AttachTool\((\d+),\s*(.+)\)$/))) {
+    return `為${slotLabelZh(m[1])}寶可夢裝備道具「${translateEnCardName(m[2], cardsList)}」`;
+  }
+  if ((m = s.match(/^Attack\((.+)\)$/))) {
+    const activeCard = findCardForBoardSlot(actorBoard, 0, ctx);
+    const activeZh = activeCard?.name || (actorBoard?.active?.name ? translateEnCardName(actorBoard.active.name, cardsList) : '戰鬥場寶可夢');
+    const attacks = activeCard?.attacks || [];
+    if (attacks.length === 1) {
+      const dmgTxt = attacks[0].damage ? `（傷害 ${attacks[0].damage}）` : '';
+      return `「${activeZh}」發動招式「${attacks[0].name}」${dmgTxt}`;
+    }
+    if (attacks.length > 1) {
+      const joined = attacks.map((a) => a.name).join('／');
+      return `「${activeZh}」發動招式（${joined}）`;
+    }
+    return `「${activeZh}」發動招式攻擊`;
+  }
+  if ((m = s.match(/^UseAbility\((\d+)\)$/))) {
+    const slot = Number(m[1]);
+    const card = findCardForBoardSlot(actorBoard, slot, ctx);
+    const pokeZh = card?.name ? `「${card.name}」` : '';
+    const abName = card?.abilities?.[0]?.name ? `「${card.abilities[0].name}」` : '';
+    return `發動${slotLabelZh(slot)}${pokeZh}的特性${abName}`;
+  }
+  if ((m = s.match(/^Retreat\((\d+)\)$/))) {
+    return `戰鬥場寶可夢撤退，換上${slotLabelZh(m[1])}寶可夢`;
+  }
+  if ((m = s.match(/^Activate\((\d+),\s*(\d+)\)$/))) {
+    return `將${playerSideZh(m[1])}${slotLabelZh(m[2])}寶可夢推上戰鬥場`;
+  }
+  if ((m = s.match(/^ApplyDamage\(attacker:\((\d+),\s*(\d+)\),\s*targets:\[(.+)\],\s*from_active:(true|false)\)$/))) {
+    const targets = [];
+    for (const seg of m[3].matchAll(/\((\d+),\s*(\d+),\s*(\d+)\)/g)) {
+      targets.push(`對${playerSideZh(seg[2])}${slotLabelZh(seg[3])}造成 ${seg[1]} 點傷害`);
+    }
+    return targets.length ? targets.join('、') : '對目標造成傷害';
+  }
+  if ((m = s.match(/^Heal\((\d+),\s*(\d+),\s*cure:(true|false)\)$/))) {
+    return `為${slotLabelZh(m[1])}寶可夢恢復 ${m[2]} 點體力${m[3] === 'true' ? '並解除異常狀態' : ''}`;
+  }
+  if ((m = s.match(/^HealAndCureConditions\((\d+),\s*(\d+),\s*\[(.*)\]\)$/))) {
+    const conds = m[3].split(',').map((x) => x.trim()).filter(Boolean).map(translateStatusZh);
+    return `為${slotLabelZh(m[1])}寶可夢恢復 ${m[2]} 點體力${conds.length ? `並解除${conds.join('、')}` : ''}`;
+  }
+  if ((m = s.match(/^HealAndDiscardEnergy\((\d+),\s*(\d+),\s*(.+)\)$/))) {
+    return `為${slotLabelZh(m[1])}寶可夢恢復 ${m[2]} 點體力並棄置指定能量`;
+  }
+  if ((m = s.match(/^DrawCard\((\d+)\)$/))) {
+    return `從牌庫抽取 ${m[1]} 張卡牌`;
+  }
+  if ((m = s.match(/^CommunicatePokemon\((.+)\)$/))) {
+    return `透過寶可夢通訊將「${translateEnCardName(m[1], cardsList)}」洗回牌庫並換取隨機寶可夢`;
+  }
+  if ((m = s.match(/^ShufflePokemonIntoDeck\(\[(.+)\]\)$/)) || (m = s.match(/^ShuffleOwnCardsIntoDeck\(\[(.+)\]\)$/))) {
+    const names = m[1].split(',').map((x) => translateEnCardName(x.trim(), cardsList)).filter(Boolean);
+    return `將手牌中的「${names.join('、')}」洗回牌庫`;
+  }
+  if ((m = s.match(/^TakeTopDeckCardAndShuffle\((.+),\s*(\d+)\)$/))) {
+    return `檢視牌庫頂 ${m[2]} 張並取得「${translateEnCardName(m[1], cardsList)}」後重洗牌庫`;
+  }
+  if ((m = s.match(/^AttachTypedFromDiscard\((\d+),\s*([A-Za-z]+),\s*(\d+)\)$/))) {
+    return `從棄牌區將 ${m[3]} 顆${translateEnergyZh(m[2])}能量附著至${slotLabelZh(m[1])}`;
+  }
+  if ((m = s.match(/^AttachFromDiscard\((\d+),\s*(\d+)\)$/))) {
+    return `從棄牌區隨機附著 ${m[2]} 顆能量至${slotLabelZh(m[1])}`;
+  }
+  if ((m = s.match(/^DiscardToolFromPokemon\((\d+),\s*(\d+),\s*(\d+)\)$/))) {
+    return `移除${playerSideZh(m[1])}${slotLabelZh(m[2])}寶可夢裝備的道具`;
+  }
+  if ((m = s.match(/^MoveEnergy\(from:(\d+),\s*to:(\d+),\s*(\d+)x\s*([A-Za-z]+)\)$/))) {
+    return `將 ${m[3]} 顆${translateEnergyZh(m[4])}能量從${slotLabelZh(m[1])}轉移至${slotLabelZh(m[2])}`;
+  }
+  if ((m = s.match(/^MoveEnergyAndReoffer\((\d+)\s*->\s*(\d+),\s*([A-Za-z]+),\s*(\d+)\s*left\)$/))) {
+    return `將 1 顆${translateEnergyZh(m[3])}能量從${slotLabelZh(m[1])}轉移至${slotLabelZh(m[2])}（剩餘可轉移 ${m[4]} 次）`;
+  }
+  if ((m = s.match(/^FlipUntilTailsThenAttach\((\d+),\s*([A-Za-z]+),\s*max:(\d+)\)$/))) {
+    return `擲硬幣至反面為止，為${slotLabelZh(m[1])}附著${translateEnergyZh(m[2])}能量（上限 ${m[3]} 顆）`;
+  }
+  if ((m = s.match(/^FlipUntilTailsThenHeal\((\d+),\s*(\d+),\s*max:(\d+)\)$/))) {
+    return `擲硬幣至反面為止，每次正面為${slotLabelZh(m[1])}恢復 ${m[2]} 點體力`;
+  }
+  if ((m = s.match(/^MoveAllDamage\(from:(\d+),\s*to:(\d+)\)$/))) {
+    return `將${slotLabelZh(m[1])}的全部傷害轉移至${slotLabelZh(m[2])}`;
+  }
+  if ((m = s.match(/^MoveDamageToOpponentActive\((\d+),\s*(\d+)\)$/))) {
+    return `將${slotLabelZh(m[1])}的 ${m[2]} 點傷害轉移至對手戰鬥場`;
+  }
+  if ((m = s.match(/^ScheduleDelayedSpotKnockOut\(target:(\d+):(\d+)\)$/))) {
+    return `預約延遲氣絕效果，鎖定${playerSideZh(m[1])}${slotLabelZh(m[2])}`;
+  }
+  if ((m = s.match(/^ScheduleDelayedSpotDamage\(target:(\d+):(\d+),\s*amount:(\d+)\)$/))) {
+    return `預約延遲傷害效果，將對${playerSideZh(m[1])}${slotLabelZh(m[2])}造成 ${m[3]} 點傷害`;
+  }
+  if ((m = s.match(/^EvolveIntoRandomFromDeck\((\d+),\s*([A-Za-z]+)\)$/))) {
+    return `從牌庫隨機將${slotLabelZh(m[1])}進化為${translateEnergyZh(m[2])}屬性寶可夢`;
+  }
+  if ((m = s.match(/^SwitchHandCardForRandomTool\((.+)\)$/))) {
+    return `將手牌「${translateEnCardName(m[1], cardsList)}」換回牌庫並檢索隨機道具`;
+  }
+  if ((m = s.match(/^ShuffleOpponentSupporter\((.+)\)$/))) {
+    return `將對手手牌中的支援者「${translateEnCardName(m[1], cardsList)}」洗回對手牌庫`;
+  }
+  if ((m = s.match(/^DiscardOpponentSupporter\((.+)\)$/))) {
+    return `丟棄對手手牌中的支援者「${translateEnCardName(m[1], cardsList)}」`;
+  }
+  if ((m = s.match(/^PutDiscardCardInHand\((.+)\)$/))) {
+    return `從棄牌區將「${translateEnCardName(m[1], cardsList)}」收回手牌`;
+  }
+  if ((m = s.match(/^DiscardOwnCardsThenDamage\(\[(.+)\],\s*(\d+)\s*to\s*(\d+):(\d+)\)$/))) {
+    const names = m[1].split(',').map((x) => translateEnCardName(x.trim(), cardsList)).filter(Boolean);
+    return `丟棄手牌「${names.join('、')}」，對${playerSideZh(m[3])}${slotLabelZh(m[4])}造成 ${m[2]} 點傷害`;
+  }
+  if ((m = s.match(/^DiscardOwnCards\(\[(.+)\]\)$/))) {
+    const names = m[1].split(',').map((x) => translateEnCardName(x.trim(), cardsList)).filter(Boolean);
+    return `丟棄手牌「${names.join('、')}」`;
+  }
+  if ((m = s.match(/^BenchOpponentPokemonFromHand\(\[(.+)\]\)$/))) {
+    const names = m[1].split(',').map((x) => translateEnCardName(x.trim(), cardsList)).filter(Boolean);
+    return `強制將對手手牌中的「${names.join('、')}」放置於對手備戰區`;
+  }
+  if ((m = s.match(/^BenchOpponentPokemonFromDiscard\((.+)\)$/))) {
+    return `從對手棄牌區將「${translateEnCardName(m[1], cardsList)}」放置於對手備戰區`;
+  }
+  if ((m = s.match(/^SadaAttach\(\[(.+)\]\)$/))) {
+    const parts = [];
+    for (const seg of m[1].matchAll(/([A-Za-z]+)→(\d+)/g)) {
+      parts.push(`為${slotLabelZh(seg[2])}附著${translateEnergyZh(seg[1])}能量`);
+    }
+    return parts.length ? `發動奧琳博士效果：${parts.join('、')}` : '發動奧琳博士附能效果';
+  }
+  if ((m = s.match(/^DiscardFossil\((\d+)\)$/))) {
+    return `主動丟棄位於${slotLabelZh(m[1])}的化石卡`;
+  }
+  if ((m = s.match(/^DiscardOwnBenchedThenDamage\((\d+),\s*(\d+)\)$/))) {
+    return `丟棄己方${slotLabelZh(m[1])}寶可夢並造成 ${m[2]} 點傷害`;
+  }
+  if ((m = s.match(/^DiscardOwnBenchedGroupThenDamage\(\[(.+)\],\s*(\d+)\)$/))) {
+    return `丟棄己方指定備戰寶可夢並造成 ${m[2]} 點傷害`;
+  }
+  if ((m = s.match(/^ShuffleSelfAndAttachmentsIntoDeck\((\d+)\)$/))) {
+    return `將${slotLabelZh(m[1])}寶可夢及所有附加卡洗回牌庫`;
+  }
+  if ((m = s.match(/^ReturnPokemonToHand\((\d+)\)$/))) {
+    return `將${slotLabelZh(m[1])}寶可夢收回手牌`;
+  }
+  if ((m = s.match(/^ShuffleInPlayPokemonIntoDeck\((\d+)\)$/))) {
+    return `將${slotLabelZh(m[1])}寶可夢洗回牌庫`;
+  }
+  if ((m = s.match(/^MoveRandomOpponentEnergyToActive\((\d+)\)$/))) {
+    return `將對手${slotLabelZh(m[1])}的隨機 1 顆能量轉移至對手戰鬥場`;
+  }
+  if ((m = s.match(/^MoveOpponentActiveEnergyToSelf\((\d+)\)$/))) {
+    return `將對手戰鬥場的 1 顆能量轉移至己方${slotLabelZh(m[1])}`;
+  }
+  if ((m = s.match(/^ApplyStatusToOpponentActive\((.+)\)$/))) {
+    return `使對手戰鬥場寶可夢陷入「${translateStatusZh(m[1])}」狀態`;
+  }
+  if ((m = s.match(/^ApplyStatusesToOpponentActive\(\[(.+)\]\)$/))) {
+    const conds = m[1].split(',').map((x) => translateStatusZh(x.trim()));
+    return `使對手戰鬥場寶可夢陷入「${conds.join('、')}」狀態`;
+  }
+  if ((m = s.match(/^MoveActiveEnergyToBench\(to:(\d+),\s*(.+)\)$/))) {
+    return `將戰鬥場寶可夢的能量轉移至${slotLabelZh(m[1])}`;
+  }
+  if ((m = s.match(/^MoveActiveEnergyToBenchAndReoffer\(to:(\d+),\s*([A-Za-z]+)\)$/))) {
+    return `將戰鬥場的 1 顆${translateEnergyZh(m[2])}能量轉移至${slotLabelZh(m[1])}`;
+  }
+  if ((m = s.match(/^SwitchOpponentBenchedThenDamage\((\d+),\s*(\d+)\)$/))) {
+    return `將對手${slotLabelZh(m[1])}寶可夢拖上戰鬥場並造成 ${m[2]} 點傷害`;
+  }
+  return '執行卡牌規則效果';
+}
+
+function formatBoardSide(b, cardsList = state.cards) {
   if (!b) return '空場';
   const active = b.active || (b.name ? b : null);
-  const name = active?.name || '空場';
+  const name = active?.name ? translateEnCardName(active.name, cardsList) : '空場';
   const hp = active?.hp != null ? `${active.hp}${active.maxHp ? `/${active.maxHp}` : ''}` : '0';
   const energy = active?.energy ?? 0;
+  const benchArr = Array.isArray(b.bench) ? b.bench : [];
   const benchCount = Array.isArray(b.bench) ? b.bench.length : (b.bench ?? 0);
   const hand = b.hand ?? 0;
-  return `<b>${esc(name)}</b> (HP ${hp} · ${energy}能 · 備戰${benchCount} · 手牌${hand})`;
+  const benchNames = benchArr.length
+    ? `〔備戰：${benchArr.map((pc) => `${translateEnCardName(pc.name, cardsList)} ${pc.hp}/${pc.maxHp}·${pc.energy}能`).join('、')}〕`
+    : '';
+  return `<b>${esc(name)}</b>（體力 ${hp} · ${energy}能 · 備戰 ${benchCount} 隻 · 手牌 ${hand} 張）${benchNames ? ` <span class="muted">${esc(benchNames)}</span>` : ''}`;
 }
 
 export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, customGamesPerOpp = null, customWeights = null, customSeedPrefix = null, replayAction = 'replay-game' }) {
@@ -764,7 +1077,7 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
     return `
       <div class="flow-modal">
         <div class="flow-nav-bar">
-          <span>第 <b>${(idx + 1).toLocaleString('zh-TW')}</b> / ${gamesPerOpp.toLocaleString('zh-TW')} 局 · ${esc(sideText)} · 種子 <code>0x${seed.toString(16).toUpperCase()}</code></span>
+          <span>第 <b>${(idx + 1).toLocaleString('zh-TW')}</b> / ${gamesPerOpp.toLocaleString('zh-TW')} 局 · ${esc(sideText)} · 隨機種子 <code>${seed}</code></span>
         </div>
         <p class="desc">對戰模擬引擎尚未就緒，暫無法重播此局完整流程。</p>
       </div>
@@ -787,37 +1100,58 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
     replay: true
   });
 
+  // 建立本局雙方牌表精準英轉中映射（讓招式與特性 100% 精準顯示官方中文名）
+  const matchCardsByEn = new Map();
+  for (const item of [...(deck.cards || []), ...(opp.representative?.cards || [])]) {
+    const c = state.cardsById?.get ? state.cardsById.get(item.id) : null;
+    if (c?.nameEn) matchCardsByEn.set(normEnKey(c.nameEn), c);
+  }
+
   const steps = Array.isArray(replayRes?.replay) ? replayRes.replay : [];
-  const outcomeLabel = { win: '我方獲勝', loss: '對手獲勝', draw: '平局（30 回合上限）' }[replayRes.outcome] || replayRes.outcome;
+  const outcomeLabel = { win: '我方獲勝', loss: '對手獲勝', draw: '平局（達 30 回合上限）' }[replayRes.outcome] || '對局結束';
   const outcomeCls = `is-${replayRes.outcome || 'draw'}`;
   const finalPts = Array.isArray(replayRes?.points) ? `${replayRes.points[0]} : ${replayRes.points[1]}` : '—';
 
-  const setupSteps = steps.filter((s) => s.turn === 0);
-  const combatSteps = steps.filter((s) => s.turn > 0);
+  // 記錄每一步執行前的盤面狀態，以便準確辨識發動招式／特性的當前寶可夢
+  const enrichedSteps = steps.map((s, i) => ({
+    ...s,
+    _seq: i + 1,
+    _prevBoard: i > 0 ? steps[i - 1].board : null
+  }));
+
+  const setupSteps = enrichedSteps.filter((s) => s.turn === 0);
+  const combatSteps = enrichedSteps.filter((s) => s.turn > 0);
   const byTurn = new Map();
   for (const s of combatSteps) {
     if (!byTurn.has(s.turn)) byTurn.set(s.turn, []);
     byTurn.get(s.turn).push(s);
   }
 
-  const renderStepRow = (s, stepNum) => {
+  const renderStepRow = (s) => {
     const actorBadge = s.actor === 0
-      ? '<span class="flow-actor is-me">我方 (千萬局獲勝策略)</span>'
-      : '<span class="flow-actor is-opp">對手 (環境策略)</span>';
+      ? '<span class="flow-actor is-me">我方（千萬局獲勝策略）</span>'
+      : '<span class="flow-actor is-opp">對手（環境基準策略）</span>';
     const b0 = s.board?.[0];
     const b1 = s.board?.[1];
+    const actionZh = translateActionLabel(s.action, {
+      actor: s.actor,
+      prevBoard: s._prevBoard,
+      board: s.board,
+      matchCardsByEn,
+      cardsList: state.cards
+    });
     const boardHtml = b0 && b1
       ? `<div class="flow-board-snap">
-          <span>我方戰鬥場：${formatBoardSide(b0)}</span>
-          <span>對手戰鬥場：${formatBoardSide(b1)}</span>
+          <span>我方戰鬥場：${formatBoardSide(b0, state.cards)}</span>
+          <span>對手戰鬥場：${formatBoardSide(b1, state.cards)}</span>
         </div>`
       : '';
     return `
       <li class="flow-step-item">
         <div class="flow-step-main">
-          <span class="flow-step-idx">#${s.step || stepNum}</span>
+          <span class="flow-step-idx">第 ${s._seq} 步</span>
           ${actorBadge}
-          <span class="flow-action-text">${esc(translateActionLabel(s.action))}</span>
+          <span class="flow-action-text">${esc(actionZh)}</span>
           <span class="flow-pts-pill">比數 ${(s.points || [0, 0]).join(' : ')}</span>
         </div>
         ${boardHtml}
@@ -826,7 +1160,7 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
   };
 
   const setupHtml = setupSteps.length
-    ? `<ol class="flow-step-list">${setupSteps.map((s, i) => renderStepRow(s, i + 1)).join('')}</ol>`
+    ? `<ol class="flow-step-list">${setupSteps.map((s) => renderStepRow(s)).join('')}</ol>`
     : '<p class="sub">無開局紀錄</p>';
 
   let turnsHtml = '';
@@ -840,7 +1174,7 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
           <span>共 ${tSteps.length} 步決策 · 回合結束比數 ${endPts}</span>
         </div>
         <ol class="flow-step-list">
-          ${tSteps.map((s, i) => renderStepRow(s, i + 1)).join('')}
+          ${tSteps.map((s) => renderStepRow(s)).join('')}
         </ol>
       </div>
     `;
@@ -850,19 +1184,19 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
     <div class="flow-modal">
       <div class="flow-nav-bar">
         <div class="flow-nav-info">
-          <span class="flow-result-badge ${outcomeCls}">${esc(outcomeLabel)} (${esc(finalPts)})</span>
+          <span class="flow-result-badge ${outcomeCls}">${esc(outcomeLabel)}（${esc(finalPts)}）</span>
           <span>第 <b>${(idx + 1).toLocaleString('zh-TW')}</b> / ${gamesPerOpp.toLocaleString('zh-TW')} 局 · ${esc(sideText)}</span>
-          <span>共 <b>${replayRes.turns || 0}</b> 回合 / <b>${steps.length}</b> 步動作 · 種子 <code>0x${seed.toString(16).toUpperCase()}</code></span>
+          <span>共 <b>${replayRes.turns || 0}</b> 回合 / <b>${steps.length}</b> 步完整動作 · 隨機種子 <code>${seed}</code></span>
         </div>
         <div class="flow-nav-btns">
-          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${prevIdx}">◀ 上一局 (#${(prevIdx + 1).toLocaleString('zh-TW')})</button>
-          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${nextIdx}">下一局 (#${(nextIdx + 1).toLocaleString('zh-TW')}) ▶</button>
+          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${prevIdx}">◀ 上一局（第 ${(prevIdx + 1).toLocaleString('zh-TW')} 局）</button>
+          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${nextIdx}">下一局（第 ${(nextIdx + 1).toLocaleString('zh-TW')} 局） ▶</button>
         </div>
       </div>
 
       <div class="flow-stage-card">
-        <h3>階段一 · 對局雙方牌表與千萬局勝局策略配置（DeckGym 精確規則引擎逐動作重現）</h3>
-        <p class="sub">我方：<b>${esc(deck.name)}</b>（${(deck.energy || []).join('/')} · 13,500 策略詞條 + 10,000,000 局勝局提煉策略） vs 對手：<b>${esc(opp.name)}</b>（${(opp.representative.energy || []).join('/')} · 基準模型 <code>${esc(run?.modelVersion || state.modelInfo?.version || 'selfplay-cem-v3')}</code>）</p>
+        <h3>階段一 · 對局雙方牌組與策略配置（精確規則引擎完整重現）</h3>
+        <p class="sub">我方：<b>${esc(deck.name)}</b>（${esc(translateEnergyListZh(deck.energy))} · 套用 13,500 策略詞條庫與 10,000,000 局勝局提煉獲勝策略）　對陣　對手：<b>${esc(opp.name)}</b>（${esc(translateEnergyListZh(opp.representative.energy))} · 採用環境基準策略模型）</p>
       </div>
 
       <div class="flow-stage-card">
@@ -871,13 +1205,13 @@ export function buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights, cu
       </div>
 
       <div class="flow-stage-card">
-        <h3>階段三 · 逐回合完整對戰流程（第 1 回合 → 第 ${replayRes.turns || 0} 回合）</h3>
+        <h3>階段三 · 逐回合完整對戰流程（第 1 回合 → 第 ${replayRes.turns || 0} 回合 · 完整展開全部 ${combatSteps.length} 步）</h3>
         <div class="flow-turns-scroll">${turnsHtml || '<p class="sub">無回合動作紀錄</p>'}</div>
       </div>
 
       <div class="flow-stage-card is-end">
         <h3>階段四 · 終局結算</h3>
-        <p class="sub">最終判定：<b>${esc(outcomeLabel)}</b> · 最終得分 <b>${esc(finalPts)}</b> · 累計執行 <b>${steps.length}</b> 個合法引擎動作，完整重現種子 <code>0x${seed.toString(16).toUpperCase()}</code> 決策軌跡。</p>
+        <p class="sub">最終判定：<b>${esc(outcomeLabel)}</b> · 最終得分 <b>${esc(finalPts)}</b> · 全場累計執行 <b>${steps.length}</b> 個合法對局動作，已完整呈現本局每一步操作與雙方場上變化。</p>
       </div>
     </div>
   `;
@@ -1097,13 +1431,13 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
             <strong>第一階段 · 對此卡組已完成 10,000,000 次勝利策略推演（篩選 ${strategy.exploreWins.toLocaleString('zh-TW')} 場勝利，推演勝率 ${expWr}）</strong>
             <p class="sub">結合 <b>${matched?.matchedCount || 0}</b> 條激活策略詞條（總庫 13,500 條），從千萬局精英勝局（${strategy.eliteWinsSelected.toLocaleString('zh-TW')} 場）中綜合提煉針對「${esc(opp.name)}」的專屬獲勝策略。</p>
           </div>
-          <span class="strategy-gain-pill ${Number(deltaPct) >= 0 ? 'is-pos' : 'is-neg'}">50,000 局勝率 ${testWr}（${Number(deltaPct) >= 0 ? '+' : ''}${deltaPct}% vs 推演期）</span>
+          <span class="strategy-gain-pill ${Number(deltaPct) >= 0 ? 'is-pos' : 'is-neg'}">50,000 局勝率 ${testWr}（較推演期 ${Number(deltaPct) >= 0 ? '+' : ''}${deltaPct}%）</span>
         </div>
         <div class="card-prior-chips">${topChips}</div>
       </div>
 
       <div class="flow-stage-card">
-        <h3>第二階段 · 採用獲勝策略進行 50,000 次實際勝率推演結果（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗 · 勝率 ${testWr} · 95% CI ${interval(agg.wins, agg.total)}）</h3>
+        <h3>第二階段 · 採用獲勝策略進行 50,000 次實際勝率推演結果（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗 · 勝率 ${testWr} · 95% 信賴區間 ${interval(agg.wins, agg.total)}）</h3>
         <p class="sub">先攻 25,000 局：<b>${agg.firstWins.toLocaleString('zh-TW')}勝 ${agg.firstDraws.toLocaleString('zh-TW')}和 ${agg.firstLosses.toLocaleString('zh-TW')}敗 (${((agg.firstWins / Math.max(1, f1Total)) * 100).toFixed(2)}%)</b> · 後攻 25,000 局：<b>${agg.secondWins.toLocaleString('zh-TW')}勝 ${agg.secondDraws.toLocaleString('zh-TW')}和 ${agg.secondLosses.toLocaleString('zh-TW')}敗 (${((agg.secondWins / Math.max(1, f2Total)) * 100).toFixed(2)}%)</b> — 切換區段點陣點擊任意格檢視四階段回放：</p>
         <div class="deep-page-tabs">${pageTabs}</div>
         ${renderGameStrip(opp.id, pageEvents, true, pageSize, 'replay-single-deep', pageStart, pageSize, DEEP_GAMES_PER_OPPONENT)}
