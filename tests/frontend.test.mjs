@@ -275,3 +275,41 @@ test('catalog pokemon categories support regional split, full paradox/UB coverag
     delete globalThis.window;
   }
 });
+
+test('project UI rule: battle page & card detail never expose internal decision methods or hardware/algorithm jargon', () => {
+  const viewsSrc = readFileSync(new URL('../public/app/views.mjs', import.meta.url), 'utf8');
+  const battleSrc = readFileSync(new URL('../public/app/battle.mjs', import.meta.url), 'utf8');
+
+  // Extract renderBattle() and buildCardDetailModal() bodies from views.mjs
+  const battleViewBody = viewsSrc.slice(viewsSrc.indexOf('export function renderBattle()'), viewsSrc.indexOf('export function renderSources()'));
+  const cardDetailBody = viewsSrc.slice(viewsSrc.indexOf('export function buildCardDetailModal('));
+  const battleReportBody = battleSrc.slice(battleSrc.indexOf('export function renderBattleReport('), battleSrc.indexOf('const ENERGY_ZH_MAP'));
+  const deepModalBody = battleSrc.slice(battleSrc.indexOf('export function renderSingleOpponentDeepProgress('), battleSrc.indexOf('// 執行兩階段真實勝率推演'));
+
+  const forbidden = [
+    /GPU 顯存加速/,
+    /多執行緒記憶體並行/,
+    /千萬局互博/,
+    /千萬局訓練/,
+    /策略詞條庫/,
+    /詞條/,
+    /22 維/,
+    /信賴區間/,
+    /隨機種子/,
+    /戰術權重先驗/,
+    /單卡評分先驗/,
+    /決策考量/,
+    /renderTrainingBenchmarkSection/,
+    /探索 → /
+  ];
+  for (const [label, text] of [
+    ['renderBattle', battleViewBody],
+    ['buildCardDetailModal', cardDetailBody],
+    ['renderBattleReport', battleReportBody],
+    ['renderSingleOpponentDeep', deepModalBody]
+  ]) {
+    for (const rx of forbidden) {
+      assert.doesNotMatch(text, rx, `Forbidden jargon ${rx} leaked into ${label}`);
+    }
+  }
+});

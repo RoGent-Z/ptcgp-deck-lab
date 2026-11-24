@@ -1024,23 +1024,18 @@ export function renderBattle() {
     && (expDone < activeModelProfile.exploreTotalGames || testDone < activeModelProfile.totalBatchGames)
   );
   const primaryBtnLabel = hasIncompleteRun
-    ? `繼續剩餘（探索 ${expDone.toLocaleString('zh-TW')} · 實測 ${testDone.toLocaleString('zh-TW')}）`
-    : `開始勝率模擬（${activeModelProfile.exploreLabel}探索 → ${activeModelProfile.testLabel}實測）`;
-  const lexTotal = state.strategyIndex?.totalEntries || state.strategyLexicon?.totalEntries || 13500;
-  const hwModeLabel = state.gpuReady
-    ? `GPU 顯存加速${state.gpuAdapterName ? ` · ${state.gpuAdapterName}` : ''}`
-    : `多執行緒記憶體並行（${Math.min(16, Number(globalThis.navigator?.hardwareConcurrency || 4))} 核）`;
-  const top10Count = Object.keys(state.top10Elite?.teams || {}).length;
+    ? '繼續勝率模擬'
+    : '開始勝率模擬';
 
   return `
     <div class="page-head">
       <h1>對戰測試與勝率模擬</h1>
-      <p class="desc">${esc(activeModelDisplay)} · ${esc(activeModelProfile.exploreLabel)}策略探索 → ${esc(activeModelProfile.testLabel)}實測 · 前十對手均採千萬局互博最佳策略。</p>
+      <p class="desc">測試牌組對陣當前環境前十熱門牌組的實戰勝率與對局詳情。</p>
     </div>
 
     <div class="battle-setup-grid">
       <section class="panel">
-        <h2>1. 參戰牌組與引擎</h2>
+        <h2>1. 參戰牌組與模式</h2>
         <div class="field-stack">
           <div class="field-label">
             <span>參戰牌組</span>
@@ -1056,10 +1051,10 @@ export function renderBattle() {
             })}
           </div>
           <div class="field-label">
-            <span>AI 決策模型</span>
+            <span>模擬模式</span>
             ${renderSwissSelect({
               id: 'battle-model-select',
-              title: '選擇 AI 決策模型',
+              title: '選擇模擬模式',
               value: uiState.battle.modelId || '',
               fullWidth: true,
               disabled: uiState.battle.running,
@@ -1067,20 +1062,14 @@ export function renderBattle() {
             })}
           </div>
           ${selectedDeck && !deckLegal ? `<div class="status-note is-warn">目前選中的牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
-          ${unsupportedDeckCards.length ? `<div class="status-note is-warn">以下卡牌尚未實裝至規則引擎，暫無法模擬：${unsupportedDeckCards.map((c) => esc(c.id)).join('、')}</div>` : ''}
-        </div>
-        <div class="engine-status-card ${state.engineReady ? 'is-ready' : 'is-pending'}">
-          <div>
-            <strong>${state.engineReady ? `引擎就緒 · ${esc(hwModeLabel)}` : '模擬引擎籌備中'}</strong>
-            <p>${state.engineReady ? `${esc(activeModelDisplay)}${top10Count ? ` · 前 ${top10Count} 對手已載入千萬局互博策略` : ''} · ${lexTotal.toLocaleString('zh-TW')} 詞條` : esc(state.engineError || '對戰模擬引擎尚未就緒。')}</p>
-          </div>
+          ${unsupportedDeckCards.length ? `<div class="status-note is-warn">以下卡牌暫不支援對戰模擬：${unsupportedDeckCards.map((c) => esc(c.id)).join('、')}</div>` : ''}
+          ${!state.engineReady ? `<div class="status-note">${esc(state.engineError || '對戰模擬功能載入中…')}</div>` : ''}
         </div>
         <div class="actions block-gap">
           <button class="btn btn-primary" type="button" data-action="start-real-battle" ${canRunReal && !uiState.battle.running ? '' : 'disabled'}>
             ${icon('play', 15)}<span>${primaryBtnLabel}</span>
           </button>
           <button class="btn btn-outline" type="button" data-action="open-deck-optimizer" data-id="${esc(selectedDeck?.id || '')}" ${selectedDeck && deckLegal && !uiState.battle.running ? '' : 'disabled'}>牌組 AI 優化</button>
-          <button class="btn btn-outline" type="button" data-action="open-strategy-lexicon">策略詞條庫 (${lexTotal.toLocaleString('zh-TW')})</button>
           ${uiState.battle.running ? `<button class="btn btn-outline" type="button" data-action="pause-battle">${icon('pause', 15)}暫停</button>` : ''}
           ${(m?.entries?.length && !uiState.battle.running) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck">${icon('plus', 15)}${decks.length ? '匯入榜首試測' : '匯入榜首並測試'}</button>` : ''}
           ${state.fixture ? `<button class="btn btn-outline" type="button" data-action="run-fixture-preview" ${uiState.battle.running ? 'disabled' : ''}>展示點陣預覽</button>` : ''}
@@ -1089,7 +1078,7 @@ export function renderBattle() {
       </section>
 
       <section class="panel">
-        <h2>2. 賽事前十對手（${lineup.selected.length}/10 · 各千萬局互博最佳化）</h2>
+        <h2>2. 當前前十熱門對手（${lineup.selected.length}/10）</h2>
         <ol class="opponent-preview-list">
           ${lineup.selected.map((x) => `
             <li>
@@ -1107,10 +1096,8 @@ export function renderBattle() {
     <section class="panel block-gap" id="battle-report-area">
       ${activeRun
         ? renderBattleReport(activeRun, lineup.selected, { canReplay: state.engineReady || state.fixture })
-        : `<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>點擊「開始勝率模擬」，以 ${esc(activeModelDisplay)} 執行 ${esc(activeModelProfile.exploreLabel)}探索與 ${esc(activeModelProfile.testLabel)}實測。</p></div>`}
+        : `<div class="empty-box is-dashed"><strong>尚無測試紀錄</strong><p>點選「開始勝率模擬」，測試此牌組對陣當前熱門牌組的實戰勝率。</p></div>`}
     </section>
-
-    ${renderTrainingBenchmarkSection()}
   `;
 }
 
@@ -1133,9 +1120,8 @@ export function renderSources() {
         <p class="desc">目前收錄卡牌：<b>${state.cardsMissing ? '0（尚未載入）' : state.cards.length}</b> 張。</p>
       </section>
       <section class="panel">
-        <h2>對戰引擎與模型</h2>
-        <p class="desc">規則引擎基於開源專案 <code>deckgym-core</code>（AGPL-3.0）。</p>
-        <p class="desc">目前模型：${state.modelInfo ? `${esc(state.modelInfo.version)}` : '籌備中'}。</p>
+        <h2>開源授權</h2>
+        <p class="desc">對戰規則引擎採用開源專案（AGPL-3.0 授權）。</p>
       </section>
       <section class="panel is-span2">
         <div class="section-head">
@@ -1177,11 +1163,6 @@ export function buildCardDetailModal(card) {
     </div>
   `).join('');
 
-  const priorInfo = state.cardPriors?.byCardId?.[card.id] || null;
-  const priorHtml = priorInfo
-    ? `<div class="modal-move"><div class="modal-move-head"><span class="tag-opp">千萬局訓練評估</span><strong>參戰 ${Number(priorInfo.g || 0).toLocaleString('zh-TW')} 局 · 決策考量 ${Number(priorInfo.ev || 0).toLocaleString('zh-TW')} 次</strong></div><p class="desc">單卡實測得分率 <b>${((priorInfo.sr || 0) * 100).toFixed(1)}%</b>（${priorInfo.w}勝 / ${priorInfo.d}和）· 戰術權重先驗 <code>${priorInfo.p >= 0 ? '+' : ''}${priorInfo.p}</code></p></div>`
-    : '';
-
   return `
     <div class="modal-card-layout">
       <div class="modal-card-preview">${renderCardFace(card, { showDeckAction: false, hiRes: true })}</div>
@@ -1189,7 +1170,6 @@ export function buildCardDetailModal(card) {
         <p class="desc">系列：<b>${esc(card.set)} ${esc(card.setName || '')}</b> · 卡包：${esc(card.pack || '—')} · 稀有度：${esc(card.rarity || '—')}</p>
         ${pokeTagsHtml}
         ${card.nameEn ? `<p class="desc">原名：${esc(card.nameEn)}</p>` : ''}
-        ${priorHtml}
         ${abHtml}
         ${attacksHtml}
         ${card.type === 'trainer' && card.effect ? `<div class="modal-move"><p>${esc(card.effect)}</p></div>` : ''}

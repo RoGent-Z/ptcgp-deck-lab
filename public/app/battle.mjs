@@ -768,85 +768,45 @@ export function buildStrategyLexiconModal({ lexicon, pairwiseDb = null, indexDoc
   `;
 }
 
-function formatPerfBadge(perf) {
-  if (!perf || !(perf.gamesPerSec > 0)) return '';
-  const rate = Math.round(perf.gamesPerSec).toLocaleString('zh-TW');
-  if (perf.mode === 'gpu') {
-    return `<span class="strategy-perf-pill">GPU 顯存加速 · ${rate} 局/秒</span>`;
-  }
-  return `<span class="strategy-perf-pill">${perf.workers || 1} 核記憶體並行 · ${rate} 局/秒</span>`;
-}
-
 function renderWinningStrategyBanner(run, summary) {
   const profile = resolveModelSimProfile(run);
   const ws = run.winningStrategy || null;
   const expCount = run.exploreStats?.completed ?? ws?.exploreTotal ?? 0;
   const expTarget = profile.exploreTotalGames;
-  const expPct = Math.min(100, (expCount / expTarget) * 100).toFixed(1);
-  const perfBadge = formatPerfBadge(run._livePerf);
+  const totalTarget = profile.totalBatchGames;
+  const testDone = summary?.total || 0;
 
-  if (!expCount && !ws) {
+  // 模擬完成後不顯示額外技術橫幅，直接呈現下方勝負報告
+  if (summary?.complete) return '';
+
+  if (expCount < expTarget) {
+    const expPct = Math.min(100, (expCount / Math.max(1, expTarget)) * 100).toFixed(1);
     return `
-      <div class="strategy-synth-banner is-pending">
+      <div class="strategy-synth-banner is-running">
         <div class="strategy-synth-head">
-          <strong>第 1 階段 · ${esc(profile.exploreLabel)}策略探索 → 第 2 階段 · ${esc(profile.testLabel)}實測</strong>
-          <span>待啟動</span>
+          <strong>正在分析對戰模擬（${expPct}%）…</strong>
+        </div>
+        <div class="progress-track is-slim">
+          <i style="width:${expPct}%"></i>
         </div>
       </div>
     `;
   }
 
-  const expWins = ws?.exploreWins ?? run.exploreStats?.wins ?? 0;
-  const expWr = expCount ? ((expWins / expCount) * 100).toFixed(2) + '%' : '—';
-  const testWrNum = summary?.equalWinRate;
-  const baseExpWrNum = ws?.exploreWinRate ?? (expCount ? expWins / expCount : null);
-  const gainPct = testWrNum != null && baseExpWrNum != null && summary.total > 0
-    ? (testWrNum - baseExpWrNum) * 100
-    : null;
-  const gainBadge = gainPct != null
-    ? `<span class="strategy-gain-pill ${gainPct >= 0 ? 'is-pos' : 'is-neg'}">實測 ${(testWrNum * 100).toFixed(2)}%（${gainPct >= 0 ? '+' : ''}${gainPct.toFixed(2)}%）</span>`
-    : perfBadge;
-
-  const topTags = (ws?.topAdjustments || []).map((a) =>
-    `<span class="card-prior-chip" title="基準 ${a.base} → 最佳化 ${a.synthesized}">
-      <b>${esc(a.labelZh)}</b> <small>${a.delta >= 0 ? '+' : ''}${a.delta.toFixed(3)}</small>
-    </span>`
-  ).join('');
-
-  const allRows = (ws?.allAdjustments || []).map((a) => `
-    <tr>
-      <td>${esc(a.labelZh)} <code>${esc(a.name)}</code></td>
-      <td class="num">${a.base.toFixed(4)}</td>
-      <td class="num"><strong>${a.synthesized.toFixed(4)}</strong></td>
-      <td class="num">${a.delta >= 0 ? '+' : ''}${a.delta.toFixed(4)}</td>
-    </tr>
-  `).join('');
-
-  return `
-    <div class="strategy-synth-banner ${expCount >= expTarget ? 'is-complete' : 'is-running'}">
-      <div class="strategy-synth-head">
-        <div>
-          <strong>第 1 階段 · 策略探索（${expCount.toLocaleString('zh-TW')} / ${expTarget.toLocaleString('zh-TW')} 局 · ${expPct}% · 勝率 ${expWr}）</strong>
+  if (testDone < totalTarget) {
+    const testPct = Math.min(100, (testDone / Math.max(1, totalTarget)) * 100).toFixed(1);
+    return `
+      <div class="strategy-synth-banner is-running">
+        <div class="strategy-synth-head">
+          <strong>正在彙整各對陣勝率（${testPct}%）…</strong>
         </div>
-        <div class="strategy-head-badges">${gainBadge}${gainPct != null && perfBadge ? perfBadge : ''}</div>
+        <div class="progress-track is-slim">
+          <i style="width:${testPct}%"></i>
+        </div>
       </div>
-      <div class="progress-track is-slim" aria-label="第一階段探索進度 ${expCount} / ${expTarget}">
-        <i style="width:${expPct}%"></i>
-      </div>
-      ${topTags ? `<div class="card-prior-chips">${topTags}</div>` : ''}
-      ${allRows ? `
-        <details class="strategy-weights-details">
-          <summary>展開 22 維獲勝策略權重對照表</summary>
-          <div class="bench-table-wrap">
-            <table class="bench-table">
-              <thead><tr><th>戰術特徵</th><th>基準權重</th><th>最佳化權重</th><th>變化量</th></tr></thead>
-              <tbody>${allRows}</tbody>
-            </table>
-          </div>
-        </details>
-      ` : ''}
-    </div>
-  `;
+    `;
+  }
+  return '';
 }
 
 function renderDeckCardPriorsBar(deck) {
@@ -992,21 +952,19 @@ export function renderBattleReport(run, lineup, options = {}) {
           <div class="battle-opp-head">
             <span class="rank-num">#${item.rank}</span>
             ${item.isSubstitute ? `<span class="pill-sub">遞補 #${item.rank}</span>` : ''}
-            ${oppEliteInfo ? `<span class="pill-sub" title="前十互博訓練 ${Number(oppEliteInfo.gamesTrained || 10000000).toLocaleString('zh-TW')} 局專屬最佳策略">千萬局最佳化</span>` : ''}
             <span class="tokens-inline">${tokens}</span>
             ${oppSprites}
             <strong class="battle-opp-name">${esc(opp.name)}</strong>
           </div>
           <div class="battle-opp-meta">
-            <span>佔比 ${metaShare}</span>
-            <span>賽事 ${metaRate}</span>
-            <span>${esc(oppExpText)}</span>
-            <span>先攻 ${agg1.wins.toLocaleString('zh-TW')}-${agg1.losses.toLocaleString('zh-TW')}-${agg1.draws.toLocaleString('zh-TW')} (${f1Pct})</span>
-            <span>後攻 ${agg2.wins.toLocaleString('zh-TW')}-${agg2.losses.toLocaleString('zh-TW')}-${agg2.draws.toLocaleString('zh-TW')} (${f2Pct})</span>
+            <span>環境佔比 ${metaShare}</span>
+            <span>賽事勝率 ${metaRate}</span>
+            <span>先攻 ${f1Pct}</span>
+            <span>後攻 ${f2Pct}</span>
           </div>
           <div class="battle-opp-actions">
-            ${!run.isDemo && options.canReplay ? `<button class="mini" type="button" data-action="run-single-opponent-deep" data-opp="${esc(opp.id)}">單組 ${esc(profile.exploreLabel)}探索 + ${esc(profile.testLabel)}實測</button>` : ''}
-            ${aggAll.total > 0 && options.canReplay ? `<button class="mini" type="button" data-action="replay-game" data-opp="${esc(opp.id)}" data-idx="0">檢視完整流程 (1–${aggAll.total.toLocaleString('zh-TW')}局)</button>` : ''}
+            ${!run.isDemo && options.canReplay ? `<button class="mini" type="button" data-action="run-single-opponent-deep" data-opp="${esc(opp.id)}">單獨深度測試</button>` : ''}
+            ${aggAll.total > 0 && options.canReplay ? `<button class="mini" type="button" data-action="replay-game" data-opp="${esc(opp.id)}" data-idx="0">檢視對局回放</button>` : ''}
           </div>
         </div>
         <div class="battle-strip-col">
@@ -1014,8 +972,7 @@ export function renderBattleReport(run, lineup, options = {}) {
         </div>
         <div class="battle-opp-stat">
           <strong class="num-lg">${winPct}</strong>
-          <span>${aggAll.wins.toLocaleString('zh-TW')}勝 ${aggAll.draws.toLocaleString('zh-TW')}和 ${aggAll.losses.toLocaleString('zh-TW')}敗 (${aggAll.total.toLocaleString('zh-TW')}/${gamesPerOpp.toLocaleString('zh-TW')}局)</span>
-          <small>95% 信賴區間 ${interval(aggAll.wins, aggAll.total)}</small>
+          <span>${aggAll.wins.toLocaleString('zh-TW')}勝 ${aggAll.draws.toLocaleString('zh-TW')}和 ${aggAll.losses.toLocaleString('zh-TW')}敗</span>
         </div>
       </div>
     `;
@@ -1023,16 +980,14 @@ export function renderBattleReport(run, lineup, options = {}) {
 
   return `
     <div class="report-shell ${run.isDemo ? 'is-demo' : ''}">
-      ${run.isDemo ? '<div class="status-note is-warn">預覽模式展示點陣（非真實引擎對局）。</div>' : ''}
+      ${run.isDemo ? '<div class="status-note is-warn">預覽模式展示點陣。</div>' : ''}
       ${subCount > 0 ? `<div class="status-note">含 ${subCount} 個遞補對手。</div>` : ''}
-      ${renderDeckCardPriorsBar(currentDeck)}
-      ${renderStrategyLexiconBanner(run, currentDeck, lineup)}
       ${renderWinningStrategyBanner(run, summary)}
       <div class="report-hero">
         <div class="report-kpi">
-          <span class="report-kpi-label">${summary.complete ? `第 2 階段 · 正式綜合勝率（${totalTarget.toLocaleString('zh-TW')} 局實測 · 對陣前十千萬局最佳化策略）` : `第 2 階段 · 實測中（${summary.total.toLocaleString('zh-TW')} / ${totalTarget.toLocaleString('zh-TW')} 局）`}</span>
+          <span class="report-kpi-label">${summary.complete ? '綜合實戰勝率' : '勝率模擬中…'}</span>
           <strong class="report-kpi-num">${overallRate}</strong>
-          <span class="report-kpi-ci">95% 信賴區間 ${summary.equalCI95} · 積分率 ${scoreRateText} · 模型 ${esc(profile.label || run.modelVersion || '—')}</span>
+          <span class="report-kpi-ci">共 ${summary.total.toLocaleString('zh-TW')} 局 · ${esc(profile.label || '')}</span>
         </div>
         <div class="report-totals">
           <div class="tot-box is-win"><b>${summary.wins.toLocaleString('zh-TW')}</b><span>勝</span></div>
@@ -1040,31 +995,29 @@ export function renderBattleReport(run, lineup, options = {}) {
           <div class="tot-box is-loss"><b>${summary.losses.toLocaleString('zh-TW')}</b><span>敗</span></div>
         </div>
       </div>
-      <div class="composite-kpi-grid" aria-label="模擬綜合勝率多維度指標">
+      <div class="composite-kpi-grid" aria-label="模擬綜合勝率指標">
         <div class="comp-card is-accent">
-          <span class="comp-label">環境加權綜合勝率</span>
+          <span class="comp-label">環境加權勝率</span>
           <strong class="comp-val">${weightedRate}</strong>
-          <small class="comp-sub">依前十占比（${(summary.top10TotalShare * 100).toFixed(1)}%）加權${weightedDeltaText ? ` · ${weightedDeltaText}` : ''}</small>
+          <small class="comp-sub">依前十熱門佔比（${(summary.top10TotalShare * 100).toFixed(1)}%）計算</small>
         </div>
         <div class="comp-card">
-          <span class="comp-label">先攻勝率（${halfTotalTarget.toLocaleString('zh-TW')} 局）</span>
+          <span class="comp-label">先攻勝率</span>
           <strong class="comp-val">${firstRate}</strong>
           <small class="comp-sub">${summary.first.wins.toLocaleString('zh-TW')}勝 ${summary.first.draws.toLocaleString('zh-TW')}和 ${summary.first.losses.toLocaleString('zh-TW')}敗</small>
         </div>
         <div class="comp-card">
-          <span class="comp-label">後攻勝率（${halfTotalTarget.toLocaleString('zh-TW')} 局）</span>
+          <span class="comp-label">後攻勝率</span>
           <strong class="comp-val">${secondRate}</strong>
           <small class="comp-sub">${summary.second.wins.toLocaleString('zh-TW')}勝 ${summary.second.draws.toLocaleString('zh-TW')}和 ${summary.second.losses.toLocaleString('zh-TW')}敗</small>
         </div>
         <div class="comp-card">
           <span class="comp-label">優劣勢與平均回合</span>
           <strong class="comp-val is-sm">${avgTurnsText}</strong>
-          <small class="comp-sub">最優：${esc(bestText)}<br>苦戰：${esc(worstText)}</small>
+          <small class="comp-sub">優勢：${esc(bestText)}<br>劣勢：${esc(worstText)}</small>
         </div>
       </div>
-      <div class="progress-track" aria-label="第二階段 ${totalTarget.toLocaleString('zh-TW')} 局實測進度 ${summary.total} / ${totalTarget}">
-        <i style="width:${Math.min(100, (summary.total / Math.max(1, totalTarget)) * 100).toFixed(1)}%"></i>
-      </div>
+      ${!summary.complete ? `<div class="progress-track"><i style="width:${Math.min(100, (summary.total / Math.max(1, totalTarget)) * 100).toFixed(1)}%"></i></div>` : ''}
       <div class="battle-matrix">${rowsHtml}</div>
     </div>
   `;
@@ -1575,8 +1528,8 @@ export function buildFullGameFlowModal({
 
   const renderStepRow = (s) => {
     const actorBadge = s.actor === 0
-      ? `<span class="flow-actor is-me">我方（${esc(profile.exploreLabel)}獲勝策略）</span>`
-      : `<span class="flow-actor is-opp">對手（${hasOppElite ? '千萬局互博最佳策略' : '環境策略'}）</span>`;
+      ? '<span class="flow-actor is-me">我方</span>'
+      : '<span class="flow-actor is-opp">對手</span>';
     const actionZh = formatFastSimStepZh(s, myCards20, oppCards20);
     const b0 = s.board?.[0];
     const b1 = s.board?.[1];
@@ -1611,7 +1564,7 @@ export function buildFullGameFlowModal({
       <div class="flow-turn-block">
         <div class="flow-turn-head">
           <strong>第 ${turnNum} 回合 · ${turnActor}</strong>
-          <span>共 ${tSteps.length} 步決策 · 回合結束比數 ${endPts}</span>
+          <span>共 ${tSteps.length} 步 · 回合結束比數 ${endPts}</span>
         </div>
         <ol class="flow-step-list">
           ${tSteps.map((s) => renderStepRow(s)).join('')}
@@ -1626,32 +1579,32 @@ export function buildFullGameFlowModal({
         <div class="flow-nav-info">
           <span class="flow-result-badge ${outcomeCls}">${esc(outcomeLabel)}（${esc(finalPts)}）</span>
           <span>第 <b>${(idx + 1).toLocaleString('zh-TW')}</b> / ${gamesPerOpp.toLocaleString('zh-TW')} 局 · ${esc(sideText)}</span>
-          <span>共 <b>${replayRes.turns || 0}</b> 回合 / <b>${steps.length}</b> 步完整動作 · 隨機種子 <code>${seedBase}</code></span>
+          <span>共 <b>${replayRes.turns || 0}</b> 回合</span>
         </div>
         <div class="flow-nav-btns">
-          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${prevIdx}">◀ 上一局（第 ${(prevIdx + 1).toLocaleString('zh-TW')} 局）</button>
-          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${nextIdx}">下一局（第 ${(nextIdx + 1).toLocaleString('zh-TW')} 局） ▶</button>
+          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${prevIdx}">◀ 上一局</button>
+          <button class="btn btn-outline" type="button" data-action="${replayAction}" data-opp="${esc(oppId)}" data-idx="${nextIdx}">下一局 ▶</button>
         </div>
       </div>
 
       <div class="flow-stage-card">
-        <h3>階段一 · 對局配置</h3>
-        <p class="sub">我方：<b>${esc(deck.name)}</b>（${esc(translateEnergyListZh(deck.energy))} · ${esc(profile.label)}獲勝策略）　對陣　對手：<b>${esc(opp.name)}</b>（${esc(translateEnergyListZh(opp.representative.energy))} · ${hasOppElite ? '千萬局互博最佳策略' : '環境策略'}）</p>
+        <h3>對局資訊</h3>
+        <p class="sub">我方：<b>${esc(deck.name)}</b>（${esc(translateEnergyListZh(deck.energy))}）　對陣　對手：<b>${esc(opp.name)}</b>（${esc(translateEnergyListZh(opp.representative.energy))}）</p>
       </div>
 
       <div class="flow-stage-card">
-        <h3>階段二 · 開局準備階段（第 0 回合：起始手牌放置戰鬥場與備戰區）</h3>
+        <h3>開局準備</h3>
         ${setupHtml}
       </div>
 
       <div class="flow-stage-card">
-        <h3>階段三 · 逐回合完整對戰流程（第 1 回合 → 第 ${replayRes.turns || 0} 回合 · 完整展開全部 ${combatSteps.length} 步）</h3>
-        <div class="flow-turns-scroll">${turnsHtml || '<p class="sub">無回合動作紀錄</p>'}</div>
+        <h3>逐回合對戰過程（第 1 回合 → 第 ${replayRes.turns || 0} 回合）</h3>
+        <div class="flow-turns-scroll">${turnsHtml || '<p class="sub">無回合紀錄</p>'}</div>
       </div>
 
       <div class="flow-stage-card is-end">
-        <h3>階段四 · 終局結算</h3>
-        <p class="sub">最終判定：<b>${esc(outcomeLabel)}</b> · 最終得分 <b>${esc(finalPts)}</b> · 全場累計執行 <b>${steps.length}</b> 個合法對局動作，已與點陣勝負結果完全一致重現。</p>
+        <h3>終局結果</h3>
+        <p class="sub"><b>${esc(outcomeLabel)}</b> · 最終得分 <b>${esc(finalPts)}</b></p>
       </div>
     </div>
   `;
@@ -1886,22 +1839,20 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simPro
   };
 }
 
-export function renderSingleOpponentDeepProgress({ opp, phase, done, total, wins, gamesPerSec, workers, mode, adapter, profile }) {
-  const p = resolveModelSimProfile(profile);
+export function renderSingleOpponentDeepProgress({ opp, phase, done, total }) {
   const pct = Math.min(100, (done / Math.max(1, total)) * 100).toFixed(1);
-  const isExplore = phase === 'explore';
-  const hwLabel = mode === 'gpu'
-    ? `GPU 顯存加速${adapter ? `（${esc(adapter)}）` : ''}`
-    : `${workers || 1} 核記憶體並行`;
+  const label = phase === 'explore'
+    ? `正在分析對陣「${esc(opp.name)}」…`
+    : `正在統計對陣「${esc(opp.name)}」勝率…`;
   return `
     <div class="flow-modal">
       <div class="strategy-synth-banner is-running">
         <div class="strategy-synth-head">
           <div>
-            <strong>${isExplore ? `第 1 階段 · 對陣「${esc(opp.name)}」${esc(p.exploreLabel)}探索` : `第 2 階段 · ${esc(p.testLabel)}實測`}</strong>
-            <p class="sub">${done.toLocaleString('zh-TW')} / ${total.toLocaleString('zh-TW')} 局（${pct}%）${isExplore && wins != null ? ` · 勝 ${wins.toLocaleString('zh-TW')}` : ''} · ${hwLabel} · <b>${Math.round(gamesPerSec || 0).toLocaleString('zh-TW')}</b> 局/秒</p>
+            <strong>${label}</strong>
+            <p class="sub">進度 ${pct}%</p>
           </div>
-          <button class="btn btn-outline" type="button" data-action="cancel-single-deep">中止</button>
+          <button class="btn btn-outline" type="button" data-action="cancel-single-deep">取消</button>
         </div>
         <div class="progress-track">
           <i style="width:${pct}%"></i>
@@ -1912,18 +1863,11 @@ export function renderSingleOpponentDeepProgress({ opp, phase, done, total, wins
 }
 
 export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
-  const { opp, deck, profile, baseWeights, oppEliteWeights, winningWeights, strategy, agg, seedPrefix, testSeedBase, myFastDeck, oppFastDeck } = deepResult;
+  const { opp, deck, profile, baseWeights, oppEliteWeights, winningWeights, agg, seedPrefix, testSeedBase, myFastDeck, oppFastDeck } = deepResult;
   const p = resolveModelSimProfile(profile);
   const testTotal = p.deepGamesPerOpponent;
   const halfTest = Math.floor(testTotal / 2);
   const testWr = agg.total ? ((agg.wins / agg.total) * 100).toFixed(2) + '%' : '—';
-  const expWr = ((strategy.exploreWinRate || 0) * 100).toFixed(2) + '%';
-  const deltaPct = agg.total
-    ? ((agg.wins / agg.total - (strategy.exploreWinRate || 0)) * 100).toFixed(2)
-    : '0.00';
-  const topChips = (strategy.topAdjustments || []).map((a) =>
-    `<span class="card-prior-chip"><b>${esc(a.labelZh)}</b> <small>${a.delta >= 0 ? '+' : ''}${a.delta.toFixed(3)}</small></span>`
-  ).join('');
 
   const pageSize = 500;
   const segStep = Math.max(pageSize, Math.floor(testTotal / 10));
@@ -1988,19 +1932,9 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
 
   return `
     <div class="flow-modal">
-      <div class="strategy-synth-banner is-complete">
-        <div class="strategy-synth-head">
-          <div>
-            <strong>第 1 階段 · ${esc(p.exploreLabel)}探索（勝率 ${expWr}）</strong>
-          </div>
-          <span class="strategy-gain-pill ${Number(deltaPct) >= 0 ? 'is-pos' : 'is-neg'}">${esc(p.testLabel)}實測 ${testWr}（${Number(deltaPct) >= 0 ? '+' : ''}${deltaPct}%）</span>
-        </div>
-        <div class="card-prior-chips">${topChips}</div>
-      </div>
-
       <div class="flow-stage-card">
-        <h3>第 2 階段 · ${testTotal.toLocaleString('zh-TW')} 局實測（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗 · ${testWr} · CI ${interval(agg.wins, agg.total)}）</h3>
-        <p class="sub">先攻 ${halfTest.toLocaleString('zh-TW')} 局 ${((agg.firstWins / Math.max(1, f1Total)) * 100).toFixed(2)}% · 後攻 ${halfTest.toLocaleString('zh-TW')} 局 ${((agg.secondWins / Math.max(1, f2Total)) * 100).toFixed(2)}% — 點擊任一格檢視回放：</p>
+        <h3>對陣「${esc(opp.name)}」勝率：${testWr}（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗）</h3>
+        <p class="sub">先攻勝率 ${((agg.firstWins / Math.max(1, f1Total)) * 100).toFixed(2)}% · 後攻勝率 ${((agg.secondWins / Math.max(1, f2Total)) * 100).toFixed(2)}% — 點擊任一格檢視回放：</p>
         <div class="deep-page-tabs">${pageTabs}</div>
         ${renderGameStrip(opp.id, pageEvents, true, pageSize, 'replay-single-deep', pageStart, pageSize, testTotal)}
       </div>

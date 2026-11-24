@@ -1039,7 +1039,7 @@ async function handleAction(el) {
         });
       }
       if (!uiState.battle.abortCtrl.signal.aborted) {
-        showNotice(`模擬完成：${profile.label}（${profile.exploreLabel}探索 → ${profile.testLabel}實測）`);
+        showNotice('勝率模擬已完成');
       }
     } catch (err) {
       showNotice(err?.message || '模擬中斷');
@@ -1063,18 +1063,12 @@ async function handleAction(el) {
     uiState.battle.deepAbortCtrl = ctrl;
 
     openModal(
-      `單組深度模擬（${profile.exploreLabel}探索 → ${profile.testLabel}實測）· 對陣 ${opp.name}`,
+      `單獨深度測試 · 對陣 ${opp.name}`,
       renderSingleOpponentDeepProgress({
         opp,
         phase: 'explore',
         done: 0,
-        total: profile.deepExploreGames,
-        wins: 0,
-        gamesPerSec: 0,
-        mode: state.gpuReady ? 'gpu' : 'cpu',
-        adapter: state.gpuAdapterName,
-        workers: Math.min(16, navigator.hardwareConcurrency || 4),
-        profile
+        total: profile.deepExploreGames
       }),
       { wide: true }
     );
@@ -1093,15 +1087,15 @@ async function handleAction(el) {
         }
       });
       if (!deepRes || ctrl.signal.aborted) {
-        showNotice('已中止單組深度模擬');
+        showNotice('已取消深度測試');
         return;
       }
       uiState.battle.lastSingleDeep = deepRes;
       const html = renderSingleOpponentDeepModal(deepRes, 0);
-      openModal(`單組深度模擬（${profile.exploreLabel}探索 → ${profile.testLabel}實測）· 對陣 ${opp.name}（第 1 / ${profile.deepGamesPerOpponent.toLocaleString('zh-TW')} 局）`, html, { wide: true });
-      showNotice(`已完成對「${opp.name}」的 ${profile.exploreLabel}探索 + ${profile.testLabel}實測`);
+      openModal(`對陣 ${opp.name} · 勝率分析與回放`, html, { wide: true });
+      showNotice(`已完成對「${opp.name}」的勝率測試`);
     } catch (err) {
-      showNotice(err?.message || '單組深度模擬失敗');
+      showNotice(err?.message || '深度測試失敗');
     }
     return;
   }
@@ -1148,11 +1142,10 @@ async function handleAction(el) {
 
   if (action === 'replay-single-deep') {
     const deepRes = uiState.battle.lastSingleDeep;
-    if (!deepRes) { showNotice('請先執行單組深度模擬'); return; }
-    const p = resolveModelSimProfile(deepRes.profile);
+    if (!deepRes) { showNotice('請先執行單獨深度測試'); return; }
     const idx = Number(el.dataset.idx) || 0;
     const html = renderSingleOpponentDeepModal(deepRes, idx);
-    openModal(`單組深度模擬（${p.exploreLabel}探索 → ${p.testLabel}實測）· 對陣 ${deepRes.opp.name}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${p.deepGamesPerOpponent.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+    openModal(`對陣 ${deepRes.opp.name} · 第 ${(idx + 1).toLocaleString('zh-TW')} 局回放`, html, { wide: true });
     return;
   }
 
@@ -1203,7 +1196,7 @@ async function handleAction(el) {
     const weights = getWeightsForVersion(run?.modelVersion);
     const p = resolveModelSimProfile(run);
     const html = buildFullGameFlowModal({ opp, oppId, idx, run, deck, weights });
-    openModal(`完整對局流程 · 對陣 ${opp?.name || oppId}（第 ${(idx + 1).toLocaleString('zh-TW')} / ${p.gamesPerOpponent.toLocaleString('zh-TW')} 局）`, html, { wide: true });
+    openModal(`對局回放 · 對陣 ${opp?.name || oppId}（第 ${(idx + 1).toLocaleString('zh-TW')} 局）`, html, { wide: true });
   }
 }
 
