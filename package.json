@@ -1,6 +1,6 @@
 {
   "name": "pocket-lab",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "private": true,
   "description": "Pocket Lab — 寶可夢卡牌 Pocket 牌組構築與賽事對戰研究站",
   "scripts": {

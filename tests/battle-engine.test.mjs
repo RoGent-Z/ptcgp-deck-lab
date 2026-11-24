@@ -377,14 +377,18 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
     const sc = cardById.get(stapleId);
     assert.equal(isCardCompatibleWithDeck(sc, optPrep.optCtx), true, `${stapleId} (${sc?.name}) must be compatible in Fire deck`);
   }
-  // Regression: Leaf (A1a-068) must be retreat reduction (effectVal=1), NOT free energy attach (effectVal=2);
-  // Wally (B4-153 滿充) must be energy attach (trainerKind=6), NOT fake draw (trainerKind=1)!
-  const encLeaf = encodeCardForFastSim(cardById.get("A1a-068"), 0);
+  // Regression: Leaf (A1a-068) must be retreat reduction (effectVal=1);
+  // Wally (B4-153 滿充) must be Stage-2 energy attach (trainerKind=6, effectVal=3);
+  // Flame Patch (B1-217 火補丁) must be discard-pile energy attach (trainerKind=6, effectVal=4)!
+  const encLeaf = encodeCardForFastSim(cardById.get("A1a-068"), 0, cardById);
   assert.equal(encLeaf.trainerKind, 6);
   assert.equal(encLeaf.effectVal, 1);
-  const encWally = encodeCardForFastSim(cardById.get("B4-153"), 0);
+  const encWally = encodeCardForFastSim(cardById.get("B4-153"), 0, cardById);
   assert.equal(encWally.trainerKind, 6);
-  assert.equal(encWally.effectVal, 2);
+  assert.equal(encWally.effectVal, 3);
+  const encPatch = encodeCardForFastSim(cardById.get("B1-217"), 0, cardById);
+  assert.equal(encPatch.trainerKind, 6);
+  assert.equal(encPatch.effectVal, 4);
 
   // Every candidate replacement deck MUST pass validateDeck() with zero issues!
   for (const sample of optPrep.candidates.slice(0, 30)) {
@@ -458,12 +462,57 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
   assert.equal(gtgModel.simProfile.roundGamesPerOpponent, 1000000);
   assert.equal(gtgModel.simProfile.convergenceTolerance, 0.001);
 
-  // Verify scaling/debuff Meta cards are NOT crippled in FastSim encoding
-  assert.ok(encodeCardForFastSim(cardById.get("A4a-020"), 0).atkDmg >= 80, "Suicune ex (20x bench) must not be crippled");
-  assert.ok(encodeCardForFastSim(cardById.get("B1-102"), 0).atkDmg >= 100, "Mega Altaria ex (40+ bench) must not be crippled");
-  assert.ok(encodeCardForFastSim(cardById.get("B3a-019"), 0).atkDmg >= 90, "Miraidon ex (20+ energy) must not be crippled");
-  assert.ok(encodeCardForFastSim(cardById.get("B1a-026"), 0).atkDmg >= 90, "Magnezone opponent-debuff must not halve its own damage");
-  assert.ok(encodeCardForFastSim(cardById.get("B2a-037"), 0).atkDmg >= 85, "Chien-Pao ex effect-text 130 snipe must be parsed");
+  // Verify scaling/debuff/mechanics Meta cards & evolution-family isolation in FastSim encoding
+  const { resolveEvolutionGroup } = await import("../public/app/core.mjs");
+  assert.ok(encodeCardForFastSim(cardById.get("A4a-020"), 0, cardById).atkDmg >= 80, "Suicune ex (20x bench) must not be crippled");
+  assert.ok(encodeCardForFastSim(cardById.get("B1-102"), 0, cardById).atkDmg >= 100, "Mega Altaria ex (40+ bench) must not be crippled");
+  assert.ok(encodeCardForFastSim(cardById.get("B3a-019"), 0, cardById).atkDmg >= 90, "Miraidon ex (20+ energy) must not be crippled");
+  assert.ok(encodeCardForFastSim(cardById.get("B1a-026"), 0, cardById).atkDmg >= 90, "Magnezone opponent-debuff must not halve its own damage");
+  assert.ok(encodeCardForFastSim(cardById.get("B2a-037"), 0, cardById).atkDmg >= 85, "Chien-Pao ex effect-text 130 snipe must be parsed");
+
+  const encCharmeleon = encodeCardForFastSim(cardById.get("B2b-008"), 0, cardById);
+  assert.ok((encCharmeleon.abFlags & 32) !== 0 && (encCharmeleon.abFlags & 4) === 0, "Charmeleon ignition must be one-time on-evolve, not repeatable every turn");
+  const encOricorio = encodeCardForFastSim(cardById.get("A3-066"), 0, cardById);
+  assert.equal(encOricorio.hp, 70);
+  assert.ok((encOricorio.abFlags & 64) !== 0, "Oricorio Safeguard must set ex-immunity bit 64");
+  const encDarkrai = encodeCardForFastSim(cardById.get("A2-110"), 0, cardById);
+  assert.ok((encDarkrai.abFlags & 16) !== 0 && (encDarkrai.abFlags & 4) === 0, "Darkrai ex trigger must snipe 20, NOT free energy ramp");
+  const encMegaZard = encodeCardForFastSim(cardById.get("B1a-014"), 0, cardById);
+  assert.equal(encMegaZard.atkDmg, 250);
+  assert.ok((encMegaZard.atkFlags & 32) !== 0, "Mega Charizard Y ex must apply real 50 self-recoil");
+  const encGiratina = encodeCardForFastSim(cardById.get("C1-101"), 0, cardById);
+  assert.equal(encGiratina.atkDmg, 140);
+  assert.ok((encGiratina.atkFlags & 128) !== 0, "Giratina ex must preserve 140 OHKO breakpoint and discard 2 energy");
+
+  // Evolution-family isolation prevents Dragonair from overwriting Giratina ex, and connects Frigibax -> Baxcalibur for Rare Candy
+  assert.equal(resolveEvolutionGroup(cardById.get("B4-117"), cardById), resolveEvolutionGroup(cardById.get("C1-098"), cardById));
+  assert.notEqual(resolveEvolutionGroup(cardById.get("B4-117"), cardById), resolveEvolutionGroup(cardById.get("C1-101"), cardById));
+  assert.equal(resolveEvolutionGroup(cardById.get("B2a-036"), cardById), resolveEvolutionGroup(cardById.get("B2a-034"), cardById));
+  assert.notEqual(resolveEvolutionGroup(cardById.get("B2b-008"), cardById), resolveEvolutionGroup(cardById.get("A4a-010"), cardById));
+
+  // Verify calibrated FastSim matchups: #1 must no longer crush #8 (Oricorio/Magnezone) or #9 (Giratina ex/Dragonair) at 90%+
+  const expandWithEvo = (rep) => {
+    const out = [];
+    for (const c of rep.cards) {
+      const enc = encodeCardForFastSim(cardById.get(c.id), 0, cardById);
+      for (let i = 0; i < c.count; i++) if (out.length < 20) out.push(enc);
+    }
+    return out;
+  };
+  const calVs8 = fastSim({
+    op: "test_chunk", opponent_id: top10[7].id,
+    deck: expandWithEvo(top10[0].representative), enemy: expandWithEvo(top10[7].representative),
+    weights: v3.weights, enemy_weights: v3.weights,
+    start_idx: 0, count: 600, total_per_opp: 600, seed_base: 8808
+  });
+  assert.ok(calVs8.wins / calVs8.completed < 0.55, `Calibrated #1 vs #8 (Oricorio/Magnezone) must be < 55%, got ${calVs8.wins}/${calVs8.completed}`);
+  const calVs9 = fastSim({
+    op: "test_chunk", opponent_id: top10[8].id,
+    deck: expandWithEvo(top10[0].representative), enemy: expandWithEvo(top10[8].representative),
+    weights: v3.weights, enemy_weights: v3.weights,
+    start_idx: 0, count: 600, total_per_opp: 600, seed_base: 8809
+  });
+  assert.ok(calVs9.wins / calVs9.completed < 0.72, `Calibrated #1 vs #9 (Giratina ex/Dragonair) must be < 72%, got ${calVs9.wins}/${calVs9.completed}`);
 
   const { runGtgDuelConvergence } = await import("../public/app/battle.mjs");
   const gtgTestRes = await runGtgDuelConvergence({

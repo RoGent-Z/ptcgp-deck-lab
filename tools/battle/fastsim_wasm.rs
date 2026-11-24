@@ -44,6 +44,7 @@ struct CompactCard {
     slot_id: i16,
     is_pokemon: u8,
     stage: u8,
+    evo_group: u16,
     type_code: u8,
     weak_code: u8,
     hp: i16,
@@ -103,11 +104,13 @@ fn read_deck(deck_slot: usize) -> [CompactCard; 20] {
         let base_c = deck_slot * 20;
         for i in 0..20 {
             let off = (base_c + i) * CARD_STRIDE;
+            let raw_stg = DECKS_BUF[off + 1];
             let atk_dmg = DECKS_BUF[off + 8] as i16;
             out[i] = CompactCard {
                 slot_id: DECKS_BUF[off + 13] as i16,
                 is_pokemon: DECKS_BUF[off] as u8,
-                stage: DECKS_BUF[off + 1] as u8,
+                stage: (raw_stg & 0xFF) as u8,
+                evo_group: ((raw_stg >> 8) & 0xFFFF) as u16,
                 type_code: DECKS_BUF[off + 2] as u8,
                 weak_code: DECKS_BUF[off + 3] as u8,
                 hp: DECKS_BUF[off + 4] as i16,
@@ -202,14 +205,15 @@ fn simulate_i32_impl<const RECORD: bool>(
             let j = (rng.next_u32() as usize) % (i + 1);
             libs[p].swap(i, j);
         }
+        // 起手抽牌從牌庫頂端（索引 19..15）抽出，確保至少 1 張基礎寶可夢位於起手 5 張內
         let mut basic_pos = 20usize;
-        for i in 0..20 {
+        for i in (0..20).rev() {
             if libs[p][i].is_pokemon == 1 && libs[p][i].stage == 0 {
                 basic_pos = i;
                 break;
             }
         }
-        if basic_pos < 20 && basic_pos >= 5 { libs[p].swap(0, basic_pos); }
+        if basic_pos < 15 { libs[p].swap(19, basic_pos); }
         for _ in 0..5 {
             lib_len[p] -= 1;
             hands[p][hand_len[p]] = libs[p][lib_len[p]];
@@ -249,7 +253,11 @@ fn simulate_i32_impl<const RECORD: bool>(
             idx += 1;
         }
         if !placed_active {
-            let fb = if p == 0 { d0[0] } else { d1[0] };
+            let deck_ref = if p == 0 { d0 } else { d1 };
+            let mut fb = deck_ref[0];
+            for k in 0..20 {
+                if deck_ref[k].is_pokemon == 1 { fb = deck_ref[k]; break; }
+            }
             board[p][0] = Slot { occ: true, card: fb, hp: fb.hp.max(60), max_hp: fb.hp.max(60), energy: 0, tool: 0, status: 0, turn_placed: 0 };
             if RECORD { push_replay_step(0, p, 1, fb.slot_id as i32, 0, 0, &points, &board, &hand_len, &lib_len); }
         }
@@ -303,13 +311,14 @@ fn simulate_i32_impl<const RECORD: bool>(
                 }
             }
 
-            // 2. Evolve
+            // 2. Evolve (嚴格校驗同進化家族 evo_group，禁止跨線吞噬 ex 核心)
             if turn >= 2 {
                 for hi in 0..hand_len[cur] {
                     let c = hands[cur][hi];
                     if c.is_pokemon == 1 && c.stage > 0 {
                         for s in 0..4 {
-                            if board[cur][s].occ && board[cur][s].card.stage + 1 == c.stage && board[cur][s].turn_placed < turn {
+                            let evo_ok = c.evo_group == 0 || board[cur][s].card.evo_group == 0 || board[cur][s].card.evo_group == c.evo_group;
+                            if board[cur][s].occ && board[cur][s].card.stage + 1 == c.stage && evo_ok && board[cur][s].turn_placed < turn {
                                 n_opts += 1;
                                 let p_shift = if s == 0 { c.power_q } else { c.power_q >> 1 };
                                 let sc = w[4] + ((p_shift * w[5]) >> 10) + ((c.bonus_q * 45) / 100);
@@ -323,10 +332,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                 }
             }
 
-            // 3. Abilities
+            // 3. Abilities (僅主動可發動特性 bits 2|4|8|16；不浪費回合在純被動或進化一次性特性上)
             if !ability_used {
                 for s in 0..4 {
-                    if board[cur][s].occ && board[cur][s].card.ab_flags != 0 {
+                    if board[cur][s].occ && (board[cur][s].card.ab_flags & 30) != 0 {
                         n_opts += 1;
                         let sn = if (board[cur][s].card.ab_flags & 16) != 0 { (w[21] * 35) / 100 } else { 0 };
                         let sc = w[6] + sn + ((board[cur][s].card.bonus_q * 35) / 100);
@@ -364,7 +373,40 @@ fn simulate_i32_impl<const RECORD: bool>(
                             if board[cur][0].tool != 0 { continue; }
                             sc += w[20]; f1 = 20; v1 = 1.0;
                         }
-                        6 => { sc += ((w[13] * 45) + (w[15] * 35)) / 100; f1 = 15; v1 = 0.5; }
+                        6 => {
+                            if c.effect_val == 99 {
+                                // 奇異糖果：必須回合 >= 2 且手牌有 2 階進化與場上同家族基礎目標才可使用
+                                if turn < 2 { continue; }
+                                let mut can_candy = false;
+                                for hi2 in 0..hand_len[cur] {
+                                    let ev = hands[cur][hi2];
+                                    if ev.is_pokemon == 1 && ev.stage == 2 {
+                                        for s in 0..4 {
+                                            let evo_ok = ev.evo_group == 0 || board[cur][s].card.evo_group == 0 || board[cur][s].card.evo_group == ev.evo_group;
+                                            if board[cur][s].occ && board[cur][s].card.stage == 0 && evo_ok && board[cur][s].turn_placed < turn {
+                                                can_candy = true;
+                                                break;
+                                            }
+                                        }
+                                        if can_candy { break; }
+                                    }
+                                }
+                                if !can_candy { continue; }
+                                sc += w[4] + ((w[13] * 45) + (w[15] * 35)) / 100; f1 = 4; v1 = 1.0;
+                            } else if c.effect_val == 3 {
+                                // 滿充等 2 階專屬充能：場上須有 2 階進化寶可夢
+                                let mut has_s2 = false;
+                                for s in 0..4 { if board[cur][s].occ && board[cur][s].card.stage == 2 { has_s2 = true; break; } }
+                                if !has_s2 { continue; }
+                                sc += ((w[13] * 45) + (w[15] * 35)) / 100; f1 = 15; v1 = 0.5;
+                            } else if c.effect_val == 4 {
+                                // 火補丁等棄牌區充能：限中後期或已有寶可夢倒下時可用
+                                if turn < 5 && points[foe] == 0 { continue; }
+                                sc += ((w[13] * 45) + (w[15] * 35)) / 100; f1 = 15; v1 = 0.5;
+                            } else {
+                                sc += ((w[13] * 45) + (w[15] * 35)) / 100; f1 = 15; v1 = 0.5;
+                            }
+                        }
                         7 => { sc += w[6]; f1 = 6; v1 = 0.8; }
                         _ => {}
                     }
@@ -395,13 +437,15 @@ fn simulate_i32_impl<const RECORD: bool>(
                 }
             }
 
-            // 6. Retreat
+            // 6. Retreat (面對防 ex 免疫如花舞鳥時，優先讓 ex 主力撤退換非 ex 攻擊手)
+            let active_ex_blocked = board[cur][0].occ && board[foe][0].occ && (board[foe][0].card.ab_flags & 64) != 0 && board[cur][0].card.prize >= 2;
             if !retreated && board[cur][0].occ && (board[cur][0].status & 4) == 0 && board[cur][0].energy >= board[cur][0].card.retreat {
                 let foe_dmg = if board[foe][0].occ { board[foe][0].card.atk_dmg } else { 0 };
                 for s in 1..4 {
                     if board[cur][s].occ {
                         n_opts += 1;
-                        let endg_b = board[cur][0].hp <= foe_dmg && board[cur][s].hp > board[cur][0].hp;
+                        let endg_b = (board[cur][0].hp <= foe_dmg && board[cur][s].hp > board[cur][0].hp)
+                            || (active_ex_blocked && board[cur][s].card.prize == 1);
                         let sc = w[17] + (if endg_b { w[18] } else { 0 });
                         if sc > best_score {
                             best_score = sc; best_kind = 6; best_a = s;
@@ -411,8 +455,8 @@ fn simulate_i32_impl<const RECORD: bool>(
                 }
             }
 
-            // 7. Attack
-            if turn >= 2 && board[cur][0].occ && (board[cur][0].status & 4) == 0 && board[cur][0].energy >= board[cur][0].card.atk_cost && board[cur][0].card.atk_dmg > 0 {
+            // 7. Attack (若對手具備防 ex 免疫且我方為 ex，招式傷害無效)
+            if turn >= 2 && board[cur][0].occ && !active_ex_blocked && (board[cur][0].status & 4) == 0 && board[cur][0].energy >= board[cur][0].card.atk_cost && board[cur][0].card.atk_dmg > 0 {
                 n_opts += 1;
                 let atk = board[cur][0].card;
                 let weak_bonus = if board[foe][0].occ && board[foe][0].card.weak_code == atk.type_code { 20 } else { 0 };
@@ -454,6 +498,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                     board[cur][best_b].hp = (board[cur][best_b].max_hp - dmg_taken).max(10);
                     board[cur][best_b].status = 0;
                     board[cur][best_b].turn_placed = turn;
+                    // 一次性進化充能特性（如火恐龍「點火」）：僅在進化當下觸發 1 次
+                    if (c.ab_flags & 32) != 0 && board[cur][0].occ {
+                        board[cur][0].energy = board[cur][0].energy.saturating_add(1);
+                    }
                     hand_len[cur] -= 1;
                     hands[cur][best_a] = hands[cur][hand_len[cur]];
                     if RECORD { push_replay_step(turn, cur, 5, c.slot_id as i32, best_b as i32, 0, &points, &board, &hand_len, &lib_len); }
@@ -501,11 +549,13 @@ fn simulate_i32_impl<const RECORD: bool>(
                         }
                         6 => {
                             if c.effect_val == 99 && turn >= 2 {
+                                let mut done_candy = false;
                                 for hi2 in 0..hand_len[cur] {
                                     if hands[cur][hi2].is_pokemon == 1 && hands[cur][hi2].stage == 2 {
+                                        let ev = hands[cur][hi2];
                                         for s in 0..4 {
-                                            if board[cur][s].occ && board[cur][s].card.stage == 0 && board[cur][s].turn_placed < turn {
-                                                let ev = hands[cur][hi2];
+                                            let evo_ok = ev.evo_group == 0 || board[cur][s].card.evo_group == 0 || board[cur][s].card.evo_group == ev.evo_group;
+                                            if board[cur][s].occ && board[cur][s].card.stage == 0 && evo_ok && board[cur][s].turn_placed < turn {
                                                 let taken = (board[cur][s].max_hp - board[cur][s].hp).max(0);
                                                 board[cur][s].card = ev;
                                                 board[cur][s].max_hp = ev.hp + if board[cur][s].tool == 1 { 20 } else { 0 };
@@ -514,13 +564,25 @@ fn simulate_i32_impl<const RECORD: bool>(
                                                 board[cur][s].turn_placed = turn;
                                                 hand_len[cur] -= 1;
                                                 hands[cur][hi2] = hands[cur][hand_len[cur]];
+                                                done_candy = true;
                                                 break;
                                             }
                                         }
+                                        if done_candy { break; }
+                                    }
+                                }
+                            } else if c.effect_val == 3 {
+                                for s in 0..4 {
+                                    if board[cur][s].occ && board[cur][s].card.stage == 2 {
+                                        board[cur][s].energy = board[cur][s].energy.saturating_add(1);
                                         break;
                                     }
                                 }
-                            } else if c.effect_val >= 2 {
+                            } else if c.effect_val == 4 {
+                                if turn >= 5 || points[foe] > 0 {
+                                    board[cur][0].energy = board[cur][0].energy.saturating_add(1);
+                                }
+                            } else if c.effect_val == 2 {
                                 board[cur][0].energy = board[cur][0].energy.saturating_add(1);
                             }
                         }
@@ -598,6 +660,9 @@ fn simulate_i32_impl<const RECORD: bool>(
                         if (atk.atk_flags & 4) != 0 { board[foe][0].status |= 1; }
                         if (atk.atk_flags & 8) != 0 { board[cur][0].hp = (board[cur][0].hp + 20).min(board[cur][0].max_hp); }
                         if (atk.atk_flags & 16) != 0 { board[cur][0].energy = board[cur][0].energy.saturating_add(1); }
+                        if (atk.atk_flags & 32) != 0 { board[cur][0].hp -= 50; }
+                        if (atk.atk_flags & 128) != 0 { board[cur][0].energy = board[cur][0].energy.saturating_sub(2); }
+                        else if (atk.atk_flags & 64) != 0 { board[cur][0].energy = board[cur][0].energy.saturating_sub(1); }
 
                         if board[foe][0].hp <= 0 {
                             ko_flag = 1;
@@ -927,11 +992,13 @@ pub extern "C" fn run_optimize_batch(
     unsafe {
         for ci in 0..nc {
             let off = ci * CARD_STRIDE;
+            let raw_stg = CAND_CARDS_BUF[off + 1];
             let atk_dmg = CAND_CARDS_BUF[off + 8] as i16;
             d0[19] = CompactCard {
                 slot_id: 19,
                 is_pokemon: CAND_CARDS_BUF[off] as u8,
-                stage: CAND_CARDS_BUF[off + 1] as u8,
+                stage: (raw_stg & 0xFF) as u8,
+                evo_group: ((raw_stg >> 8) & 0xFFFF) as u16,
                 type_code: CAND_CARDS_BUF[off + 2] as u8,
                 weak_code: CAND_CARDS_BUF[off + 3] as u8,
                 hp: CAND_CARDS_BUF[off + 4] as i16,

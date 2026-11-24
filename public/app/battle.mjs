@@ -412,7 +412,7 @@ function expandDeckForFastSim(deckLike, cardBonusById = {}) {
   for (const item of deckLike?.cards || []) {
     const card = state.cardsById?.get ? state.cardsById.get(item.id) : null;
     const bonus = Number(cardBonusById[item.id] ?? 0);
-    const enc = encodeCardForFastSim(card, bonus);
+    const enc = encodeCardForFastSim(card, bonus, state.cardsById);
     const cnt = Math.max(1, Number(item.count || 1));
     for (let k = 0; k < cnt; k++) {
       if (out.length < 20) out.push(enc);
@@ -1875,6 +1875,12 @@ export async function runGtgDuelConvergence({
       if (srBest > chosenSr) {
         chosenW = blendedBestW;
         chosenSr = srBest;
+      }
+      const srPureBest = await scoreSideAgainstFrozen(sideDeck, foeDeck, cands[bestCid], frozenFoeW, checkSeed);
+      if (srPureBest == null || signal?.aborted) return null;
+      if (srPureBest > chosenSr) {
+        chosenW = cands[bestCid];
+        chosenSr = srPureBest;
       }
     }
     return { weights: chosenW, improved: chosenSr > srBase, gain: chosenSr - srBase };

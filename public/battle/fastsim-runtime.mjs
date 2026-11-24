@@ -33,7 +33,7 @@ export async function instantiateFastSim(wasmSource) {
       const c = compactCards[i] || compactCards[0];
       const off = (baseCard + i) * CARD_STRIDE;
       decks[off] = c.isPokemon | 0;
-      decks[off + 1] = c.stage | 0;
+      decks[off + 1] = (c.stage & 0xff) | (((c.evoGroup || 0) & 0xffff) << 8);
       decks[off + 2] = c.typeCode | 0;
       decks[off + 3] = c.weakCode | 0;
       decks[off + 4] = c.hp | 0;
@@ -272,7 +272,7 @@ export async function instantiateFastSim(wasmSource) {
         const c = candCards[i];
         const o = i * CARD_STRIDE;
         cBuf[o] = c.isPokemon | 0;
-        cBuf[o + 1] = c.stage | 0;
+        cBuf[o + 1] = (c.stage & 0xff) | (((c.evoGroup || 0) & 0xffff) << 8);
         cBuf[o + 2] = c.typeCode | 0;
         cBuf[o + 3] = c.weakCode | 0;
         cBuf[o + 4] = c.hp | 0;

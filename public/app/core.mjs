@@ -633,7 +633,60 @@ const FASTSIM_TYPE_CODES = {
   fighting: 5, darkness: 6, metal: 7, dragon: 8, colorless: 9
 };
 
-// 依實卡招式文本精準估算期望傷害（正確處理 × 倍率、+ 加傷、純效果狙擊、對手反面干擾與棄能/反傷代價）
+const EVO_FAMILY_MAP_CACHE = new WeakMap();
+
+function normEvoKey(name) {
+  return String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function getEvoParentMap(cardsById) {
+  if (!cardsById || typeof cardsById.values !== 'function') return null;
+  let map = EVO_FAMILY_MAP_CACHE.get(cardsById);
+  if (map) return map;
+  map = new Map();
+  for (const c of cardsById.values()) {
+    if (!c || (c.type !== 'pokemon' && c.subtype !== 'fossil')) continue;
+    const from = normEvoKey(c.evolvesFrom);
+    if (!from) continue;
+    const keys = [normEvoKey(c.limitName), normEvoKey(c.nameEn), normEvoKey(c.name)];
+    for (const k of keys) {
+      if (k && !map.has(k)) map.set(k, from);
+    }
+  }
+  EVO_FAMILY_MAP_CACHE.set(cardsById, map);
+  return map;
+}
+
+export function resolveEvolutionGroup(card, cardsById = null) {
+  if (!card) return 0;
+  const isFossil = card.subtype === 'fossil' || /化石|Fossil/i.test(`${card.name || ''} ${card.nameEn || ''}`);
+  if (card.type !== 'pokemon' && !isFossil) return 0;
+  const stage = card.stage === 'stage2' ? 2 : card.stage === 'stage1' ? 1 : 0;
+  const parentMap = getEvoParentMap(cardsById);
+  let cur = normEvoKey(card.limitName || card.nameEn || card.name);
+  if (stage > 0 && card.evolvesFrom) {
+    cur = normEvoKey(card.evolvesFrom);
+    if (parentMap) {
+      for (let hop = 0; hop < 4; hop++) {
+        const next = parentMap.get(cur);
+        if (!next || next === cur) break;
+        cur = next;
+      }
+    } else if (stage === 2) {
+      // 無全卡圖鑑上下文時，2階進化無法回溯至基礎名，退回兼容模式 0
+      return 0;
+    }
+  }
+  if (!cur) return 0;
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < cur.length; i++) {
+    h ^= cur.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return (h % 65534) + 1;
+}
+
+// 依實卡招式文本精準估算期望傷害（正確處理 × 倍率、+ 加傷、純效果狙擊、對手反面干擾與棄能/反傷機制旗標）
 export function computeExpectedAttackDamage(atk) {
   const rawDmgStr = String(atk?.damage || '0').trim();
   let dmgNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
@@ -699,27 +752,32 @@ export function computeExpectedAttackDamage(atk) {
     dmgNum = Math.round(dmgNum * 1.15);
   }
 
-  // 5. 冷卻、棄能與反傷代價
+  // 5. 冷卻、真實棄能與真實自傷（保留滿額傷害斷點，並以引擎旗標在對局內真實扣血/棄能）
   if (/下個自己的回合.*無法使用|can't attack during your next turn/i.test(eff)) {
     dmgNum = Math.round(dmgNum * 0.72);
   }
+  let discardEnergy = 0;
   const discardMatch = eff.match(/將這隻寶可夢身上的(?:所有|隨機\s*(\d+)?\s*個|(\d+)個).*能量丟棄|discard\s+(\d+|all)\s+.*energy/i);
   if (discardMatch) {
-    const nDisc = /所有|all/i.test(discardMatch[0]) ? 3 : Math.max(1, Number(discardMatch[1] || discardMatch[2] || discardMatch[3] || 1));
-    dmgNum = Math.round(dmgNum * Math.max(0.72, 1 - 0.08 * nDisc));
+    discardEnergy = /所有|all/i.test(discardMatch[0]) ? 2 : Math.min(2, Math.max(1, Number(discardMatch[1] || discardMatch[2] || discardMatch[3] || 1)));
   }
+  let heavyRecoil = false;
   const recoilMatch = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
   if (recoilMatch) {
     const recoil = Number(recoilMatch[1] || recoilMatch[2] || 0);
-    dmgNum = Math.max(10, dmgNum - Math.round(recoil * 0.6));
+    if (recoil >= 40) {
+      heavyRecoil = true; // 如超級噴火龍Yex 250 傷自傷 50：引擎實戰真實自扣 50 HP
+    } else if (recoil >= 10) {
+      dmgNum = Math.max(10, dmgNum - Math.round(recoil * 0.4));
+    }
   }
-  return { dmgNum, isOpponentMissDebuff };
+  return { dmgNum, isOpponentMissDebuff, discardEnergy, heavyRecoil };
 }
 
-export function encodeCardForFastSim(card, strategyBonus = 0) {
+export function encodeCardForFastSim(card, strategyBonus = 0, cardsById = null) {
   if (!card) {
     return {
-      isPokemon: 1, stage: 0, typeCode: 9, weakCode: 255, hp: 60, retreat: 1,
+      isPokemon: 1, stage: 0, evoGroup: 0, typeCode: 9, weakCode: 255, hp: 60, retreat: 1,
       prize: 1, atkCost: 1, atkDmg: 20, atkFlags: 0, abFlags: 0,
       trainerKind: 0, effectVal: 0, strategyBonus: Number(strategyBonus || 0)
     };
@@ -728,10 +786,11 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
   const isFossil = card.subtype === 'fossil' || /化石|Fossil/i.test(name);
   const isPokemon = card.type === 'pokemon' || isFossil ? 1 : 0;
   const stage = card.stage === 'stage2' ? 2 : card.stage === 'stage1' ? 1 : 0;
+  const evoGroup = isPokemon ? resolveEvolutionGroup(card, cardsById) : 0;
   const primaryType = (card.types?.[0] || 'colorless').toLowerCase();
   const typeCode = FASTSIM_TYPE_CODES[primaryType] ?? 9;
   const weakCode = card.weakness ? (FASTSIM_TYPE_CODES[String(card.weakness).toLowerCase()] ?? 255) : 255;
-  let hp = isFossil ? 40 : (Number(card.hp) || (isPokemon ? 60 : 0));
+  const hp = isFossil ? 40 : (Number(card.hp) || (isPokemon ? 60 : 0));
   const retreat = isFossil ? 4 : Math.min(4, Math.max(0, Number(card.retreat ?? 1)));
   const cats = card.type === 'pokemon' ? (card._pokeCats || getPokemonCategories(card)) : [];
   const isMega = cats.includes('mega');
@@ -740,21 +799,27 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
 
   let bestDmg = 0;
   let bestCost = 1;
-  let atkFlags = 0;
+  let bestAtkFlags = 0;
   for (const atk of card.attacks || []) {
     const cost = Math.max(0, Math.min(5, (atk.cost || []).length));
     const eff = String(atk.effect || '');
-    const { dmgNum, isOpponentMissDebuff } = computeExpectedAttackDamage(atk);
+    const { dmgNum, isOpponentMissDebuff, discardEnergy, heavyRecoil } = computeExpectedAttackDamage(atk);
     const effCost = Math.max(1, cost);
+    let flags = 0;
+    if (eff.length > 0) flags |= 1;
+    if (/備戰|bench|對手的(?:1隻|任1隻)寶可夢受到/i.test(eff) && /傷害|damage/i.test(eff)) flags |= 2;
+    if (isOpponentMissDebuff || /中毒|灼傷|睡眠|麻痺|混亂|poison|burn|asleep|paralyz|confus/i.test(eff)) flags |= 4;
+    if (/恢復|heal/i.test(eff)) flags |= 8;
+    if (/能量區.*附|附於.*能量|attach.*energy/i.test(eff)) flags |= 16;
+    if (heavyRecoil) flags |= 32;
+    if (discardEnergy >= 2) flags |= 128;
+    else if (discardEnergy === 1) flags |= 64;
+
     if (dmgNum > bestDmg || (dmgNum === bestDmg && effCost < bestCost)) {
       bestDmg = dmgNum;
       bestCost = effCost;
+      bestAtkFlags = flags;
     }
-    if (eff.length > 0) atkFlags |= 1;
-    if (/備戰|bench|對手的(?:1隻|任1隻)寶可夢受到/i.test(eff) && /傷害|damage/i.test(eff)) atkFlags |= 2;
-    if (isOpponentMissDebuff || /中毒|灼傷|睡眠|麻痺|混亂|poison|burn|asleep|paralyz|confus/i.test(eff)) atkFlags |= 4;
-    if (/恢復|heal/i.test(eff)) atkFlags |= 8;
-    if (/能量區.*附|附於.*能量|attach.*energy/i.test(eff)) atkFlags |= 16;
   }
   if (isPokemon && bestDmg === 0) bestDmg = isFossil ? 0 : 20;
 
@@ -762,14 +827,18 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
   for (const ab of card.abilities || []) {
     abFlags |= 1;
     const eff = String(ab.effect || '');
+    const isOneTimeEvolve = /完成進化時|當從手牌使出這張卡.*進化|when you play this Pok[eé]mon from your hand to evolve/i.test(eff);
     if (/抽.*張|draw/i.test(eff)) abFlags |= 2;
-    if (/能量區|附於|轉移.*能量|attach.*energy|move.*energy/i.test(eff)) abFlags |= 4;
+    const isEnergyTriggerOnly = /每次從自己的能量區將.*能量附於.*時|whenever you attach.*energy.*from your energy zone/i.test(eff);
+    if (!isEnergyTriggerOnly && /(?:從自己的(?:能量區|棄牌區)[^。]*能量[^。]*附於|轉移[^。]*能量|attach.*energy.*from|move.*energy)/i.test(eff)) {
+      if (isOneTimeEvolve) abFlags |= 32; // 僅進化當下觸發 1 次（如火恐龍「點火」）
+      else abFlags |= 4; // 每回合可發動 1 次（如三合一磁怪、哈克龍）
+    }
     if (/恢復|heal/i.test(eff)) abFlags |= 8;
     if (/傷害|damage/i.test(eff) && !/不會受到/.test(eff)) abFlags |= 16;
-    // 防 ex 免疫特性（如花舞鳥「神祕守護」）：在高速引擎中以高耐久坦度等效呈現對 ex 隊的拖延壓制
+    // 防 ex 免疫特性（如花舞鳥「神祕守護」）：引擎真實判定寶可夢 ex 攻擊無效
     if (/不會受到.*寶可夢ex.*招式的傷害|prevent all damage done to this Pok[eé]mon by attacks from.*Pok[eé]mon ex/i.test(eff)) {
-      hp = Math.round(hp * 1.9);
-      abFlags |= 8;
+      abFlags |= 64;
     }
   }
 
@@ -790,7 +859,11 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
         : 10;
     } else if (/奇異糖果|神奇糖果|Rare Candy/i.test(eff)) {
       trainerKind = 6; effectVal = 99;
-    } else if (/能量區.*附於|棄牌區.*能量附於|改附於.*能量|火補丁|滿充|小霞|小剛|小光|電次|卡奇|梅麗莎|Flame Patch|Misty|Brock|Dawn|Volkner/i.test(eff)) {
+    } else if (/附於2階進化|2階進化寶可夢.*能量|滿充/i.test(eff)) {
+      trainerKind = 6; effectVal = 3; // 限場上有 2 階進化寶可夢時使用
+    } else if (/棄牌區.*能量附於|火補丁|電次|Flame Patch|Volkner/i.test(eff)) {
+      trainerKind = 6; effectVal = 4; // 限棄牌區有能量（中後期或有寶可夢倒下）時使用
+    } else if (/能量區.*附於|改附於.*能量|小霞|小剛|小光|卡奇|梅麗莎|Misty|Brock|Dawn/i.test(eff)) {
       trainerKind = 6; effectVal = 2;
     } else if (/撤退所需的能量減少|撤退費用減少|速度強化|葉子|X Speed|Leaf/i.test(eff)) {
       trainerKind = 6; effectVal = 1;
@@ -813,8 +886,8 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
   }
 
   return {
-    isPokemon, stage, typeCode, weakCode, hp, retreat, prize,
-    atkCost: bestCost, atkDmg: bestDmg, atkFlags, abFlags,
+    isPokemon, stage, evoGroup, typeCode, weakCode, hp, retreat, prize,
+    atkCost: bestCost, atkDmg: bestDmg, atkFlags: bestAtkFlags, abFlags,
     trainerKind, effectVal, strategyBonus: Number(strategyBonus || 0)
   };
 }
@@ -1700,7 +1773,7 @@ export function isCardCompatibleWithDeck(card, ctx) {
 }
 
 export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
-  const base = encodeCardForFastSim(card, strategyBonus);
+  const base = encodeCardForFastSim(card, strategyBonus, ctx?.cardsById || null);
   if (!card || !ctx) return base;
 
   const { deckEnergySet } = ctx;
@@ -1874,14 +1947,15 @@ export function buildLegalReplacementCandidates({
     hasTool,
     hasStadium,
     hasLowHpBasic,
-    hasRareCandyTarget
+    hasRareCandyTarget,
+    cardsById
   };
 
   // Build fixed 19-card base deck array for FastSim / WebGPU
   const baseCards19 = [];
   for (const entry of remainingEntries) {
     const card = cardsById.get(entry.id);
-    const enc = encodeCardForFastSim(card, Number(cardBonusById[entry.id] || 0));
+    const enc = encodeCardForFastSim(card, Number(cardBonusById[entry.id] || 0), cardsById);
     for (let k = 0; k < entry.count; k++) {
       if (baseCards19.length < 19) baseCards19.push(enc);
     }

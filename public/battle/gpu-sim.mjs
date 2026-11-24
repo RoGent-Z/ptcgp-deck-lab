@@ -30,6 +30,7 @@ struct Params {
 struct Card {
   is_pokemon: i32,
   stage: i32,
+  evo_group: i32,
   type_code: i32,
   weak_code: i32,
   hp: i32,
@@ -67,9 +68,11 @@ var<workgroup> wg_w1: array<i32, 22>;
 
 fn load_card_vram(deck_slot: u32, idx: u32) -> Card {
   let o = (deck_slot * 20u + idx) * CARD_STRIDE;
+  let raw_stg = decks_buf[o + 1u];
   var c: Card;
   c.is_pokemon = decks_buf[o];
-  c.stage = decks_buf[o + 1u];
+  c.stage = raw_stg & 255;
+  c.evo_group = (raw_stg >> 8u) & 65535;
   c.type_code = decks_buf[o + 2u];
   c.weak_code = decks_buf[o + 3u];
   c.hp = decks_buf[o + 4u];
@@ -130,17 +133,18 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
   }
   var points = array<i32, 2>(0, 0);
 
-  // Setup player 0
+  // Setup player 0 (draws from top indices 19..15; ensure at least 1 Basic in opening 5)
   for (var i = 19u; i >= 1u; i = i - 1u) {
     let j = rng_next(&rng) % (i + 1u);
     let tmp = lib0[i]; lib0[i] = lib0[j]; lib0[j] = tmp;
   }
   var bp0 = 20u;
-  for (var i = 0u; i < 20u; i = i + 1u) {
+  for (var ii = 0u; ii < 20u; ii = ii + 1u) {
+    let i = 19u - ii;
     let c = wg_cards[lib0[i]];
     if (c.is_pokemon == 1 && c.stage == 0) { bp0 = i; break; }
   }
-  if (bp0 < 20u && bp0 >= 5u) { let t = lib0[0]; lib0[0] = lib0[bp0]; lib0[bp0] = t; }
+  if (bp0 < 15u) { let t = lib0[19u]; lib0[19u] = lib0[bp0]; lib0[bp0] = t; }
   for (var i = 0u; i < 5u; i = i + 1u) {
     lib_len[0] = lib_len[0] - 1u;
     hand0[hand_len[0]] = lib0[lib_len[0]];
@@ -174,21 +178,24 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
     idx0 = idx0 + 1u;
   }
   if (!pa0) {
-    let fb = wg_cards[0u];
-    b0[0] = Slot(1, 0u, max(60, fb.hp), max(60, fb.hp), 0, 0, 0, 0);
+    var fbi0 = 0u;
+    for (var k = 0u; k < 20u; k = k + 1u) { if (wg_cards[k].is_pokemon == 1) { fbi0 = k; break; } }
+    let fb = wg_cards[fbi0];
+    b0[0] = Slot(1, fbi0, max(60, fb.hp), max(60, fb.hp), 0, 0, 0, 0);
   }
 
-  // Setup player 1
+  // Setup player 1 (draws from top indices 19..15; ensure at least 1 Basic in opening 5)
   for (var i = 19u; i >= 1u; i = i - 1u) {
     let j = rng_next(&rng) % (i + 1u);
     let tmp = lib1[i]; lib1[i] = lib1[j]; lib1[j] = tmp;
   }
   var bp1 = 20u;
-  for (var i = 0u; i < 20u; i = i + 1u) {
+  for (var ii = 0u; ii < 20u; ii = ii + 1u) {
+    let i = 19u - ii;
     let c = wg_cards[lib1[i]];
     if (c.is_pokemon == 1 && c.stage == 0) { bp1 = i; break; }
   }
-  if (bp1 < 20u && bp1 >= 5u) { let t = lib1[0]; lib1[0] = lib1[bp1]; lib1[bp1] = t; }
+  if (bp1 < 15u) { let t = lib1[19u]; lib1[19u] = lib1[bp1]; lib1[bp1] = t; }
   for (var i = 0u; i < 5u; i = i + 1u) {
     lib_len[1] = lib_len[1] - 1u;
     hand1[hand_len[1]] = lib1[lib_len[1]];
@@ -222,8 +229,10 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
     idx1 = idx1 + 1u;
   }
   if (!pa1) {
-    let fb = wg_cards[20u];
-    b1[0] = Slot(1, 20u, max(60, fb.hp), max(60, fb.hp), 0, 0, 0, 0);
+    var fbi1 = 20u;
+    for (var k = 20u; k < 40u; k = k + 1u) { if (wg_cards[k].is_pokemon == 1) { fbi1 = k; break; } }
+    let fb = wg_cards[fbi1];
+    b1[0] = Slot(1, fbi1, max(60, fb.hp), max(60, fb.hp), 0, 0, 0, 0);
   }
 
   var cur = first_player;
@@ -273,28 +282,32 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
         }
       }
 
-      // 2. Evolve
+      // 2. Evolve (strict evolution-family matching)
       if (turn >= 2u) {
         for (var hi = 0u; hi < my_hl; hi = hi + 1u) {
           let c = wg_cards[my_h[hi]];
           if (c.is_pokemon == 1 && c.stage > 0) {
             for (var s = 0u; s < 4u; s = s + 1u) {
-              if (my_b[s].occ == 1 && wg_cards[my_b[s].ci].stage + 1 == c.stage && my_b[s].turn_placed < i32(turn)) {
-                let ps = select(c.power_q >> 1u, c.power_q, s == 0u);
-                let sc = get_w(cur, 4u) + ((ps * get_w(cur, 5u)) >> 10u) + ((c.bonus_q * 45) / 100);
-                if (sc > best_score) { best_score = sc; best_kind = 2u; best_a = hi; best_b = s; }
+              if (my_b[s].occ == 1) {
+                let base_c = wg_cards[my_b[s].ci];
+                let evo_ok = (c.evo_group == 0) || (base_c.evo_group == 0) || (base_c.evo_group == c.evo_group);
+                if (base_c.stage + 1 == c.stage && evo_ok && my_b[s].turn_placed < i32(turn)) {
+                  let ps = select(c.power_q >> 1u, c.power_q, s == 0u);
+                  let sc = get_w(cur, 4u) + ((ps * get_w(cur, 5u)) >> 10u) + ((c.bonus_q * 45) / 100);
+                  if (sc > best_score) { best_score = sc; best_kind = 2u; best_a = hi; best_b = s; }
+                }
               }
             }
           }
         }
       }
 
-      // 3. Abilities
+      // 3. Abilities (repeatable active abilities bits 2|4|8|16 only)
       if (!ability_used) {
         for (var s = 0u; s < 4u; s = s + 1u) {
           if (my_b[s].occ == 1) {
             let scard = wg_cards[my_b[s].ci];
-            if (scard.ab_flags != 0) {
+            if ((scard.ab_flags & 30) != 0) {
               let sn = select(0, (get_w(cur, 21u) * 35) / 100, (scard.ab_flags & 16) != 0);
               let sc = get_w(cur, 6u) + sn + ((scard.bonus_q * 35) / 100);
               if (sc > best_score) { best_score = sc; best_kind = 4u; best_a = s; }
@@ -325,7 +338,40 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
             if (my_b[0].tool != 0) { continue; }
             sc = sc + get_w(cur, 20u);
           } else if (c.trainer_kind == 6) {
-            sc = sc + ((get_w(cur, 13u) * 45) + (get_w(cur, 15u) * 35)) / 100;
+            if (c.effect_val == 99) {
+              if (turn < 2u) { continue; }
+              var can_candy = false;
+              for (var hi2 = 0u; hi2 < my_hl; hi2 = hi2 + 1u) {
+                let ev = wg_cards[my_h[hi2]];
+                if (ev.is_pokemon == 1 && ev.stage == 2) {
+                  for (var s = 0u; s < 4u; s = s + 1u) {
+                    if (my_b[s].occ == 1) {
+                      let tgt = wg_cards[my_b[s].ci];
+                      let evo_ok = (ev.evo_group == 0) || (tgt.evo_group == 0) || (tgt.evo_group == ev.evo_group);
+                      if (tgt.stage == 0 && evo_ok && my_b[s].turn_placed < i32(turn)) {
+                        can_candy = true;
+                        break;
+                      }
+                    }
+                  }
+                  if (can_candy) { break; }
+                }
+              }
+              if (!can_candy) { continue; }
+              sc = sc + get_w(cur, 4u) + ((get_w(cur, 13u) * 45) + (get_w(cur, 15u) * 35)) / 100;
+            } else if (c.effect_val == 3) {
+              var has_s2 = false;
+              for (var s = 0u; s < 4u; s = s + 1u) {
+                if (my_b[s].occ == 1 && wg_cards[my_b[s].ci].stage == 2) { has_s2 = true; break; }
+              }
+              if (!has_s2) { continue; }
+              sc = sc + ((get_w(cur, 13u) * 45) + (get_w(cur, 15u) * 35)) / 100;
+            } else if (c.effect_val == 4) {
+              if (turn < 5u && points[foe] == 0) { continue; }
+              sc = sc + ((get_w(cur, 13u) * 45) + (get_w(cur, 15u) * 35)) / 100;
+            } else {
+              sc = sc + ((get_w(cur, 13u) * 45) + (get_w(cur, 15u) * 35)) / 100;
+            }
           } else if (c.trainer_kind == 7) {
             sc = sc + get_w(cur, 6u);
           }
@@ -349,12 +395,17 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
         }
       }
 
-      // 6. Retreat
+      // 6. Retreat (retreat ex attacker if opponent active has ex-immunity shield)
+      let active_ex_blocked = (my_b[0].occ == 1) && (fo_b[0].occ == 1)
+        && ((wg_cards[fo_b[0].ci].ab_flags & 64) != 0)
+        && (wg_cards[my_b[0].ci].prize >= 2);
       if (!retreated && my_b[0].occ == 1 && (my_b[0].status & 4) == 0 && my_b[0].energy >= wg_cards[my_b[0].ci].retreat) {
         let fo_dmg = select(0, wg_cards[fo_b[0].ci].atk_dmg, fo_b[0].occ == 1);
         for (var s = 1u; s < 4u; s = s + 1u) {
           if (my_b[s].occ == 1) {
-            let endg = select(0, get_w(cur, 18u), my_b[0].hp <= fo_dmg && my_b[s].hp > my_b[0].hp);
+            let endg_cond = (my_b[0].hp <= fo_dmg && my_b[s].hp > my_b[0].hp)
+              || (active_ex_blocked && wg_cards[my_b[s].ci].prize == 1);
+            let endg = select(0, get_w(cur, 18u), endg_cond);
             let sc = get_w(cur, 17u) + endg;
             if (sc > best_score) { best_score = sc; best_kind = 6u; best_a = s; }
           }
@@ -362,7 +413,7 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
       }
 
       // 7. Attack
-      if (turn >= 2u && my_b[0].occ == 1 && (my_b[0].status & 4) == 0) {
+      if (turn >= 2u && my_b[0].occ == 1 && !active_ex_blocked && (my_b[0].status & 4) == 0) {
         let atk = wg_cards[my_b[0].ci];
         if (my_b[0].energy >= atk.atk_cost && atk.atk_dmg > 0) {
           let weak_b = select(0, 20, fo_b[0].occ == 1 && wg_cards[fo_b[0].ci].weak_code == atk.type_code);
@@ -393,6 +444,9 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
         my_b[best_b].hp = max(10, my_b[best_b].max_hp - taken);
         my_b[best_b].status = 0;
         my_b[best_b].turn_placed = i32(turn);
+        if ((c.ab_flags & 32) != 0 && my_b[0].occ == 1) {
+          my_b[0].energy = my_b[0].energy + 1;
+        }
         my_hl = my_hl - 1u;
         my_h[best_a] = my_h[my_hl];
       } else if (best_kind == 3u) {
@@ -434,27 +488,44 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
           }
         } else if (c.trainer_kind == 6) {
           if (c.effect_val == 99 && turn >= 2u) {
+            var done_candy = false;
             for (var hi2 = 0u; hi2 < my_hl; hi2 = hi2 + 1u) {
               let ev_ci = my_h[hi2];
               let ev = wg_cards[ev_ci];
               if (ev.is_pokemon == 1 && ev.stage == 2) {
                 for (var s = 0u; s < 4u; s = s + 1u) {
-                  if (my_b[s].occ == 1 && wg_cards[my_b[s].ci].stage == 0 && my_b[s].turn_placed < i32(turn)) {
-                    let tk = max(0, my_b[s].max_hp - my_b[s].hp);
-                    my_b[s].ci = ev_ci;
-                    my_b[s].max_hp = ev.hp + select(0, 20, my_b[s].tool == 1);
-                    my_b[s].hp = max(10, my_b[s].max_hp - tk);
-                    my_b[s].status = 0;
-                    my_b[s].turn_placed = i32(turn);
-                    my_hl = my_hl - 1u;
-                    my_h[hi2] = my_h[my_hl];
-                    break;
+                  if (my_b[s].occ == 1) {
+                    let tgt = wg_cards[my_b[s].ci];
+                    let evo_ok = (ev.evo_group == 0) || (tgt.evo_group == 0) || (tgt.evo_group == ev.evo_group);
+                    if (tgt.stage == 0 && evo_ok && my_b[s].turn_placed < i32(turn)) {
+                      let tk = max(0, my_b[s].max_hp - my_b[s].hp);
+                      my_b[s].ci = ev_ci;
+                      my_b[s].max_hp = ev.hp + select(0, 20, my_b[s].tool == 1);
+                      my_b[s].hp = max(10, my_b[s].max_hp - tk);
+                      my_b[s].status = 0;
+                      my_b[s].turn_placed = i32(turn);
+                      my_hl = my_hl - 1u;
+                      my_h[hi2] = my_h[my_hl];
+                      done_candy = true;
+                      break;
+                    }
                   }
                 }
+                if (done_candy) { break; }
+              }
+            }
+          } else if (c.effect_val == 3) {
+            for (var s = 0u; s < 4u; s = s + 1u) {
+              if (my_b[s].occ == 1 && wg_cards[my_b[s].ci].stage == 2) {
+                my_b[s].energy = my_b[s].energy + 1;
                 break;
               }
             }
-          } else if (c.effect_val >= 2) {
+          } else if (c.effect_val == 4) {
+            if (turn >= 5u || points[foe] > 0) {
+              my_b[0].energy = my_b[0].energy + 1;
+            }
+          } else if (c.effect_val == 2) {
             my_b[0].energy = my_b[0].energy + 1;
           }
         } else if (c.trainer_kind == 7) {
@@ -514,6 +585,9 @@ fn sim_game(seed: u32, first_player: u32) -> vec2<u32> {
           if ((atk.atk_flags & 4) != 0) { fo_b[0].status = fo_b[0].status | 1; }
           if ((atk.atk_flags & 8) != 0) { my_b[0].hp = min(my_b[0].max_hp, my_b[0].hp + 20); }
           if ((atk.atk_flags & 16) != 0) { my_b[0].energy = my_b[0].energy + 1; }
+          if ((atk.atk_flags & 32) != 0) { my_b[0].hp = my_b[0].hp - 50; }
+          if ((atk.atk_flags & 128) != 0) { my_b[0].energy = max(0, my_b[0].energy - 2); }
+          else if ((atk.atk_flags & 64) != 0) { my_b[0].energy = max(0, my_b[0].energy - 1); }
 
           if (fo_b[0].hp <= 0) {
             points[cur] = points[cur] + wg_cards[fo_b[0].ci].prize;
@@ -779,9 +853,11 @@ var<workgroup> wg_opt: array<atomic<u32>, 4>;
 
 fn load_cand_vram(ci: u32) -> Card {
   let o = ci * CARD_STRIDE;
+  let raw_stg = cand_cards_buf[o + 1u];
   var c: Card;
   c.is_pokemon = cand_cards_buf[o];
-  c.stage = cand_cards_buf[o + 1u];
+  c.stage = raw_stg & 255;
+  c.evo_group = (raw_stg >> 8u) & 65535;
   c.type_code = cand_cards_buf[o + 2u];
   c.weak_code = cand_cards_buf[o + 3u];
   c.hp = cand_cards_buf[o + 4u];
@@ -875,7 +951,7 @@ function packDeckToI32(target, slot, compactCards) {
     const c = compactCards[i] || compactCards[0];
     const o = (baseCard + i) * CARD_STRIDE;
     target[o] = c.isPokemon | 0;
-    target[o + 1] = c.stage | 0;
+    target[o + 1] = (c.stage & 0xff) | (((c.evoGroup || 0) & 0xffff) << 8);
     target[o + 2] = c.typeCode | 0;
     target[o + 3] = c.weakCode | 0;
     target[o + 4] = c.hp | 0;
@@ -1231,7 +1307,7 @@ export async function probeWebGPU() {
             const c = candidateCards[i];
             const o = i * CARD_STRIDE;
             candCardsHost[o] = c.isPokemon | 0;
-            candCardsHost[o + 1] = c.stage | 0;
+            candCardsHost[o + 1] = (c.stage & 0xff) | (((c.evoGroup || 0) & 0xffff) << 8);
             candCardsHost[o + 2] = c.typeCode | 0;
             candCardsHost[o + 3] = c.weakCode | 0;
             candCardsHost[o + 4] = c.hp | 0;
