@@ -1017,11 +1017,13 @@ export function renderBattle() {
   const testDone = activeRun?.compactResults
     ? Object.values(activeRun.compactResults).reduce((s, r) => s + (r?.total || 0), 0)
     : (activeRun?.events?.length || 0);
+  const gtgDoneOpps = Number(activeRun?.gtgMeta?.opponentsDone || 0);
   const hasIncompleteRun = Boolean(
     activeRun
     && !activeRun.isDemo
-    && (expDone > 0 || testDone > 0)
-    && (expDone < activeModelProfile.exploreTotalGames || testDone < activeModelProfile.totalBatchGames)
+    && (activeModelProfile.mode === 'gtg'
+      ? (gtgDoneOpps > 0 && gtgDoneOpps < lineup.selected.length)
+      : ((expDone > 0 || testDone > 0) && (expDone < activeModelProfile.exploreTotalGames || testDone < activeModelProfile.totalBatchGames)))
   );
   const primaryBtnLabel = hasIncompleteRun
     ? '繼續勝率模擬'

@@ -94,6 +94,52 @@
         "deepExploreGames": 1000000,
         "deepGamesPerOpponent": 5000
       }
+    },
+    {
+      "id": "gtg-elite-lite",
+      "file": "battle/models/gtg-elite-lite.json",
+      "version": "gtg-elite-lite",
+      "label": "GTG精英轻量模型",
+      "badge": "GTG精英轻量模型",
+      "derivedFrom": "v3",
+      "trainedGames": 11645480,
+      "cumulativeTrainingGames": 11737640,
+      "cardPoolEvaluated": {
+        "minDecisionsPerCard": 2400,
+        "minGamesPerCard": 1200,
+        "totalCardDecisionEvaluations": 10984800,
+        "totalCardEvaluationGames": 5492400,
+        "totalDistinctCards": 4577
+      },
+      "vsBaseline": {
+        "draws": 32,
+        "games": 2160,
+        "losses": 814,
+        "opponent": "baseline-v0",
+        "score": 0.6157407407407407,
+        "winRate": 0.6083333333333333,
+        "wins": 1314
+      },
+      "simProfile": {
+        "id": "gtg-elite-lite",
+        "mode": "gtg",
+        "label": "GTG精英轻量模型",
+        "exploreLabel": "100 萬局/輪",
+        "testLabel": "收斂實測",
+        "roundGamesPerOpponent": 1000000,
+        "evalGamesPerOpponent": 20000,
+        "evalGamesPerOpponentCpu": 5000,
+        "convergenceTolerance": 0.001,
+        "maxRounds": 12,
+        "candidateCount": 20,
+        "exploreTotalGames": 10000000,
+        "exploreGamesPerOpponent": 1000000,
+        "gamesPerOpponent": 20000,
+        "firstSeatGames": 10000,
+        "totalBatchGames": 200000,
+        "deepExploreGames": 1000000,
+        "deepGamesPerOpponent": 20000
+      }
     }
   ],
   "benchmark": {

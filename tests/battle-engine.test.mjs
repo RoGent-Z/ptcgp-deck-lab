@@ -42,11 +42,11 @@ test("seeded first and second seat games resolve by the rules and replay exactly
   }
 });
 
-test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-league elite strategies, 13,500+ strategy lexicon, and WASM engines execute deterministically", async () => {
+test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型), top10 100M-league elite strategies, 10.48M strategy lexicon, and WASM engines execute deterministically", async () => {
   const manifest = JSON.parse(await readFile(new URL("../public/battle/models/manifest.json", import.meta.url), "utf8"));
   assert.equal(manifest.defaultModelId, "v3");
   assert.equal(manifest.mobileDefaultModelId, "lite-1m5q");
-  assert.equal(manifest.models.length, 2, "Only 1B5M全量模型 and 1M5Q轻量模型 should exist");
+  assert.equal(manifest.models.length, 3, "1B5M全量模型, 1M5Q轻量模型, and GTG精英轻量模型 should exist");
   assert.equal(manifest.models[0].id, "v3");
   assert.equal(manifest.models[0].label, "1B5M全量模型");
   assert.equal(manifest.models[0].simProfile.exploreTotalGames, 1000000000);
@@ -56,6 +56,11 @@ test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-lea
   assert.equal(manifest.models[1].simProfile.exploreTotalGames, 1000000);
   assert.equal(manifest.models[1].simProfile.totalBatchGames, 5000);
   assert.equal(manifest.models[1].simProfile.gamesPerOpponent, 500);
+  assert.equal(manifest.models[2].id, "gtg-elite-lite");
+  assert.equal(manifest.models[2].label, "GTG精英轻量模型");
+  assert.equal(manifest.models[2].simProfile.mode, "gtg");
+  assert.equal(manifest.models[2].simProfile.roundGamesPerOpponent, 1000000);
+  assert.equal(manifest.models[2].simProfile.convergenceTolerance, 0.001);
   assert.ok(manifest.strategyLexiconEntries >= 10000);
   assert.equal(manifest.top10GamesPerTeam, 10000000);
   assert.equal(manifest.top10TotalLeagueGames, 100000000);
@@ -445,4 +450,39 @@ test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-lea
   assert.equal(mergedMatched.totalLexiconCount, 13500 + 10472176);
   assert.ok(mergedMatched.pairMatchedCount >= 40, `Expected >= 40 pairwise strategies activated, got ${mergedMatched.pairMatchedCount}`);
   assert.ok(mergedMatched.activePairStrategies.length > 0);
+
+  // Verify GTG精英轻量模型 JSON config & real dual-side simultaneous co-evolution convergence loop
+  const gtgModel = JSON.parse(await readFile(new URL("../public/battle/models/gtg-elite-lite.json", import.meta.url), "utf8"));
+  assert.equal(gtgModel.name, "GTG精英轻量模型");
+  assert.equal(gtgModel.simProfile.mode, "gtg");
+  assert.equal(gtgModel.simProfile.roundGamesPerOpponent, 1000000);
+  assert.equal(gtgModel.simProfile.convergenceTolerance, 0.001);
+
+  const { runGtgDuelConvergence } = await import("../public/app/battle.mjs");
+  const gtgTestRes = await runGtgDuelConvergence({
+    opp: top10[1],
+    myFastDeck: expand(top10[0].representative),
+    oppFastDeck: expand(top10[1].representative),
+    initPlayerWeights: gtgModel.weights,
+    initEnemyWeights: top10Elite.teams[top10[1].id].weights,
+    roundGames: 400, // Fast deterministic UT slice exercising exact dual-side simultaneous update + CRN eval
+    evalGames: 500,
+    candCount: 10,
+    tol: 0.001,
+    maxRounds: 4,
+    seedPrefix: "ut-gtg",
+    fastSim,
+    gpuSim: null
+  });
+  assert.ok(gtgTestRes.rounds >= 1 && gtgTestRes.rounds <= 4);
+  assert.equal(gtgTestRes.finalPlayerWeights.length, 22);
+  assert.equal(gtgTestRes.finalEnemyWeights.length, 22);
+  assert.equal(gtgTestRes.finalEval.total, 500);
+  assert.equal(gtgTestRes.finalEval.sampleOutcomesStr.length, 500);
+  assert.ok(gtgTestRes.history.length === gtgTestRes.rounds + 1);
+  // Both sides simultaneously learned and updated away from frozen initial weights
+  const pChanged = gtgTestRes.finalPlayerWeights.some((w, i) => w !== gtgModel.weights[i]);
+  const eChanged = gtgTestRes.finalEnemyWeights.some((w, i) => w !== top10Elite.teams[top10[1].id].weights[i]);
+  assert.equal(pChanged, true, "GTG player weights should evolve from winning games");
+  assert.equal(eChanged, true, "GTG opponent weights should evolve simultaneously from winning games");
 });

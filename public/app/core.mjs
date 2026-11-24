@@ -92,8 +92,38 @@ export const LITE_MODEL_PROFILE = Object.freeze({
   deepGamesPerOpponent: 5000
 });
 
+export const GTG_MODEL_PROFILE = Object.freeze({
+  id: 'gtg-elite-lite',
+  mode: 'gtg',
+  label: 'GTG精英轻量模型',
+  exploreLabel: '100 萬局/輪',
+  testLabel: '收斂實測',
+  roundGamesPerOpponent: 1000000,
+  evalGamesPerOpponent: 20000,
+  evalGamesPerOpponentCpu: 5000,
+  convergenceTolerance: 0.001,
+  maxRounds: 12,
+  candidateCount: 20,
+  exploreTotalGames: 10000000,
+  exploreGamesPerOpponent: 1000000,
+  gamesPerOpponent: 20000,
+  firstSeatGames: 10000,
+  totalBatchGames: 200000,
+  deepExploreGames: 1000000,
+  deepGamesPerOpponent: 20000
+});
+
 export function resolveModelSimProfile(modelOrRun) {
   const sp = modelOrRun?.simProfile || modelOrRun?.metaEntry?.simProfile;
+  const tag = String(sp?.id || modelOrRun?.id || modelOrRun?.modelId || modelOrRun?.version || modelOrRun?.modelVersion || '').toLowerCase();
+  if (sp && (sp.mode === 'gtg' || tag.includes('gtg'))) {
+    return {
+      ...GTG_MODEL_PROFILE,
+      ...sp,
+      mode: 'gtg',
+      firstSeatGames: sp.firstSeatGames ?? Math.floor((sp.gamesPerOpponent || GTG_MODEL_PROFILE.gamesPerOpponent) / 2)
+    };
+  }
   if (sp && Number(sp.exploreTotalGames) > 0 && Number(sp.totalBatchGames) > 0) {
     return {
       ...FULL_MODEL_PROFILE,
@@ -101,7 +131,7 @@ export function resolveModelSimProfile(modelOrRun) {
       firstSeatGames: sp.firstSeatGames ?? Math.floor(sp.gamesPerOpponent / 2)
     };
   }
-  const tag = String(modelOrRun?.id || modelOrRun?.modelId || modelOrRun?.version || modelOrRun?.modelVersion || '').toLowerCase();
+  if (tag.includes('gtg')) return { ...GTG_MODEL_PROFILE };
   if (tag.includes('1m5q') || tag.includes('lite')) return { ...LITE_MODEL_PROFILE };
   return { ...FULL_MODEL_PROFILE };
 }
@@ -168,11 +198,12 @@ function roundW(v) {
   return Math.round(Math.max(-8, Math.min(8, v)) * 1e6) / 1e6;
 }
 
-// 產生探索階段候選策略集（保留原模型於 index 0，並展開多維度戰術變體）
-export function buildExplorationCandidates(baseWeights, seedLabel = 'explore', candidateCount = 25) {
+// 產生探索階段候選策略集（保留原模型於 index 0，並展開多維度戰術變體；支援退火縮放 radiusScale）
+export function buildExplorationCandidates(baseWeights, seedLabel = 'explore', candidateCount = 25, radiusScale = 1.0) {
   const base = Array.isArray(baseWeights) && baseWeights.length === 22
     ? baseWeights.map(Number)
     : Array(22).fill(0);
+  const rScale = Math.max(0.05, Number(radiusScale) || 1.0);
   const rand = seededRandom(seedLabel);
   const list = [[...base]];
 
@@ -190,7 +221,7 @@ export function buildExplorationCandidates(baseWeights, seedLabel = 'explore', c
     if (list.length >= candidateCount) break;
     const w = base.map((val, idx) => {
       const fname = FEATURE_NAMES_22[idx];
-      return roundW(val + (tpl.deltas[fname] || 0));
+      return roundW(val + (tpl.deltas[fname] || 0) * rScale);
     });
     list.push(w);
   }
@@ -200,12 +231,24 @@ export function buildExplorationCandidates(baseWeights, seedLabel = 'explore', c
       const u1 = Math.max(1e-9, rand());
       const u2 = rand();
       const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
-      const scale = idx <= 1 ? 0.12 : 0.28;
+      const scale = (idx <= 1 ? 0.12 : 0.28) * rScale;
       return roundW(val + z * scale);
     });
     list.push(w);
   }
   return list;
+}
+
+// 雙邊同步對弈阻尼融合（避免博弈震盪並平滑收斂至納許均衡）
+export function dampBlendWeights(prevWeights = [], learnedWeights = [], alpha = 0.55) {
+  const a = Math.max(0.05, Math.min(1, Number(alpha) || 0.55));
+  const out = new Array(22);
+  for (let k = 0; k < 22; k++) {
+    const p = Number(prevWeights[k] || 0);
+    const l = Number(learnedWeights[k] ?? p);
+    out[k] = roundW(a * l + (1 - a) * p);
+  }
+  return out;
 }
 
 // 從 1,000 次探索對局中篩選「勝利的對局」綜合提煉為獲勝策略
