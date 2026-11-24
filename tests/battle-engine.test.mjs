@@ -458,6 +458,13 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
   assert.equal(gtgModel.simProfile.roundGamesPerOpponent, 1000000);
   assert.equal(gtgModel.simProfile.convergenceTolerance, 0.001);
 
+  // Verify scaling/debuff Meta cards are NOT crippled in FastSim encoding
+  assert.ok(encodeCardForFastSim(cardById.get("A4a-020"), 0).atkDmg >= 80, "Suicune ex (20x bench) must not be crippled");
+  assert.ok(encodeCardForFastSim(cardById.get("B1-102"), 0).atkDmg >= 100, "Mega Altaria ex (40+ bench) must not be crippled");
+  assert.ok(encodeCardForFastSim(cardById.get("B3a-019"), 0).atkDmg >= 90, "Miraidon ex (20+ energy) must not be crippled");
+  assert.ok(encodeCardForFastSim(cardById.get("B1a-026"), 0).atkDmg >= 90, "Magnezone opponent-debuff must not halve its own damage");
+  assert.ok(encodeCardForFastSim(cardById.get("B2a-037"), 0).atkDmg >= 85, "Chien-Pao ex effect-text 130 snipe must be parsed");
+
   const { runGtgDuelConvergence } = await import("../public/app/battle.mjs");
   const gtgTestRes = await runGtgDuelConvergence({
     opp: top10[1],
@@ -480,9 +487,11 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
   assert.equal(gtgTestRes.finalEval.total, 500);
   assert.equal(gtgTestRes.finalEval.sampleOutcomesStr.length, 500);
   assert.ok(gtgTestRes.history.length === gtgTestRes.rounds + 1);
-  // Both sides simultaneously learned and updated away from frozen initial weights
-  const pChanged = gtgTestRes.finalPlayerWeights.some((w, i) => w !== gtgModel.weights[i]);
-  const eChanged = gtgTestRes.finalEnemyWeights.some((w, i) => w !== top10Elite.teams[top10[1].id].weights[i]);
-  assert.equal(pChanged, true, "GTG player weights should evolve from winning games");
-  assert.equal(eChanged, true, "GTG opponent weights should evolve simultaneously from winning games");
+  // Monotonic best-response guard: neither side's round gain can ever be negative
+  for (const h of gtgTestRes.history.slice(1)) {
+    assert.ok(h.playerGain >= 0, `Player learning must be monotonic, got ${h.playerGain}`);
+    assert.ok(h.enemyGain >= 0, `Opponent learning must be monotonic, got ${h.enemyGain}`);
+  }
+  const anyOppImproved = gtgTestRes.history.slice(1).some((h) => h.enemyGain > 0);
+  assert.equal(anyOppImproved, true, "GTG opponent should actively learn stronger counter-strategy");
 });

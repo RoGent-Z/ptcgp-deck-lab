@@ -776,12 +776,14 @@ function renderWinningStrategyBanner(run, summary) {
   if (profile.mode === 'gtg') {
     const doneOpps = Number(run?.gtgMeta?.opponentsDone || 0);
     const totalOpps = Math.max(1, Number(run?.gtgMeta?.totalOpponents || 10));
+    const curRound = Number(run?.gtgMeta?.currentRound || 0);
     const subFrac = Math.max(0, Math.min(0.99, Number(run?.gtgMeta?.currentOppFrac || 0)));
     const pct = Math.min(99.9, ((doneOpps + subFrac) / totalOpps) * 100).toFixed(1);
+    const roundText = curRound > 0 ? ` · 第 ${curRound} 次迭代` : '';
     return `
       <div class="strategy-synth-banner is-running">
         <div class="strategy-synth-head">
-          <strong>正在分析對戰勝率（已完成 ${doneOpps} / ${totalOpps} 組對手 · ${pct}%）…</strong>
+          <strong>正在分析對戰勝率（已完成 ${doneOpps} / ${totalOpps} 組對手${roundText} · ${pct}%）…</strong>
         </div>
         <div class="progress-track is-slim">
           <i style="width:${pct}%"></i>
@@ -963,12 +965,15 @@ export function renderBattleReport(run, lineup, options = {}) {
       ? `探索 ${oppExp.games.toLocaleString('zh-TW')} 局 (${(oppExp.winRate * 100).toFixed(1)}%)`
       : '待探索';
 
+    const oppGtgRounds = Number(run?.gtgMeta?.byOpponent?.[opp.id]?.rounds || 0);
+
     rowsHtml += `
       <div class="battle-row" data-opp-row="${esc(opp.id)}">
         <div class="battle-opp-info">
           <div class="battle-opp-head">
             <span class="rank-num">#${item.rank}</span>
             ${item.isSubstitute ? `<span class="pill-sub">遞補 #${item.rank}</span>` : ''}
+            ${oppGtgRounds > 0 ? `<span class="pill-sub">迭代 ${oppGtgRounds} 次</span>` : ''}
             <span class="tokens-inline">${tokens}</span>
             ${oppSprites}
             <strong class="battle-opp-name">${esc(opp.name)}</strong>
@@ -978,6 +983,7 @@ export function renderBattleReport(run, lineup, options = {}) {
             <span>賽事勝率 ${metaRate}</span>
             <span>先攻 ${f1Pct}</span>
             <span>後攻 ${f2Pct}</span>
+            ${oppGtgRounds > 0 ? `<span>迭代 ${oppGtgRounds} 次</span>` : ''}
           </div>
           <div class="battle-opp-actions">
             ${!run.isDemo && options.canReplay ? `<button class="mini" type="button" data-action="run-single-opponent-deep" data-opp="${esc(opp.id)}">單獨深度測試</button>` : ''}
@@ -995,6 +1001,12 @@ export function renderBattleReport(run, lineup, options = {}) {
     `;
   }
 
+  const gtgOppRecords = Object.values(run?.gtgMeta?.byOpponent || {}).filter((x) => x?.done);
+  const gtgTotalRounds = gtgOppRecords.reduce((s, x) => s + Number(x.rounds || 0), 0);
+  const gtgRoundSummary = profile.mode === 'gtg' && gtgTotalRounds > 0
+    ? ` · 累計迭代 ${gtgTotalRounds} 次（平均 ${(gtgTotalRounds / Math.max(1, gtgOppRecords.length)).toFixed(1)} 次/組）`
+    : '';
+
   return `
     <div class="report-shell ${run.isDemo ? 'is-demo' : ''}">
       ${run.isDemo ? '<div class="status-note is-warn">預覽模式展示點陣。</div>' : ''}
@@ -1004,7 +1016,7 @@ export function renderBattleReport(run, lineup, options = {}) {
         <div class="report-kpi">
           <span class="report-kpi-label">${summary.complete ? '綜合實戰勝率' : '勝率模擬中…'}</span>
           <strong class="report-kpi-num">${overallRate}</strong>
-          <span class="report-kpi-ci">共 ${summary.total.toLocaleString('zh-TW')} 局 · ${esc(profile.label || '')}</span>
+          <span class="report-kpi-ci">共 ${summary.total.toLocaleString('zh-TW')} 局${gtgRoundSummary} · ${esc(profile.label || '')}</span>
         </div>
         <div class="report-totals">
           <div class="tot-box is-win"><b>${summary.wins.toLocaleString('zh-TW')}</b><span>勝</span></div>
@@ -1748,8 +1760,38 @@ export async function runGtgDuelConvergence({
     };
   }
 
-  // 輔助：單側從 500,000 局對弈中學習己方獲勝局並提煉新策略（不修改對側凍結策略）
-  async function learnOneSide(sideDeck, foeDeck, baseW, frozenFoeW, cands, seedLabel, sideId) {
+  // 輔助：快速同種子配對驗證單側候選策略對抗凍結對手的真實勝率（嚴格防止學歪或退步）
+  async function scoreSideAgainstFrozen(sideDeck, foeDeck, candW, frozenFoeW, checkSeedBase) {
+    const checkGames = useGpu ? 2000 : Math.min(1000, evalGames);
+    if (useGpu) {
+      const res = await gpuSim.runTestOpponent({
+        deck: sideDeck,
+        enemy: foeDeck,
+        playerWeights: candW,
+        enemyWeights: frozenFoeW,
+        totalPerOpp: checkGames,
+        seedBase: checkSeedBase
+      });
+      if (signal?.aborted || res?.aborted) return null;
+      return res.total ? (res.wins + 0.5 * res.draws) / res.total : 0;
+    }
+    const res = fastSim({
+      op: 'test_50k_chunk',
+      deck: sideDeck,
+      enemy: foeDeck,
+      opponent_id: opp.id,
+      weights: candW,
+      enemy_weights: frozenFoeW,
+      start_idx: 0,
+      count: checkGames,
+      total_per_opp: checkGames,
+      seed_base: checkSeedBase
+    });
+    return res.completed ? (res.wins + 0.5 * res.draws) / res.completed : 0;
+  }
+
+  // 輔助：單側從 500,000 局對弈中學習己方獲勝局並提煉新策略（含單調最佳回應保護，確保對面與我方絕不退步）
+  async function learnOneSide(sideDeck, foeDeck, baseW, frozenFoeW, cands, seedLabel, sideId, alpha) {
     const stats = createEmptyExploreStats([sideId], cands.length);
     const seedBase = fnv1a32(seedLabel);
     if (useGpu) {
@@ -1803,8 +1845,39 @@ export async function runGtgDuelConvergence({
       });
       if (signal?.aborted) return null;
     }
+
+    // 找出本輪 50 萬局中勝率最高的單一候選策略 + 勝局綜合提煉策略，再與原策略做同種子實測擇優
+    const byC = stats.byCandidate || [];
+    let bestCid = 0;
+    let bestSr = -1;
+    for (let i = 0; i < byC.length; i++) {
+      const g = byC[i]?.games || 0;
+      if (g <= 0) continue;
+      const sr = ((byC[i].wins || 0) + 0.5 * (byC[i].draws || 0)) / g;
+      if (sr > bestSr) { bestSr = sr; bestCid = i; }
+    }
     const synth = synthesizeWinningStrategyFromStats(stats, baseW, cands);
-    return synth.byOpponent?.[sideId]?.weights || synth.weights;
+    const rawSynthW = synth.byOpponent?.[sideId]?.weights || synth.weights;
+    const blendedSynthW = dampBlendWeights(baseW, rawSynthW, alpha);
+    const blendedBestW = bestCid > 0 ? dampBlendWeights(baseW, cands[bestCid], Math.min(0.85, alpha + 0.15)) : baseW;
+
+    const checkSeed = fnv1a32(`${seedLabel}:guard`);
+    const srBase = await scoreSideAgainstFrozen(sideDeck, foeDeck, baseW, frozenFoeW, checkSeed);
+    if (srBase == null || signal?.aborted) return null;
+    const srSynth = await scoreSideAgainstFrozen(sideDeck, foeDeck, blendedSynthW, frozenFoeW, checkSeed);
+    if (srSynth == null || signal?.aborted) return null;
+    let chosenW = srSynth > srBase ? blendedSynthW : baseW;
+    let chosenSr = Math.max(srBase, srSynth);
+
+    if (bestCid > 0) {
+      const srBest = await scoreSideAgainstFrozen(sideDeck, foeDeck, blendedBestW, frozenFoeW, checkSeed);
+      if (srBest == null || signal?.aborted) return null;
+      if (srBest > chosenSr) {
+        chosenW = blendedBestW;
+        chosenSr = srBest;
+      }
+    }
+    return { weights: chosenW, improved: chosenSr > srBase, gain: chosenSr - srBase };
   }
 
   let wP = [...initPlayerWeights];
@@ -1814,7 +1887,7 @@ export async function runGtgDuelConvergence({
   let prevEval = await evalHeadToHead(wP, wE);
   if (!prevEval || signal?.aborted) return null;
   let prevWr = prevEval.winRate;
-  const history = [{ round: 0, winRate: prevWr, delta: null, gamesThisRound: 0 }];
+  const history = [{ round: 0, winRate: prevWr, delta: null, gamesThisRound: 0, playerGain: 0, enemyGain: 0 }];
   let converged = false;
   let totalCoEvoGames = 0;
 
@@ -1822,36 +1895,39 @@ export async function runGtgDuelConvergence({
 
   for (let round = 1; round <= maxRounds; round++) {
     if (signal?.aborted) return null;
-    const radiusScale = Math.max(0.15, Math.pow(0.76, round - 1));
+    const radiusScale = Math.max(0.18, Math.pow(0.78, round - 1));
+    const alpha = Math.max(0.32, 0.62 * Math.pow(0.88, round - 1));
     const pCands = buildExplorationCandidates(wP, `${seedPrefix}:p:${opp.id}:r${round}`, candCount, radiusScale);
     const eCands = buildExplorationCandidates(wE, `${seedPrefix}:e:${opp.id}:r${round}`, candCount, radiusScale);
 
-    // 雙邊同步基於「本輪開始前的凍結策略」各自對弈 50 萬局（合計 100 萬局/輪），同時學習各自獲勝局
-    const learnedP = await learnOneSide(myFastDeck, oppFastDeck, wP, wE, pCands, `${seedPrefix}:gp:${opp.id}:r${round}`, opp.id);
-    if (!learnedP || signal?.aborted) return null;
+    // 雙邊同步基於「本輪開始前的凍結策略」各自對弈 50 萬局（合計 100 萬局/輪），同時學習各自獲勝局並單調擇優
+    const resP = await learnOneSide(myFastDeck, oppFastDeck, wP, wE, pCands, `${seedPrefix}:gp:${opp.id}:r${round}`, opp.id, alpha);
+    if (!resP || signal?.aborted) return null;
     onRoundProgress?.({ round, maxRounds, winRate: prevWr, delta: null, frac: Math.min(0.95, (round - 0.5) / Math.max(3, Math.min(maxRounds, 6))) });
 
-    const learnedE = await learnOneSide(oppFastDeck, myFastDeck, wE, wP, eCands, `${seedPrefix}:ge:${opp.id}:r${round}`, `player:${opp.id}`);
-    if (!learnedE || signal?.aborted) return null;
+    const resE = await learnOneSide(oppFastDeck, myFastDeck, wE, wP, eCands, `${seedPrefix}:ge:${opp.id}:r${round}`, `player:${opp.id}`, alpha);
+    if (!resE || signal?.aborted) return null;
     totalCoEvoGames += halfRoundGames * 2;
 
-    // 雙方同時採用新策略（平滑阻尼更新，收斂至博弈均衡）
-    const alpha = Math.max(0.28, 0.58 * Math.pow(0.86, round - 1));
-    wP = dampBlendWeights(wP, learnedP, alpha);
-    wE = dampBlendWeights(wE, learnedE, alpha);
+    // 雙方同時採用驗證更強的新策略
+    wP = resP.weights;
+    wE = resE.weights;
 
     // 以新策略同種子實測本輪勝率，並計算與上次勝率之差
     const curEval = await evalHeadToHead(wP, wE);
     if (!curEval || signal?.aborted) return null;
     const curWr = curEval.winRate;
     const delta = Math.abs(curWr - prevWr);
-    history.push({ round, winRate: curWr, delta, gamesThisRound: halfRoundGames * 2 });
+    history.push({ round, winRate: curWr, delta, gamesThisRound: halfRoundGames * 2, playerGain: resP.gain, enemyGain: resE.gain });
 
     prevEval = curEval;
     prevWr = curWr;
     onRoundProgress?.({ round, maxRounds, winRate: curWr, delta, frac: Math.min(0.98, round / Math.max(3, Math.min(maxRounds, 6))) });
 
-    if (delta < tol) {
+    // 至少完成 2 輪雙邊博弈迭代（避免第 1 輪雙方同步大幅加分互相抵銷造成偽收斂），
+    // 或當雙方均無法再找到任何更優策略時即判定達均衡收斂
+    const bothSettled = !resP.improved && !resE.improved;
+    if ((round >= 2 && delta < tol) || bothSettled) {
       converged = true;
       break;
     }
@@ -1879,14 +1955,15 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simPro
     ensurePairwiseStrategies()
   ]);
   const oppEliteWeights = getOpponentEliteWeights(opp.id, baseWeights);
-  const matched = matchDeckStrategies(deck, [{ rank: 1, entry: opp }], lexicon, baseWeights, pairwiseDb, state.cardsById);
+  const isGtg = profile.mode === 'gtg';
+  const matched = matchDeckStrategies(deck, isGtg ? [] : [{ rank: 1, entry: opp }], lexicon, baseWeights, pairwiseDb, state.cardsById);
   const oppMatched = matchDeckStrategies(opp.representative, [], lexicon, oppEliteWeights, pairwiseDb, state.cardsById);
 
   const myFastDeck = expandDeckForFastSim(deck, matched.cardBonusById);
   const oppFastDeck = expandDeckForFastSim(opp.representative, oppMatched.cardBonusById);
   const useGpu = Boolean(gpuSim?.ready);
 
-  if (profile.mode === 'gtg') {
+  if (isGtg) {
     const evalGames = useGpu
       ? (profile.evalGamesPerOpponent || 20000)
       : (profile.evalGamesPerOpponentCpu || 5000);
@@ -1905,8 +1982,8 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simPro
       fastSim,
       gpuSim,
       signal,
-      onRoundProgress: ({ frac }) => {
-        onProgress?.({ phase: 'explore', done: Math.round(frac * 100), total: 100, profile });
+      onRoundProgress: ({ round, frac }) => {
+        onProgress?.({ phase: 'explore', round, done: Math.round(frac * 100), total: 100, profile });
       }
     });
     if (!gtg || signal?.aborted) return null;
@@ -2135,10 +2212,11 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simPro
   };
 }
 
-export function renderSingleOpponentDeepProgress({ opp, phase, done, total }) {
+export function renderSingleOpponentDeepProgress({ opp, phase, round = 0, done, total }) {
   const pct = Math.min(100, (done / Math.max(1, total)) * 100).toFixed(1);
+  const roundText = round > 0 ? `（第 ${round} 次迭代）` : '';
   const label = phase === 'explore'
-    ? `正在分析對陣「${esc(opp.name)}」…`
+    ? `正在分析對陣「${esc(opp.name)}」${roundText}…`
     : `正在統計對陣「${esc(opp.name)}」勝率…`;
   return `
     <div class="flow-modal">
@@ -2159,11 +2237,12 @@ export function renderSingleOpponentDeepProgress({ opp, phase, done, total }) {
 }
 
 export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
-  const { opp, deck, profile, baseWeights, oppEliteWeights, winningWeights, agg, seedPrefix, testSeedBase, myFastDeck, oppFastDeck } = deepResult;
+  const { opp, deck, profile, baseWeights, oppEliteWeights, winningWeights, strategy, agg, seedPrefix, testSeedBase, myFastDeck, oppFastDeck } = deepResult;
   const p = resolveModelSimProfile(profile);
   const testTotal = p.deepGamesPerOpponent;
   const halfTest = Math.floor(testTotal / 2);
   const testWr = agg.total ? ((agg.wins / agg.total) * 100).toFixed(2) + '%' : '—';
+  const gtgRoundsText = strategy?.rounds > 0 ? ` · 迭代 ${strategy.rounds} 次` : '';
 
   const pageSize = 500;
   const segStep = Math.max(pageSize, Math.floor(testTotal / 10));
@@ -2229,7 +2308,7 @@ export function renderSingleOpponentDeepModal(deepResult, activeReplayIdx = 0) {
   return `
     <div class="flow-modal">
       <div class="flow-stage-card">
-        <h3>對陣「${esc(opp.name)}」勝率：${testWr}（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗）</h3>
+        <h3>對陣「${esc(opp.name)}」勝率：${testWr}（${agg.wins.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.losses.toLocaleString('zh-TW')}敗${gtgRoundsText}）</h3>
         <p class="sub">先攻勝率 ${((agg.firstWins / Math.max(1, f1Total)) * 100).toFixed(2)}% · 後攻勝率 ${((agg.secondWins / Math.max(1, f2Total)) * 100).toFixed(2)}% — 點擊任一格檢視回放：</p>
         <div class="deep-page-tabs">${pageTabs}</div>
         ${renderGameStrip(opp.id, pageEvents, true, pageSize, 'replay-single-deep', pageStart, pageSize, testTotal)}
@@ -2299,8 +2378,8 @@ export async function executeBattleBatch({ run, deck, lineup, weights, simProfil
         continue;
       }
 
-      // 針對此對手單獨匹配起始雙邊策略（不同對手採不同專屬對戰策略）
-      const myMatchupMatched = matchDeckStrategies(deck, [item], lexicon, weights, pairwiseDb, state.cardsById);
+      // 雙邊完全對稱初始化各自專屬策略（不給單邊額外克制偏置，完全交由雙邊 1M 局實戰博弈收斂）
+      const myMatchupMatched = matchDeckStrategies(deck, [], lexicon, weights, pairwiseDb, state.cardsById);
       run.matchedStrategies.myCardBonusByOpp[opp.id] = myMatchupMatched.cardBonusById;
       const oppInitBase = getOpponentEliteWeights(opp.id, weights);
       const oppMatched = matchDeckStrategies(opp.representative, [], lexicon, oppInitBase, pairwiseDb, state.cardsById);
@@ -2322,7 +2401,8 @@ export async function executeBattleBatch({ run, deck, lineup, weights, simProfil
         fastSim,
         gpuSim,
         signal,
-        onRoundProgress: ({ frac }) => {
+        onRoundProgress: ({ round, frac }) => {
+          run.gtgMeta.currentRound = round;
           run.gtgMeta.currentOppFrac = frac;
           onTick(run);
         }
@@ -2360,6 +2440,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, simProfil
         history: gtgRes.history
       };
       run.gtgMeta.opponentsDone = doneCount();
+      run.gtgMeta.currentRound = 0;
       run.gtgMeta.currentOppFrac = 0;
 
       await saveRunRecord(run);

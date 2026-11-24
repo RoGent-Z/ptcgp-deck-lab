@@ -633,6 +633,89 @@ const FASTSIM_TYPE_CODES = {
   fighting: 5, darkness: 6, metal: 7, dragon: 8, colorless: 9
 };
 
+// 依實卡招式文本精準估算期望傷害（正確處理 × 倍率、+ 加傷、純效果狙擊、對手反面干擾與棄能/反傷代價）
+export function computeExpectedAttackDamage(atk) {
+  const rawDmgStr = String(atk?.damage || '0').trim();
+  let dmgNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
+  const cost = Math.max(0, Math.min(5, (atk?.cost || []).length));
+  const eff = String(atk?.effect || '');
+
+  // 1. 空數值純效果傷害（如古劍豹ex「對手的1隻寶可夢受到130點傷害」）
+  if (dmgNum === 0 && eff.length > 0) {
+    const effDmg = eff.match(/對手的(?:1隻|任1隻|戰鬥|所有).*?寶可夢.*?受到\s*(\d+)\s*點傷害|does\s+(\d+)\s+damage\s+to/i);
+    if (effDmg) dmgNum = Number(effDmg[1] || effDmg[2] || 0);
+  }
+
+  // 2. 倍率型招式（×）：區分備戰數量倍率、能量倍率、多硬幣與單硬幣
+  if (rawDmgStr.includes('×') || rawDmgStr.includes('x')) {
+    if (/雙方.*備戰寶可夢|both players.*benched/i.test(eff)) {
+      dmgNum = Math.round(dmgNum * 4.5); // 如水君ex 20×雙方備戰 -> 約 90
+    } else if (/備戰寶可夢|benched Pok[eé]mon/i.test(eff)) {
+      dmgNum = Math.round(dmgNum * 2.5);
+    } else if (/能量.*數量|energy attached/i.test(eff)) {
+      dmgNum = Math.round(dmgNum * Math.max(2.5, cost + 1));
+    } else {
+      const multiCoin = eff.match(/擲\s*(\d+)\s*次硬幣|flip\s+(\d+)\s+coins/i);
+      if (multiCoin) {
+        const nCoins = Math.max(1, Number(multiCoin[1] || multiCoin[2] || 2));
+        dmgNum = Math.round(dmgNum * nCoins * 0.5);
+      } else if (/直到出現反面|until you get tails/i.test(eff)) {
+        dmgNum = Math.round(dmgNum * 1.0);
+      } else {
+        dmgNum = Math.round(dmgNum * 1.5);
+      }
+    }
+  } else if (rawDmgStr.includes('+')) {
+    // 3. 加成型招式（+）：備戰加傷、能量加傷、額外附能、條件加傷、硬幣加傷
+    const benchScale = eff.match(/備戰寶可夢的數量\s*[×x]\s*(\d+)/i);
+    const energyScale = eff.match(/每(?:有|附有)[^，。,.]{0,12}能量.{0,24}?(\d+)\s*點|(\d+)\s*more damage for each.*energy/i);
+    const flatBonus = eff.match(/增加\s*(\d+)\s*點傷害|造成\s*(\d+)\s*點額外傷害|\+\s*(\d+)\s*點傷害|(\d+)\s*more damage/i);
+    if (benchScale) {
+      const perUnit = Number(benchScale[1] || 20);
+      const mult = /雙方/.test(eff) ? 4.2 : 2.5; // 如超級七夕青鳥ex 40 + 2.5*30 = 115
+      dmgNum += Math.round(perUnit * mult);
+    } else if (energyScale) {
+      const perUnit = Number(energyScale[1] || energyScale[2] || 20);
+      dmgNum += Math.round(perUnit * Math.max(3, cost + 1)); // 如密勒頓ex 20 + 4*20 = 100
+    } else if (flatBonus) {
+      const add = Number(flatBonus[1] || flatBonus[2] || flatBonus[3] || flatBonus[4] || 0);
+      if (/額外附有|extra.*energy/i.test(eff)) {
+        dmgNum += Math.round(add * 0.55); // 如炎帝ex 60 + 60*0.55 = 93
+      } else if (/擲.*硬幣|flip a coin/i.test(eff)) {
+        dmgNum += Math.round(add * 0.5);
+      } else {
+        dmgNum += Math.round(add * 0.65); // 如月亮伊布 30 + 50*0.65 = 63
+      }
+    }
+  }
+
+  // 4. 僅針對「攻擊方自己擲反面失敗」折減；絕不誤傷「下回合讓對手擲反面失敗」的防禦干擾技（如自爆磁怪）
+  const isOpponentMissDebuff = /在下個對手的回合.*對手擲.*硬幣|during your opponent's next turn.*flip a coin/i.test(eff);
+  if (!isOpponentMissDebuff && /擲1次硬幣[，,。]?\s*若為反面[，,]?\s*(?:則)?這[個招]式失敗|flip a coin\.?\s*if tails,\s*this attack does nothing/i.test(eff)) {
+    dmgNum = Math.round(dmgNum * 0.5);
+  }
+  if (isOpponentMissDebuff) {
+    // 對手下回合 50% 機率攻擊落空，等效提升實戰壓制力
+    dmgNum = Math.round(dmgNum * 1.15);
+  }
+
+  // 5. 冷卻、棄能與反傷代價
+  if (/下個自己的回合.*無法使用|can't attack during your next turn/i.test(eff)) {
+    dmgNum = Math.round(dmgNum * 0.72);
+  }
+  const discardMatch = eff.match(/將這隻寶可夢身上的(?:所有|隨機\s*(\d+)?\s*個|(\d+)個).*能量丟棄|discard\s+(\d+|all)\s+.*energy/i);
+  if (discardMatch) {
+    const nDisc = /所有|all/i.test(discardMatch[0]) ? 3 : Math.max(1, Number(discardMatch[1] || discardMatch[2] || discardMatch[3] || 1));
+    dmgNum = Math.round(dmgNum * Math.max(0.72, 1 - 0.08 * nDisc));
+  }
+  const recoilMatch = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
+  if (recoilMatch) {
+    const recoil = Number(recoilMatch[1] || recoilMatch[2] || 0);
+    dmgNum = Math.max(10, dmgNum - Math.round(recoil * 0.6));
+  }
+  return { dmgNum, isOpponentMissDebuff };
+}
+
 export function encodeCardForFastSim(card, strategyBonus = 0) {
   if (!card) {
     return {
@@ -648,7 +731,7 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
   const primaryType = (card.types?.[0] || 'colorless').toLowerCase();
   const typeCode = FASTSIM_TYPE_CODES[primaryType] ?? 9;
   const weakCode = card.weakness ? (FASTSIM_TYPE_CODES[String(card.weakness).toLowerCase()] ?? 255) : 255;
-  const hp = isFossil ? 40 : (Number(card.hp) || (isPokemon ? 60 : 0));
+  let hp = isFossil ? 40 : (Number(card.hp) || (isPokemon ? 60 : 0));
   const retreat = isFossil ? 4 : Math.min(4, Math.max(0, Number(card.retreat ?? 1)));
   const cats = card.type === 'pokemon' ? (card._pokeCats || getPokemonCategories(card)) : [];
   const isMega = cats.includes('mega');
@@ -659,37 +742,17 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
   let bestCost = 1;
   let atkFlags = 0;
   for (const atk of card.attacks || []) {
-    const rawDmgStr = String(atk.damage || '0');
-    let dmgNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
     const cost = Math.max(0, Math.min(5, (atk.cost || []).length));
     const eff = String(atk.effect || '');
-    // 在快速初篩中對高代價招式做真實期望折減，避免棄能/反傷/擲硬幣招式被誤判為免費高傷
-    if (/反面.*失敗|若為反面.*失敗|tails.*does nothing/i.test(eff)) {
-      dmgNum = Math.round(dmgNum * 0.5);
-    } else if (rawDmgStr.includes('×') || rawDmgStr.includes('x')) {
-      dmgNum = Math.round(dmgNum * 0.65);
-    }
-    if (/下個自己的回合.*無法使用|can't attack during your next turn/i.test(eff)) {
-      dmgNum = Math.round(dmgNum * 0.72);
-    }
-    const discardMatch = eff.match(/將這隻寶可夢身上的(?:所有|(\d+)個).*能量丟棄|discard\s+(\d+|all)\s+.*energy/i);
-    if (discardMatch) {
-      const nDisc = /所有|all/i.test(discardMatch[0]) ? 3 : Math.max(1, Number(discardMatch[1] || discardMatch[2] || 1));
-      dmgNum = Math.round(dmgNum * Math.max(0.52, 1 - 0.14 * nDisc));
-    }
-    const recoilMatch = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
-    if (recoilMatch) {
-      const recoil = Number(recoilMatch[1] || recoilMatch[2] || 0);
-      dmgNum = Math.max(10, dmgNum - Math.round(recoil * 0.6));
-    }
+    const { dmgNum, isOpponentMissDebuff } = computeExpectedAttackDamage(atk);
     const effCost = Math.max(1, cost);
     if (dmgNum > bestDmg || (dmgNum === bestDmg && effCost < bestCost)) {
       bestDmg = dmgNum;
       bestCost = effCost;
     }
     if (eff.length > 0) atkFlags |= 1;
-    if (/備戰|bench/i.test(eff) && /傷害|damage/i.test(eff)) atkFlags |= 2;
-    if (/中毒|灼傷|睡眠|麻痺|混亂|poison|burn|asleep|paralyz|confus/i.test(eff)) atkFlags |= 4;
+    if (/備戰|bench|對手的(?:1隻|任1隻)寶可夢受到/i.test(eff) && /傷害|damage/i.test(eff)) atkFlags |= 2;
+    if (isOpponentMissDebuff || /中毒|灼傷|睡眠|麻痺|混亂|poison|burn|asleep|paralyz|confus/i.test(eff)) atkFlags |= 4;
     if (/恢復|heal/i.test(eff)) atkFlags |= 8;
     if (/能量區.*附|附於.*能量|attach.*energy/i.test(eff)) atkFlags |= 16;
   }
@@ -700,9 +763,14 @@ export function encodeCardForFastSim(card, strategyBonus = 0) {
     abFlags |= 1;
     const eff = String(ab.effect || '');
     if (/抽.*張|draw/i.test(eff)) abFlags |= 2;
-    if (/能量區|附於|attach.*energy/i.test(eff)) abFlags |= 4;
+    if (/能量區|附於|轉移.*能量|attach.*energy|move.*energy/i.test(eff)) abFlags |= 4;
     if (/恢復|heal/i.test(eff)) abFlags |= 8;
-    if (/傷害|damage/i.test(eff)) abFlags |= 16;
+    if (/傷害|damage/i.test(eff) && !/不會受到/.test(eff)) abFlags |= 16;
+    // 防 ex 免疫特性（如花舞鳥「神祕守護」）：在高速引擎中以高耐久坦度等效呈現對 ex 隊的拖延壓制
+    if (/不會受到.*寶可夢ex.*招式的傷害|prevent all damage done to this Pok[eé]mon by attacks from.*Pok[eé]mon ex/i.test(eff)) {
+      hp = Math.round(hp * 1.9);
+      abFlags |= 8;
+    }
   }
 
   let trainerKind = 0;
@@ -1662,19 +1730,7 @@ export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
           return !k || k === 'colorless' || deckEnergySet.has(k);
         });
         if (canPay) {
-          const rawDmgStr = String(atk.damage || '0');
-          let dmgNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
-          const eff = String(atk.effect || '');
-          if (/反面.*失敗|若為反面.*失敗|tails.*does nothing/i.test(eff)) dmgNum = Math.round(dmgNum * 0.5);
-          else if (rawDmgStr.includes('×') || rawDmgStr.includes('x')) dmgNum = Math.round(dmgNum * 0.65);
-          if (/下個自己的回合.*無法使用|can't attack during your next turn/i.test(eff)) dmgNum = Math.round(dmgNum * 0.72);
-          const discardMatch = eff.match(/將這隻寶可夢身上的(?:所有|(\d+)個).*能量丟棄|discard\s+(\d+|all)\s+.*energy/i);
-          if (discardMatch) {
-            const nDisc = /所有|all/i.test(discardMatch[0]) ? 3 : Math.max(1, Number(discardMatch[1] || discardMatch[2] || 1));
-            dmgNum = Math.round(dmgNum * Math.max(0.52, 1 - 0.14 * nDisc));
-          }
-          const recoilMatch = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
-          if (recoilMatch) dmgNum = Math.max(10, dmgNum - Math.round(Number(recoilMatch[1] || recoilMatch[2] || 0) * 0.6));
+          const { dmgNum } = computeExpectedAttackDamage(atk);
           const costLen = Math.max(1, Math.min(5, costs.length || 1));
           if (dmgNum > playableDmg || (dmgNum === playableDmg && costLen < playableCost)) {
             playableDmg = dmgNum;
