@@ -7,7 +7,7 @@ import {
   mergeVaultSnapshots,
   pushRemoteVault
 } from './cloud.mjs';
-import { getPokemonCategories, getPokemonCategorySearchTerms, normalizeFeaturedPokemon, normalizeSearch, readDeckFile } from './core.mjs';
+import { getPokemonCategories, getPokemonCategorySearchTerms, normalizeFeaturedPokemon, normalizeSearch, parsePairwiseBinary, readDeckFile } from './core.mjs';
 import { all, get, put, remove } from './storage.mjs';
 
 export const isFixtureMode = () => (typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fixture') === '1' : false);
@@ -48,6 +48,7 @@ export const state = {
   cardPriors: null,
   strategyIndex: null,
   strategyLexicon: null,
+  pairwiseStrategies: null,
   coverageMap: null,
   cloudSession: null,
   lastSyncedUserId: null,
@@ -205,6 +206,37 @@ export async function ensureStrategyLexicon() {
       .finally(() => { strategyLexiconPromise = null; });
   }
   return strategyLexiconPromise;
+}
+
+let pairwiseStrategiesPromise = null;
+export async function ensurePairwiseStrategies() {
+  if (state.pairwiseStrategies) return state.pairwiseStrategies;
+  if (!pairwiseStrategiesPromise) {
+    pairwiseStrategiesPromise = (async () => {
+      const metaDoc = await fetchJsonOptional('battle/strategies/pairwise-10m.json');
+      if (!metaDoc) return null;
+      const urls = Array.isArray(metaDoc.binaryShards) && metaDoc.binaryShards.length
+        ? metaDoc.binaryShards
+        : [metaDoc.binaryFile || 'battle/strategies/pairwise-10m.bin'];
+      const parts = await Promise.all(
+        urls.map((u) => fetch(u).then((r) => (r.ok ? r.arrayBuffer() : null)))
+      );
+      if (parts.some((p) => !p)) return null;
+      let totalLen = 0;
+      for (const p of parts) totalLen += p.byteLength;
+      const merged = new Uint8Array(totalLen);
+      let off = 0;
+      for (const p of parts) {
+        merged.set(new Uint8Array(p), off);
+        off += p.byteLength;
+      }
+      state.pairwiseStrategies = parsePairwiseBinary(merged.buffer, metaDoc);
+      return state.pairwiseStrategies;
+    })()
+      .catch(() => null)
+      .finally(() => { pairwiseStrategiesPromise = null; });
+  }
+  return pairwiseStrategiesPromise;
 }
 
 export async function ensureFullMeta() {

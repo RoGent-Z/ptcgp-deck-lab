@@ -1,7 +1,12 @@
 {
-  "schemaVersion": 1,
-  "generatedAt": "2026-11-23T02:08:47.386Z",
-  "totalEntries": 13500,
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-24T05:56:21.000Z",
+  "totalEntries": 10485676,
+  "singleCardEntries": 13500,
+  "pairwiseEntries": 10472176,
+  "pairwiseFunctionalPairs": 3293461,
+  "pairwiseGamesPerPair": 1000,
+  "pairwiseTotalGamesSimulated": 3293461000,
   "cardsEvaluated": 4577,
   "minGamesPerCard": 2400,
   "totalCardEvalGames": 10984800,
@@ -35,6 +40,11 @@
       "id": "matchup_macro",
       "labelZh": "高階環境與對位攻略",
       "count": 185
+    },
+    {
+      "id": "pairwise_synergy",
+      "labelZh": "全卡兩兩千局協同",
+      "count": 10472176
     }
   ],
   "sources": [

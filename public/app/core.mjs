@@ -729,20 +729,142 @@ function ensureLexiconIndex(lexicon) {
   return lexicon._idx;
 }
 
-export function matchDeckStrategies(deck, lineup = [], lexicon = null, baseWeights = []) {
+export function parsePairwiseBinary(arrayBuffer, metaDoc = null) {
+  if (!arrayBuffer || arrayBuffer.byteLength < 32) return null;
+  const view = new DataView(arrayBuffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== 'PLP1') throw Error(`無效的雙卡策略庫檔頭 (${magic})`);
+
+  const version = view.getUint32(4, true);
+  const totalCards = view.getUint32(8, true);
+  const functionalCards = view.getUint32(12, true);
+  const functionalPairs = view.getUint32(16, true);
+  const totalPairwiseEntries = view.getUint32(20, true);
+  const gamesPerPair = view.getUint32(24, true);
+  const groupTableBytes = view.getUint32(28, true);
+
+  const groupOf = new Uint16Array(arrayBuffer, 32, totalCards);
+  const matrixOffset = 32 + groupTableBytes;
+  const matrix = new Uint8Array(arrayBuffer, matrixOffset, functionalPairs * 2);
+
+  const cardIds = Array.isArray(metaDoc?.cardIds) ? metaDoc.cardIds : [];
+  const cardIdxById = new Map();
+  for (let i = 0; i < cardIds.length; i++) {
+    cardIdxById.set(cardIds[i], i);
+  }
+
+  return {
+    version,
+    totalCards,
+    functionalCards,
+    functionalPairs,
+    totalPairwiseEntries,
+    gamesPerPair,
+    groupOf,
+    matrix,
+    cardIds,
+    cardIdxById,
+    meta: metaDoc || {}
+  };
+}
+
+export function lookupPairwiseStrategy(pairwiseDb, cardIdA, cardIdB, cardsById = null) {
+  if (!pairwiseDb?.matrix || !pairwiseDb.cardIdxById) return null;
+  const idxA = pairwiseDb.cardIdxById.get(cardIdA);
+  const idxB = pairwiseDb.cardIdxById.get(cardIdB);
+  if (idxA === undefined || idxB === undefined) return null;
+
+  const G = pairwiseDb.functionalCards;
+  let u = pairwiseDb.groupOf[idxA];
+  let v = pairwiseDb.groupOf[idxB];
+  if (u > v) { const t = u; u = v; v = t; }
+  const pIdx = u * G - ((u * (u - 1)) / 2) + (v - u);
+  if (pIdx < 0 || pIdx >= pairwiseDb.functionalPairs) return null;
+
+  const wrByte = pairwiseDb.matrix[pIdx * 2];
+  const byte1 = pairwiseDb.matrix[pIdx * 2 + 1];
+  const wr = roundW(wrByte / 250);
+  const synNibble = (byte1 >> 4) & 0xf;
+  const delta = roundW((synNibble - 8) / 200);
+  const bestRegime = (byte1 >> 2) & 0x3;
+  const archetypeTag = byte1 & 0x3;
+
+  const meta = pairwiseDb.meta || {};
+  const regimeLabels = meta.regimeLabelsZh || ['快攻搶分流', '控場干擾流', '進化續航流', '狙擊獎賞流'];
+  const archLabels = meta.archetypeLabelsZh || ['常規雙卡協同', '同系強聯動組合', '進化與道具核心連攜', '跨系配置風險警示'];
+  const templates = meta.archetypeRuleTemplates || [];
+  const wDeltas = meta.regimeWDeltas || [
+    { idx: [2, 9, 11, 14], val: [0.18, 0.20, 0.24, 0.16] },
+    { idx: [6, 7, 8, 19], val: [0.18, 0.18, 0.22, 0.20] },
+    { idx: [4, 5, 15, 20], val: [0.22, 0.20, 0.16, 0.22] },
+    { idx: [11, 12, 19, 21], val: [0.24, 0.16, 0.18, 0.26] }
+  ];
+
+  const cA = cardsById?.get?.(cardIdA);
+  const cB = cardsById?.get?.(cardIdB);
+  const nameA = cA?.name || cardIdA;
+  const nameB = cB?.name || cardIdB;
+  const regimeLabel = regimeLabels[bestRegime] || '綜合節奏流';
+  const archetypeLabel = archLabels[archetypeTag] || '雙卡協同';
+  const sdStr = `${delta >= 0 ? '+' : ''}${(delta * 100).toFixed(1)}%`;
+  const tpl = templates[archetypeTag]
+    || '「{A}」與「{B}」經 1,000 局雙卡實測，於「{R}」表現最佳（勝率 {WR}%，協同 {SD}）。';
+  const rule = tpl
+    .replace('{A}', nameA)
+    .replace('{B}', nameB)
+    .replace('{R}', regimeLabel)
+    .replace('{WR}', (wr * 100).toFixed(1))
+    .replace('{SD}', sdStr);
+
+  const wd = wDeltas[bestRegime] || wDeltas[0];
+  const scale = archetypeTag === 3 ? -0.35 : Math.max(0.2, Math.min(1.4, 0.65 + delta * 12));
+  const bonus = roundW(Math.max(-0.22, Math.min(0.32, (wr - 0.5) * 0.45 + delta * 2.2)));
+  const pairId = idxA <= idxB ? `PAIR:${cardIdA}+${cardIdB}` : `PAIR:${cardIdB}+${cardIdA}`;
+
+  return {
+    id: pairId,
+    pairIndex: pIdx,
+    cardA: cardIdA,
+    cardB: cardIdB,
+    nameA,
+    nameB,
+    cat: 'pairwise_synergy',
+    catLabel: archetypeLabel,
+    games: pairwiseDb.gamesPerPair || 1000,
+    wr,
+    delta,
+    bestRegime,
+    regimeLabel,
+    archetypeTag,
+    archetypeLabel,
+    title: `${nameA} × ${nameB}（${regimeLabel}）`,
+    rule,
+    wIdx: wd.idx,
+    wVal: wd.val.map((v) => roundW(v * scale)),
+    bonus
+  };
+}
+
+export function matchDeckStrategies(deck, lineup = [], lexicon = null, baseWeights = [], pairwiseDb = null, cardsById = null) {
   const base = Array.isArray(baseWeights) && baseWeights.length === 22
     ? baseWeights.map(Number)
     : Array(22).fill(0);
   const idx = ensureLexiconIndex(lexicon);
-  if (!idx || !deck?.cards?.length) {
+  const pairTotal = pairwiseDb?.totalPairwiseEntries || 0;
+  const singleTotal = lexicon?.totalEntries || lexicon?.entries?.length || 0;
+  if ((!idx && !pairwiseDb) || !deck?.cards?.length) {
     return {
-      totalLexiconCount: lexicon?.totalEntries || 0,
+      totalLexiconCount: singleTotal + pairTotal,
+      singleLexiconCount: singleTotal,
+      pairwiseLexiconCount: pairTotal,
       matchedCount: 0,
       cardMatchedCount: 0,
       macroMatchedCount: 0,
+      pairMatchedCount: 0,
       cardBonusById: {},
       lexiconSeedWeights: [...base],
       topActiveStrategies: [],
+      activePairStrategies: [],
       matchedIds: []
     };
   }
@@ -753,12 +875,14 @@ export function matchDeckStrategies(deck, lineup = [], lexicon = null, baseWeigh
   const wAccum = Array(22).fill(0);
   const wHits = Array(22).fill(0);
   const seenCardIds = new Set();
+  const uniqueDeckItems = [];
 
-  // 1. 匹配本牌組內每一張寶可夢卡與訓練家卡對應的所有策略詞條
+  // 1. 匹配本牌組內每一張寶可夢卡與訓練家卡對應的單卡策略詞條
   for (const item of deck.cards) {
     if (!item?.id || seenCardIds.has(item.id)) continue;
     seenCardIds.add(item.id);
-    const list = idx.byCardId.get(item.id) || [];
+    uniqueDeckItems.push(item);
+    const list = idx?.byCardId.get(item.id) || [];
     for (const r of list) {
       matched.push(r);
       const b = Number(r[12] || 0);
@@ -780,7 +904,7 @@ export function matchDeckStrategies(deck, lineup = [], lexicon = null, baseWeigh
   // 2. 匹配對陣前十對手與通用環境攻略詞條
   const oppIdSet = new Set((lineup || []).map((x) => x.entry?.id || x.id).filter(Boolean));
   let macroMatchedCount = 0;
-  for (const r of idx.macro) {
+  for (const r of idx?.macro || []) {
     const target = String(r[3] || '');
     const oppPrefix = target.includes(':') ? target.split(':')[0] : '';
     const isRelevant = !oppPrefix || oppIdSet.has(oppPrefix);
@@ -798,21 +922,52 @@ export function matchDeckStrategies(deck, lineup = [], lexicon = null, baseWeigh
     }
   }
 
+  // 3. 查詢 10M 級全卡兩兩千局實測雙卡協同詞條庫（本牌組內所有 C(K,2) 雙卡組合 + 滿編雙張組合）
+  const activePairStrategies = [];
+  if (pairwiseDb?.matrix) {
+    for (let i = 0; i < uniqueDeckItems.length; i++) {
+      const a = uniqueDeckItems[i];
+      for (let j = i; j < uniqueDeckItems.length; j++) {
+        const b = uniqueDeckItems[j];
+        if (i === j && Number(a.count || 1) < 2) continue;
+        const ps = lookupPairwiseStrategy(pairwiseDb, a.id, b.id, cardsById);
+        if (!ps) continue;
+        activePairStrategies.push(ps);
+        const weightFactor = ps.archetypeTag === 2 ? 0.55 : ps.archetypeTag === 1 ? 0.45 : ps.archetypeTag === 3 ? 0.25 : 0.30;
+        cardBonusSum.set(a.id, (cardBonusSum.get(a.id) || 0) + ps.bonus * weightFactor);
+        cardBonusCnt.set(a.id, (cardBonusCnt.get(a.id) || 0) + weightFactor);
+        if (b.id !== a.id) {
+          cardBonusSum.set(b.id, (cardBonusSum.get(b.id) || 0) + ps.bonus * weightFactor);
+          cardBonusCnt.set(b.id, (cardBonusCnt.get(b.id) || 0) + weightFactor);
+        }
+        for (let k = 0; k < ps.wIdx.length; k++) {
+          const fi = ps.wIdx[k];
+          if (fi >= 0 && fi < 22) {
+            wAccum[fi] += Number(ps.wVal[k] || 0) * weightFactor;
+            wHits[fi] += weightFactor;
+          }
+        }
+      }
+    }
+    activePairStrategies.sort((x, y) => (y.delta * 2.2 + y.wr) - (x.delta * 2.2 + x.wr));
+  }
+  const pairMatchedCount = activePairStrategies.length;
+
   const cardBonusById = {};
   for (const [cid, sum] of cardBonusSum.entries()) {
-    cardBonusById[cid] = roundW(sum / Math.max(1, cardBonusCnt.get(cid) || 1));
+    cardBonusById[cid] = roundW(sum / Math.max(0.01, cardBonusCnt.get(cid) || 1));
   }
 
-  // 將匹配策略詞條的 22 維戰術方向平滑融合至基礎模型作為千萬局推演種子權重
+  // 將單卡 + 雙卡協同策略的 22 維戰術方向平滑融合至基礎模型作為推演種子權重
   const lexiconSeedWeights = base.map((b, k) => {
     const avgShift = wHits[k] > 0 ? wAccum[k] / wHits[k] : 0;
     return roundW(b + Math.max(-0.45, Math.min(0.45, avgShift * 0.55)));
   });
 
-  const catLabels = lexicon.catLabelsZh || {};
-  const cats = lexicon.cats || [];
-  const sorted = [...matched].sort((a, b) => (Number(b[8] || 0) + Number(b[7] || 0) * 0.2) - (Number(a[8] || 0) + Number(a[7] || 0) * 0.2));
-  const topActiveStrategies = sorted.slice(0, 12).map((r) => ({
+  const catLabels = lexicon?.catLabelsZh || {};
+  const cats = lexicon?.cats || [];
+  const sortedSingle = [...matched].sort((a, b) => (Number(b[8] || 0) + Number(b[7] || 0) * 0.2) - (Number(a[8] || 0) + Number(a[7] || 0) * 0.2));
+  const topSingle = sortedSingle.slice(0, 8).map((r) => ({
     id: r[0],
     cat: cats[r[1]] || 'matchup_macro',
     catLabel: catLabels[cats[r[1]]] || '策略詞條',
@@ -824,15 +979,33 @@ export function matchDeckStrategies(deck, lineup = [], lexicon = null, baseWeigh
     wr: r[7],
     delta: r[8]
   }));
+  const topPairs = activePairStrategies.slice(0, 8).map((ps) => ({
+    id: ps.id,
+    cat: ps.cat,
+    catLabel: ps.catLabel,
+    cardId: ps.cardA,
+    cardIdB: ps.cardB,
+    target: `${ps.cardA}+${ps.cardB}`,
+    title: ps.title,
+    rule: ps.rule,
+    games: ps.games,
+    wr: ps.wr,
+    delta: ps.delta
+  }));
+  const topActiveStrategies = [...topPairs.slice(0, 6), ...topSingle.slice(0, 6)];
 
   return {
-    totalLexiconCount: lexicon.totalEntries || lexicon.entries.length,
-    matchedCount: matched.length,
+    totalLexiconCount: singleTotal + pairTotal,
+    singleLexiconCount: singleTotal,
+    pairwiseLexiconCount: pairTotal,
+    matchedCount: matched.length + pairMatchedCount,
     cardMatchedCount,
     macroMatchedCount,
+    pairMatchedCount,
     cardBonusById,
     lexiconSeedWeights,
     topActiveStrategies,
+    activePairStrategies: activePairStrategies.slice(0, 40),
     matchedIds: matched.map((r) => r[0])
   };
 }

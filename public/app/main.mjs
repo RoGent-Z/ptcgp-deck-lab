@@ -4,6 +4,7 @@ import {
   EXPLORE_TOTAL_GAMES,
   GAMES_PER_OPPONENT,
   isAndroidOrMobileEnv,
+  matchDeckStrategies,
   normalizeFeaturedPokemon,
   replaceDeckCardOnce,
   resolveModelSimProfile,
@@ -28,6 +29,7 @@ import {
 import {
   deleteDeck,
   ensureFullMeta,
+  ensurePairwiseStrategies,
   ensureStrategyLexicon,
   exportFullBackupJson,
   freshnessStatus,
@@ -1105,7 +1107,7 @@ async function handleAction(el) {
   }
 
   if (action === 'open-strategy-lexicon' || action === 'strategy-lex-filter' || action === 'strategy-lex-page') {
-    if (!uiState.battle.lex) uiState.battle.lex = { q: '', cat: 'all', onlyMatched: false, page: 1 };
+    if (!uiState.battle.lex) uiState.battle.lex = { q: '', cat: 'pairwise_synergy', onlyMatched: false, page: 1 };
     if (action === 'strategy-lex-filter') {
       uiState.battle.lex.cat = el.dataset.cat || 'all';
       uiState.battle.lex.onlyMatched = el.dataset.matched === '1';
@@ -1113,19 +1115,26 @@ async function handleAction(el) {
     } else if (action === 'strategy-lex-page') {
       uiState.battle.lex.page = Math.max(1, Number(el.dataset.page) || 1);
     }
-    if (!state.strategyLexicon) {
-      openModal('策略詞條庫（載入中…）', '<div class="empty-box is-dashed">正在載入 13,500 條策略詞條庫…</div>', { wide: true });
-      await ensureStrategyLexicon();
+    if (!state.strategyLexicon || !state.pairwiseStrategies) {
+      openModal('策略詞條庫（載入中…）', '<div class="empty-box is-dashed">正在載入 1,048 萬條策略詞條庫…</div>', { wide: true });
+      await Promise.all([ensureStrategyLexicon(), ensurePairwiseStrategies()]);
     }
     const run = state.runs.find((r) => r.runId === uiState.battle.activeRunId) || state.runs[0];
-    const matchedIds = run?.matchedStrategies?.matchedIds || [];
+    const selDeck = state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0] || null;
+    const matchedLive = run?.matchedStrategies
+      || (selDeck ? matchDeckStrategies(selDeck, [], state.strategyLexicon, state.modelInfo?.weights || [], state.pairwiseStrategies, state.cardsById) : null);
+    const matchedIds = matchedLive?.matchedIds || [];
+    const activePairs = matchedLive?.activePairStrategies || [];
     const html = buildStrategyLexiconModal({
       lexicon: state.strategyLexicon,
+      pairwiseDb: state.pairwiseStrategies,
       indexDoc: state.strategyIndex,
       matchedIdSet: new Set(matchedIds),
+      activePairs,
+      deck: selDeck,
       ...uiState.battle.lex
     });
-    const total = state.strategyLexicon?.entries?.length || 13500;
+    const total = (state.strategyLexicon?.entries?.length || 13500) + (state.pairwiseStrategies?.totalPairwiseEntries || 10472176);
     openModal(`策略詞條庫（${total.toLocaleString('zh-TW')} 條）`, html, { wide: true });
     return;
   }
@@ -1250,13 +1259,20 @@ document.addEventListener('input', (e) => {
     uiState.battle.lex.page = 1;
     clearTimeout(qTimer);
     qTimer = setTimeout(() => {
-      if (!dialogEl.open || !state.strategyLexicon) return;
+      if (!dialogEl.open || (!state.strategyLexicon && !state.pairwiseStrategies)) return;
       const run = state.runs.find((r) => r.runId === uiState.battle.activeRunId) || state.runs[0];
-      const matchedIds = run?.matchedStrategies?.matchedIds || [];
+      const selDeck = state.decks.find((d) => d.id === uiState.battle.deckId) || state.decks[0] || null;
+      const matchedLive = run?.matchedStrategies
+        || (selDeck ? matchDeckStrategies(selDeck, [], state.strategyLexicon, state.modelInfo?.weights || [], state.pairwiseStrategies, state.cardsById) : null);
+      const matchedIds = matchedLive?.matchedIds || [];
+      const activePairs = matchedLive?.activePairStrategies || [];
       dialogBodyEl.innerHTML = buildStrategyLexiconModal({
         lexicon: state.strategyLexicon,
+        pairwiseDb: state.pairwiseStrategies,
         indexDoc: state.strategyIndex,
         matchedIdSet: new Set(matchedIds),
+        activePairs,
+        deck: selDeck,
         ...uiState.battle.lex
       });
       const inp = document.getElementById('lex-search-input');

@@ -83,13 +83,15 @@ test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-lea
     assert.ok(mirrorWr >= 0.45 && mirrorWr <= 0.55, `${id} mirror win rate ${mirrorWr} out of balanced range`);
   }
 
-  // Verify 13,500+ Strategy Lexicon covers all 4,577 cards with >= 1,000 games/card & unique IDs
+  // Verify 10.48M Strategy Lexicon (13,500 single/macro + 10,472,176 all-pairs 1,000-game tested)
   const lexIndex = JSON.parse(await readFile(new URL("../public/battle/strategies/index.json", import.meta.url), "utf8"));
   const lexDoc = JSON.parse(await readFile(new URL("../public/battle/strategies/lexicon.json", import.meta.url), "utf8"));
-  assert.ok(lexIndex.totalEntries >= 10000, `Expected >= 10,000 strategy entries, got ${lexIndex.totalEntries}`);
-  assert.equal(lexDoc.entries.length, lexIndex.totalEntries);
+  assert.ok(lexIndex.totalEntries >= 10_000_000, `Expected >= 10,000,000 strategy entries, got ${lexIndex.totalEntries}`);
+  assert.equal(lexDoc.entries.length, lexIndex.singleCardEntries);
+  assert.equal(lexIndex.singleCardEntries + lexIndex.pairwiseEntries, lexIndex.totalEntries);
   assert.equal(lexIndex.cardsEvaluated, 4577);
   assert.ok(lexIndex.minGamesPerCard >= 1000);
+  assert.equal(lexIndex.pairwiseGamesPerPair, 1000);
   const uniqIds = new Set(lexDoc.entries.map((r) => r[0]));
   assert.equal(uniqIds.size, lexDoc.entries.length);
 
@@ -405,4 +407,42 @@ test("deployed dual models (1B5M全量模型 & 1M5Q轻量模型), top10 100M-lea
     assert.equal(r.games, 200);
     assert.equal(r.wins + r.draws + r.losses, 200);
   }
+
+  // Verify 10.47M all-pairs 1,000-game pairwise strategy binary matrix & O(1) lookup + deck strategy fusion
+  const { parsePairwiseBinary, lookupPairwiseStrategy } = await import("../public/app/core.mjs");
+  const pairMeta = JSON.parse(await readFile(new URL("../public/battle/strategies/pairwise-10m.json", import.meta.url), "utf8"));
+  const shardPaths = Array.isArray(pairMeta.binaryShards) && pairMeta.binaryShards.length
+    ? pairMeta.binaryShards
+    : [pairMeta.binaryFile || "battle/strategies/pairwise-10m.bin"];
+  const shardBufs = await Promise.all(shardPaths.map((p) => readFile(new URL(`../public/${p}`, import.meta.url))));
+  const pairBinBuf = Buffer.concat(shardBufs);
+  const pairAb = pairBinBuf.buffer.slice(pairBinBuf.byteOffset, pairBinBuf.byteOffset + pairBinBuf.byteLength);
+  const pairDb = parsePairwiseBinary(pairAb, pairMeta);
+  assert.equal(pairDb.totalCards, 4577);
+  assert.equal(pairDb.functionalCards, 2566);
+  assert.equal(pairDb.functionalPairs, 3293461);
+  assert.equal(pairDb.totalPairwiseEntries, 10472176);
+  assert.equal(pairDb.gamesPerPair, 1000);
+  assert.equal(pairMeta.totalGamesSimulated, 3293461000);
+
+  const comboGood = lookupPairwiseStrategy(pairDb, "A2b-010", "A3-155", cardById); // 噴火龍ex + 莉莉艾
+  assert.ok(comboGood && comboGood.games === 1000);
+  assert.ok(comboGood.wr > 0.7, `Expected strong synergy WR for Charizard ex + Lillie, got ${comboGood.wr}`);
+  assert.equal(comboGood.archetypeTag, 2); // 進化與道具核心連攜
+
+  const comboClash = lookupPairwiseStrategy(pairDb, "B1a-014", "B2-149", cardById); // 超級噴火龍Yex + 卡露妮 ([超])
+  assert.ok(comboClash && comboClash.games === 1000);
+  assert.equal(comboClash.archetypeTag, 3); // 跨系配置風險警示
+
+  const mergedMatched = matchDeckStrategies(
+    top10[0].representative,
+    top10.map((entry, idx) => ({ rank: idx + 1, entry })),
+    lexDoc,
+    v3.weights,
+    pairDb,
+    cardById
+  );
+  assert.equal(mergedMatched.totalLexiconCount, 13500 + 10472176);
+  assert.ok(mergedMatched.pairMatchedCount >= 40, `Expected >= 40 pairwise strategies activated, got ${mergedMatched.pairMatchedCount}`);
+  assert.ok(mergedMatched.activePairStrategies.length > 0);
 });

@@ -1,0 +1,608 @@
+{
+  "version": "pairwise-10m-v1",
+  "generatedAt": "2026-11-24T05:56:21.493Z",
+  "binaryFile": "battle/strategies/pairwise-10m.bin",
+  "binaryBytes": 6596110,
+  "binarySha256": "054157055f62971994e358c96b0ebc5c8988a9455757aa4092eb57f7a0b6386f",
+  "totalCards": 4577,
+  "functionalCards": 2566,
+  "functionalPairsTested": 3293461,
+  "totalPairwiseEntries": 10472176,
+  "gamesPerPair": 1000,
+  "totalGamesSimulated": 3293461000,
+  "gpuHardware": "nvidia blackwell",
+  "elapsedSec": 290.63,
+  "gamesPerSec": 11332027,
+  "meanPairWinRate": 0.6193,
+  "positiveSynergyFuncPairs": 379723,
+  "regimeLabelsZh": [
+    "快攻搶分流",
+    "控場干擾流",
+    "進化續航流",
+    "狙擊獎賞流"
+  ],
+  "regimeWDeltas": [
+    {
+      "idx": [
+        2,
+        9,
+        11,
+        14
+      ],
+      "val": [
+        0.18,
+        0.2,
+        0.24,
+        0.16
+      ]
+    },
+    {
+      "idx": [
+        6,
+        7,
+        8,
+        19
+      ],
+      "val": [
+        0.18,
+        0.18,
+        0.22,
+        0.2
+      ]
+    },
+    {
+      "idx": [
+        4,
+        5,
+        15,
+        20
+      ],
+      "val": [
+        0.22,
+        0.2,
+        0.16,
+        0.22
+      ]
+    },
+    {
+      "idx": [
+        11,
+        12,
+        19,
+        21
+      ],
+      "val": [
+        0.24,
+        0.16,
+        0.18,
+        0.26
+      ]
+    }
+  ],
+  "archetypeLabelsZh": [
+    "常規雙卡協同",
+    "同系強聯動組合",
+    "進化與道具核心連攜",
+    "跨系配置風險警示"
+  ],
+  "archetypeRuleTemplates": [
+    "「{A}」與「{B}」經 1,000 局雙卡配對實測，以「{R}」表現最佳（實測勝率 {WR}%，協同增益 {SD}），建議在節奏穩定期雙卡齊發擴大場面差。",
+    "「{A}」與「{B}」形成同系核心聯動，經 1,000 局實測在「{R}」下勝率達 {WR}%（協同增益 {SD}），優先共享能量與濾牌曲線提前定型。",
+    "「{A}」與「{B}」構成關鍵進化／道具連攜軸，經 1,000 局實測於「{R}」達 {WR}% 勝率（協同增益 {SD}），務必保留關鍵手牌與保底資源確保連攜落地。",
+    "「{A}」與「{B}」存在跨系或發動條件衝突風險（1,000 局實測勝率 {WR}%，協同 {SD}），實戰應避免同時強行站場並優先替換為高相容組件。"
+  ],
+  "topDiscoveredCombos": [
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A3-155",
+      "nameB": "莉莉艾",
+      "winRate": 0.879,
+      "synergyDelta": 0.14,
+      "bestRegime": 2,
+      "archetypeTag": 2
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "C1-119",
+      "nameB": "甜甜蜜",
+      "winRate": 0.856,
+      "synergyDelta": 0.15,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B2b-068",
+      "nameB": "卡魯穆",
+      "winRate": 0.864,
+      "synergyDelta": 0.145,
+      "bestRegime": 2,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B4b-213",
+      "nameB": "小青",
+      "winRate": 0.858,
+      "synergyDelta": 0.147,
+      "bestRegime": 3,
+      "archetypeTag": 2
+    },
+    {
+      "cardA": "A4-133",
+      "nameA": "袋獸",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.876,
+      "synergyDelta": 0.135,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A3a-063",
+      "nameB": "異獸防壁",
+      "winRate": 0.854,
+      "synergyDelta": 0.147,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2-142",
+      "nameA": "旋轉洛託姆",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.88,
+      "synergyDelta": 0.132,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B1a-068",
+      "nameB": "希特隆",
+      "winRate": 0.857,
+      "synergyDelta": 0.144,
+      "bestRegime": 2,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A4b-373",
+      "nameB": "博士的研究",
+      "winRate": 0.854,
+      "synergyDelta": 0.142,
+      "bestRegime": 3,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A4-152",
+      "nameB": "傑尼龜噴壺",
+      "winRate": 0.846,
+      "synergyDelta": 0.144,
+      "bestRegime": 1,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B3a-073",
+      "nameB": "弗圖博士",
+      "winRate": 0.855,
+      "synergyDelta": 0.138,
+      "bestRegime": 3,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B1a-062",
+      "nameB": "卷卷耳",
+      "winRate": 0.871,
+      "synergyDelta": 0.128,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "P-B-091",
+      "nameB": "火箭隊的果然翁",
+      "winRate": 0.873,
+      "synergyDelta": 0.127,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2-152",
+      "nameA": "竹蘭",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.859,
+      "synergyDelta": 0.134,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A4-078",
+      "nameA": "波克比",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.87,
+      "synergyDelta": 0.127,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-070",
+      "nameA": "寶可夢中心的姐姐",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.864,
+      "synergyDelta": 0.13,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A3a-068",
+      "nameB": "帥哥",
+      "winRate": 0.853,
+      "synergyDelta": 0.136,
+      "bestRegime": 3,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B4b-184",
+      "nameB": "向尾喵",
+      "winRate": 0.861,
+      "synergyDelta": 0.131,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A2b-069",
+      "nameB": "奇樹",
+      "winRate": 0.85,
+      "synergyDelta": 0.135,
+      "bestRegime": 3,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-071",
+      "nameA": "赤紅",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.86,
+      "synergyDelta": 0.129,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B3a-067",
+      "nameB": "纏紅鶴",
+      "winRate": 0.867,
+      "synergyDelta": 0.125,
+      "bestRegime": 3,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A2b-111",
+      "nameB": "精靈球",
+      "winRate": 0.849,
+      "synergyDelta": 0.134,
+      "bestRegime": 3,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B1-225",
+      "nameB": "模仿少女",
+      "winRate": 0.849,
+      "synergyDelta": 0.134,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B4b-182",
+      "nameB": "肯泰羅ex",
+      "winRate": 0.867,
+      "synergyDelta": 0.124,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B3a-054",
+      "nameB": "破空焰",
+      "winRate": 0.868,
+      "synergyDelta": 0.123,
+      "bestRegime": 2,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2a-027",
+      "nameA": "落雷獸",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.859,
+      "synergyDelta": 0.128,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A3b-067",
+      "nameA": "吃剩的東西",
+      "cardB": "B1-069",
+      "nameB": "胖嘟嘟",
+      "winRate": 0.835,
+      "synergyDelta": 0.141,
+      "bestRegime": 0,
+      "archetypeTag": 2
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "C1-129",
+      "nameB": "友好商店的哥哥",
+      "winRate": 0.853,
+      "synergyDelta": 0.131,
+      "bestRegime": 2,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B4a-069",
+      "nameB": "火箭隊的研究員",
+      "winRate": 0.847,
+      "synergyDelta": 0.134,
+      "bestRegime": 3,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-069",
+      "nameA": "胖嘟嘟",
+      "cardB": "B2a-025",
+      "nameB": "海地鼠",
+      "winRate": 0.834,
+      "synergyDelta": 0.141,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B4-012",
+      "nameB": "蓋蓋蟲",
+      "winRate": 0.861,
+      "synergyDelta": 0.126,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B2a-045",
+      "nameB": "密勒頓",
+      "winRate": 0.863,
+      "synergyDelta": 0.125,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A4-131",
+      "nameA": "吉利蛋",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.864,
+      "synergyDelta": 0.123,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A1-099",
+      "nameA": "霹靂電球",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.859,
+      "synergyDelta": 0.127,
+      "bestRegime": 2,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B2-151",
+      "nameB": "雜耍藝人",
+      "winRate": 0.847,
+      "synergyDelta": 0.132,
+      "bestRegime": 2,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A4a-069",
+      "nameB": "小茜",
+      "winRate": 0.871,
+      "synergyDelta": 0.119,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "A3a-067",
+      "nameB": "格拉吉歐",
+      "winRate": 0.848,
+      "synergyDelta": 0.131,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B3-069",
+      "nameB": "迷布莉姆",
+      "winRate": 0.863,
+      "synergyDelta": 0.123,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2a-070",
+      "nameA": "阿爾宙斯",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.857,
+      "synergyDelta": 0.126,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "P-B-051",
+      "nameB": "基格爾德",
+      "winRate": 0.866,
+      "synergyDelta": 0.12,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A1-115",
+      "nameA": "凱西",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.86,
+      "synergyDelta": 0.123,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B3-097",
+      "nameB": "熊徒弟",
+      "winRate": 0.863,
+      "synergyDelta": 0.122,
+      "bestRegime": 0,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "B1a-014",
+      "nameA": "超級噴火龍Yex",
+      "cardB": "B4-153",
+      "nameB": "滿充",
+      "winRate": 0.863,
+      "synergyDelta": 0.122,
+      "bestRegime": 0,
+      "archetypeTag": 2
+    },
+    {
+      "cardA": "A3-085",
+      "nameA": "科斯莫古",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.857,
+      "synergyDelta": 0.125,
+      "bestRegime": 2,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A2-082",
+      "nameA": "超甲狂犀",
+      "cardB": "A3-104",
+      "nameB": "投擲猴ex",
+      "winRate": 0.832,
+      "synergyDelta": 0.138,
+      "bestRegime": 1,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A4-150",
+      "nameA": "爆炸頭水牛",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.862,
+      "synergyDelta": 0.121,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A2b-010",
+      "nameA": "噴火龍ex",
+      "cardB": "B1-222",
+      "nameB": "哈拉",
+      "winRate": 0.84,
+      "synergyDelta": 0.133,
+      "bestRegime": 1,
+      "archetypeTag": 0
+    },
+    {
+      "cardA": "A3-044",
+      "nameA": "拉普拉斯",
+      "cardB": "B1-069",
+      "nameB": "胖嘟嘟",
+      "winRate": 0.838,
+      "synergyDelta": 0.134,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "A1-097",
+      "nameA": "小磁怪",
+      "cardB": "B1-081",
+      "nameB": "雷伊布ex",
+      "winRate": 0.86,
+      "synergyDelta": 0.122,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    },
+    {
+      "cardA": "B1-081",
+      "nameA": "雷伊布ex",
+      "cardB": "B4b-100",
+      "nameB": "光蚪仔",
+      "winRate": 0.859,
+      "synergyDelta": 0.122,
+      "bestRegime": 0,
+      "archetypeTag": 1
+    }
+  ],
+  "regimeDistribution": [
+    746286,
+    823157,
+    1720712,
+    3306
+  ],
+  "archetypeDistribution": [
+    855077,
+    1030033,
+    59577,
+    1348774
+  ]
+}
