@@ -377,18 +377,119 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
     const sc = cardById.get(stapleId);
     assert.equal(isCardCompatibleWithDeck(sc, optPrep.optCtx), true, `${stapleId} (${sc?.name}) must be compatible in Fire deck`);
   }
-  // Regression: Leaf (A1a-068) must be retreat reduction (effectVal=1);
+  // Regression: Leaf (A1a-068) must be retreat -2 (effectVal=12), X Speed (P-A-002) retreat -1 (effectVal=1);
   // Wally (B4-153 滿充) must be Stage-2 energy attach (trainerKind=6, effectVal=3);
   // Flame Patch (B1-217 火補丁) must be discard-pile energy attach (trainerKind=6, effectVal=4)!
   const encLeaf = encodeCardForFastSim(cardById.get("A1a-068"), 0, cardById);
   assert.equal(encLeaf.trainerKind, 6);
-  assert.equal(encLeaf.effectVal, 1);
+  assert.equal(encLeaf.effectVal, 12);
+  assert.equal(encLeaf.isSupporter, 1);
+  const encXSpeed = encodeCardForFastSim(cardById.get("P-A-002"), 0, cardById);
+  assert.equal(encXSpeed.trainerKind, 6);
+  assert.equal(encXSpeed.effectVal, 1);
+  assert.equal(encXSpeed.isItem, 1);
   const encWally = encodeCardForFastSim(cardById.get("B4-153"), 0, cardById);
   assert.equal(encWally.trainerKind, 6);
   assert.equal(encWally.effectVal, 3);
   const encPatch = encodeCardForFastSim(cardById.get("B1-217"), 0, cardById);
   assert.equal(encPatch.trainerKind, 6);
   assert.equal(encPatch.effectVal, 4);
+
+  // Exact-Mechanics v2 card effect regressions (attacks, abilities, tools, stadiums, trainers)
+  // 1. 0-cost attacks preserved (Chingling B1-109 Item-Lock & Igglybuff A4a-059 Sleep)
+  const encChingling = encodeCardForFastSim(cardById.get("B1-109"), 0, cardById);
+  assert.equal(encChingling.a1Cost, 0);
+  assert.equal(encChingling.a1Dmg, 10);
+  assert.equal(encChingling.a1Op, 23);
+  assert.equal(encChingling.a1Val, 3); // Item lock
+  const encIggly = encodeCardForFastSim(cardById.get("A4a-059"), 0, cardById);
+  assert.equal(encIggly.a1Cost, 0);
+  assert.equal(encIggly.a1Op, 3); // Real Sleep (not Poison!)
+  // 2. Dual-attack Pokémon keep BOTH attacks (Hoopa ex B4-103, Giratina ex C1-101, Chien-Pao ex B2a-037)
+  const encHoopa = encodeCardForFastSim(cardById.get("B4-103"), 0, cardById);
+  assert.equal(encHoopa.a1Cost, 1);
+  assert.equal(encHoopa.a1Dmg, 30);
+  assert.equal(encHoopa.a1Op, 17); // +20 bench snipe
+  assert.equal(encHoopa.a2Cost, 3);
+  assert.equal(encHoopa.a2Dmg, 100);
+  assert.equal(encHoopa.a2Op, 15); // 20 self-recoil
+  assert.equal(encHoopa.a2Val, 20);
+  const encChienPao = encodeCardForFastSim(cardById.get("B2a-037"), 0, cardById);
+  assert.equal(encChienPao.a1Cost, 1);
+  assert.equal(encChienPao.a1Dmg, 20);
+  assert.equal(encChienPao.a2Cost, 3);
+  assert.equal(encChienPao.a2Op, 17);
+  assert.equal(encChienPao.a2Val >> 8, 8); // pure snipe + discard all energy
+  assert.equal(encChienPao.a2Val & 0xff, 130);
+  // 3. Dynamic scaling attacks do NOT get fake bench snipe (Suicune ex & Mega Altaria ex)
+  const encSuicune = encodeCardForFastSim(cardById.get("A4a-020"), 0, cardById);
+  assert.equal(encSuicune.a1Op, 10);
+  assert.equal(encSuicune.a1Val >> 8, 2); // both benches
+  assert.equal(encSuicune.a1Val & 0xff, 20);
+  assert.equal(encSuicune.abOp, 1); // Legendary Pulse EoT draw 1
+  const encAltaria = encodeCardForFastSim(cardById.get("B1-102"), 0, cardById);
+  assert.equal(encAltaria.a1Dmg, 40);
+  assert.equal(encAltaria.a1Op, 10);
+  assert.equal(encAltaria.a1Val >> 8, 0); // own bench only
+  assert.equal(encAltaria.a1Val & 0xff, 30);
+  // 4. Entei ex extra-energy threshold (60 + 60 if >= 2 extra fire energy)
+  const encEntei = encodeCardForFastSim(cardById.get("A4a-010"), 0, cardById);
+  assert.equal(encEntei.a1Cost, 2);
+  assert.equal(encEntei.a1Dmg, 60);
+  assert.equal(encEntei.a1Op, 13);
+  assert.equal(encEntei.a1Val >> 8, 2);
+  assert.equal(encEntei.a1Val & 0xff, 60);
+  // 5. C1-018 Charizard Flame Aura (30 dmg on Fire energy attach), Hydreigon (+2e -30hp), Greninja ex free switch
+  const encC1Zard = encodeCardForFastSim(cardById.get("C1-018"), 0, cardById);
+  assert.equal(encC1Zard.abOp, 9);
+  assert.equal(encC1Zard.abVal, 30);
+  const encHydreigon = encodeCardForFastSim(cardById.get("B1-157"), 0, cardById);
+  assert.equal(encHydreigon.abOp, 3);
+  assert.equal(encHydreigon.abVal, 3); // +2 energy & -30 self HP
+  const encGrenEx = encodeCardForFastSim(cardById.get("B1-073"), 0, cardById);
+  assert.equal(encGrenEx.abOp, 17); // Water Shuriken / Shifting Stream free switch
+  // 6. Tools, Stadiums, and Trainers exact effects (NO Small Balloon +20HP, NO Prism Cave +10 dmg, NO Ice Pop bounce, NO Guzma Sabrina!)
+  const encBalloon = encodeCardForFastSim(cardById.get("B3b-064"), 0, cardById);
+  assert.equal(encBalloon.trainerKind, 5);
+  assert.equal(encBalloon.effectVal, 5); // Basic -1 retreat, NOT +20 HP (1)
+  const encEviolite = encodeCardForFastSim(cardById.get("C1-123"), 0, cardById);
+  assert.equal(encEviolite.trainerKind, 5);
+  assert.equal(encEviolite.effectVal, 6); // Basic -20 dmg
+  const encLuckyEgg = encodeCardForFastSim(cardById.get("B3-148"), 0, cardById);
+  assert.equal(encLuckyEgg.trainerKind, 5);
+  assert.equal(encLuckyEgg.effectVal, 7);
+  const encTrickPin = encodeCardForFastSim(cardById.get("B4-148"), 0, cardById);
+  assert.equal(encTrickPin.trainerKind, 5);
+  assert.equal(encTrickPin.effectVal, 8);
+  const encPrismCave = encodeCardForFastSim(cardById.get("B4-155"), 0, cardById);
+  assert.equal(encPrismCave.trainerKind, 7);
+  assert.equal(encPrismCave.effectVal, 1); // Neutral stadium
+  const encTrainingArea = encodeCardForFastSim(cardById.get("B2-153"), 0, cardById);
+  assert.equal(encTrainingArea.trainerKind, 7);
+  assert.equal(encTrainingArea.effectVal, 2); // Stage 1 +10 dmg
+  const encIcePop = encodeCardForFastSim(cardById.get("B2-145"), 0, cardById);
+  assert.equal(encIcePop.trainerKind, 2); // Heal 20 + coin return (NOT bounce!)
+  assert.equal(encIcePop.effectVal & 0xff, 20);
+  assert.ok((encIcePop.effectVal & 1024) !== 0);
+  const encFieldBlower = encodeCardForFastSim(cardById.get("B3-147"), 0, cardById);
+  assert.equal(encFieldBlower.trainerKind, 3);
+  assert.equal(encFieldBlower.effectVal, 7); // Tool/Stadium discard
+  const encCopycat = encodeCardForFastSim(cardById.get("B1-225"), 0, cardById);
+  assert.equal(encCopycat.trainerKind, 1);
+  assert.equal(encCopycat.effectVal, 11);
+  assert.equal(encCopycat.isSupporter, 1);
+  const encProfResearch = encodeCardForFastSim(cardById.get("P-A-007"), 0, cardById);
+  assert.equal(encProfResearch.trainerKind, 1);
+  assert.equal(encProfResearch.effectVal, 2);
+  assert.equal(encProfResearch.isSupporter, 1); // Enforces 1 Supporter/turn!
+  const encGuzma = encodeCardForFastSim(cardById.get("A3-151"), 0, cardById);
+  assert.equal(encGuzma.trainerKind, 3);
+  assert.equal(encGuzma.effectVal, 6); // Discard opp tools!
+  const encUmbreon = encodeCardForFastSim(cardById.get("C1-084"), 0, cardById);
+  assert.equal(encUmbreon.a1Dmg, 30);
+  assert.equal(encUmbreon.a1Op, 27);
+  assert.equal(encUmbreon.a1Val >> 8, 3); // vs Basic +50
+  assert.equal(encUmbreon.a1Val & 0xff, 50);
 
   // Every candidate replacement deck MUST pass validateDeck() with zero issues!
   for (const sample of optPrep.candidates.slice(0, 30)) {
@@ -513,6 +614,44 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
     start_idx: 0, count: 600, total_per_opp: 600, seed_base: 8809
   });
   assert.ok(calVs9.wins / calVs9.completed < 0.72, `Calibrated #1 vs #9 (Giratina ex/Dragonair) must be < 72%, got ${calVs9.wins}/${calVs9.completed}`);
+
+  // Runtime Exact-Mechanics v2 behavioral tests in fastsim.wasm:
+  // A) Small Balloon (B3b-064) must NEVER grant +20 Max HP; Chingling (B1-109) must attack at 0 energy & inflict Item-Lock!
+  const chinglingEnc = encodeCardForFastSim(cardById.get("B1-109"), 0, cardById);
+  const balloonEnc = encodeCardForFastSim(cardById.get("B3b-064"), 0, cardById);
+  const igglyEnc = encodeCardForFastSim(cardById.get("A4a-059"), 0, cardById);
+  const potionEnc = encodeCardForFastSim(cardById.get("P-A-001"), 0, cardById);
+  const deckA = [...Array(10).fill(chinglingEnc), ...Array(10).fill(balloonEnc)];
+  const deckB = [...Array(10).fill(igglyEnc), ...Array(10).fill(potionEnc)];
+  const repZeroCost = fastSim({
+    op: "replay_game", deck: deckA, enemy: deckB,
+    weights: v3.weights, enemy_weights: v3.weights,
+    game_idx: 0, total_per_opp: 100, seed_base: 424242
+  });
+  for (const st of repZeroCost.steps) {
+    // Chingling base HP is 30; equipping Small Balloon must NEVER turn maxHp into 50!
+    assert.ok(st.board[0].maxHp <= 30, `Small Balloon must not grant +20 HP to Chingling (got maxHp=${st.board[0].maxHp})`);
+    // Igglybuff Sleep must NEVER emit Poison (reason=1) damage!
+    if (st.kind === 12) {
+      assert.notEqual(st.aux2 & 0xf, 1, "Sleep deck must never trigger Poison damage in between-turn check");
+    }
+  }
+  const chinglingAttackedZeroE = repZeroCost.steps.some((st) => st.kind === 10 && st.actor === 0 && st.aux1 === 10);
+  assert.equal(chinglingAttackedZeroE, true, "Chingling must execute 0-cost 10-damage attack");
+
+  // B) Cyrus (A2-150) must NOT switch an undamaged opponent bench Pokémon; Guzma (A3-151) must strip Giant Cape +20 HP!
+  const cyrusEnc = encodeCardForFastSim(cardById.get("A2-150"), 0, cardById);
+  const charmanderEnc = encodeCardForFastSim(cardById.get("B2b-007"), 0, cardById);
+  const deckCyrus = [...Array(10).fill(charmanderEnc), ...Array(10).fill(cyrusEnc)];
+  const deckTargets = Array(20).fill(charmanderEnc);
+  const repCyrus = fastSim({
+    op: "replay_game", deck: deckCyrus, enemy: deckTargets,
+    weights: v3.weights, enemy_weights: v3.weights,
+    game_idx: 0, total_per_opp: 100, seed_base: 515151
+  });
+  // On Turn 1 (before any attack has dealt damage), Cyrus MUST NOT be played!
+  const cyrusPlayedT1 = repCyrus.steps.some((st) => st.turn === 1 && st.kind === 6 && st.aux1 === 3 && st.aux2 === 2);
+  assert.equal(cyrusPlayedT1, false, "Cyrus must not be played when opponent bench has zero damaged Pokémon");
 
   const { areDecksIdentical, countDeckDifferences, runGtgDuelConvergence } = await import("../public/app/battle.mjs");
   // Verify mirror detection & card diff counter for custom-deck GTG duel

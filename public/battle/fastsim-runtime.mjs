@@ -1,10 +1,39 @@
-// Fast zero-allocation fixed-point i32 WASM runtime wrapper for Pocket Lab.
+// Fast zero-allocation fixed-point i32 WASM runtime wrapper for Pocket Lab (Exact-Mechanics v2).
 // Uses exact Q10 (* 1024) i32 weights/bonuses and Rng32 matching WebGPU WGSL bit-for-bit.
 const FEATURES = 22;
-const CARD_STRIDE = 14;
+const CARD_STRIDE = 20;
 const MAX_ENEMIES = 10;
 const MAX_CANDS = 40;
 const moduleCache = new WeakMap();
+
+function packCardFields(buf, off, c, slotId) {
+  const meta = (c.stage & 0xff)
+    | (((c.evoGroup || 0) & 0xffff) << 8)
+    | ((c.isSupporter ? 1 : 0) << 24)
+    | ((c.isItem ? 1 : 0) << 25)
+    | ((c.isFossil ? 1 : 0) << 26);
+  const hasV2 = c.a1Cost !== undefined;
+  buf[off] = c.isPokemon | 0;
+  buf[off + 1] = meta | 0;
+  buf[off + 2] = c.typeCode | 0;
+  buf[off + 3] = c.weakCode | 0;
+  buf[off + 4] = c.hp | 0;
+  buf[off + 5] = c.retreat | 0;
+  buf[off + 6] = c.prize | 0;
+  buf[off + 7] = (hasV2 ? c.a1Cost : (c.atkCost ?? 1)) | 0;
+  buf[off + 8] = (hasV2 ? c.a1Dmg : (c.atkDmg ?? 0)) | 0;
+  buf[off + 9] = (hasV2 ? c.a1Op : 0) | 0;
+  buf[off + 10] = (hasV2 ? c.a1Val : 0) | 0;
+  buf[off + 11] = (hasV2 ? c.a2Cost : 255) | 0;
+  buf[off + 12] = (hasV2 ? c.a2Dmg : 0) | 0;
+  buf[off + 13] = (hasV2 ? c.a2Op : 0) | 0;
+  buf[off + 14] = (hasV2 ? c.a2Val : 0) | 0;
+  buf[off + 15] = (hasV2 ? c.abOp : 0) | 0;
+  buf[off + 16] = (hasV2 ? c.abVal : 0) | 0;
+  buf[off + 17] = c.trainerKind | 0;
+  buf[off + 18] = c.effectVal | 0;
+  buf[off + 19] = slotId | 0;
+}
 
 async function compileFastModule(wasmSource) {
   if (wasmSource instanceof WebAssembly.Module) return wasmSource;
@@ -31,21 +60,7 @@ export async function instantiateFastSim(wasmSource) {
     const baseCard = slot * 20;
     for (let i = 0; i < 20; i++) {
       const c = compactCards[i] || compactCards[0];
-      const off = (baseCard + i) * CARD_STRIDE;
-      decks[off] = c.isPokemon | 0;
-      decks[off + 1] = (c.stage & 0xff) | (((c.evoGroup || 0) & 0xffff) << 8);
-      decks[off + 2] = c.typeCode | 0;
-      decks[off + 3] = c.weakCode | 0;
-      decks[off + 4] = c.hp | 0;
-      decks[off + 5] = c.retreat | 0;
-      decks[off + 6] = c.prize | 0;
-      decks[off + 7] = c.atkCost | 0;
-      decks[off + 8] = c.atkDmg | 0;
-      decks[off + 9] = c.atkFlags | 0;
-      decks[off + 10] = c.abFlags | 0;
-      decks[off + 11] = c.trainerKind | 0;
-      decks[off + 12] = c.effectVal | 0;
-      decks[off + 13] = i;
+      packCardFields(decks, (baseCard + i) * CARD_STRIDE, c, i);
       bonuses[baseCard + i] = Math.round(Number(c.strategyBonus || 0) * 1024);
     }
   };
@@ -270,21 +285,7 @@ export async function instantiateFastSim(wasmSource) {
       const cBonus = new Int32Array(mem.buffer, ex.get_cand_bonus_ptr(), 256);
       for (let i = 0; i < nCands; i++) {
         const c = candCards[i];
-        const o = i * CARD_STRIDE;
-        cBuf[o] = c.isPokemon | 0;
-        cBuf[o + 1] = (c.stage & 0xff) | (((c.evoGroup || 0) & 0xffff) << 8);
-        cBuf[o + 2] = c.typeCode | 0;
-        cBuf[o + 3] = c.weakCode | 0;
-        cBuf[o + 4] = c.hp | 0;
-        cBuf[o + 5] = c.retreat | 0;
-        cBuf[o + 6] = c.prize | 0;
-        cBuf[o + 7] = c.atkCost | 0;
-        cBuf[o + 8] = c.atkDmg | 0;
-        cBuf[o + 9] = c.atkFlags | 0;
-        cBuf[o + 10] = c.abFlags | 0;
-        cBuf[o + 11] = c.trainerKind | 0;
-        cBuf[o + 12] = c.effectVal | 0;
-        cBuf[o + 13] = 19;
+        packCardFields(cBuf, i * CARD_STRIDE, c, 19);
         cBonus[i] = Math.round(Number(c.strategyBonus || 0) * 1024);
       }
 

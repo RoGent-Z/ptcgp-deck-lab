@@ -1414,26 +1414,129 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
     case 2:
       return `開局將「${cName}」放置於${slotLabelZh(step.aux1)}`;
     case 3:
-      return `從牌庫抽取 1 張卡牌（「${cName}」）`;
+      return step.aux1 === 2
+        ? `競技場效果：從牌庫抽取 1 張卡牌（「${cName}」）`
+        : `從牌庫抽取 1 張卡牌（「${cName}」）`;
     case 4:
       return `將「${cName}」放置於${slotLabelZh(step.aux1)}`;
-    case 5:
-      return `將${slotLabelZh(step.aux1)}的寶可夢進化為「${cName}」`;
+    case 5: {
+      const trig = step.aux2;
+      const trigMap = {
+        1: '，觸發進化特性（為戰鬥場額外附著 1 顆能量）',
+        2: '，觸發進化特性（從牌庫抽出 2 張卡）',
+        3: '，觸發進化特性（從牌庫召喚同類分身至備戰區）',
+        4: '，觸發進化特性（對對手戰鬥場造成 20 點傷害）',
+        5: '，觸發進化特性（重洗對手手牌）'
+      };
+      return `將${slotLabelZh(step.aux1)}的寶可夢進化為「${cName}」${trigMap[trig] || ''}`;
+    }
     case 6: {
       const tk = step.aux1;
       const val = step.aux2;
-      if (tk === 1) return `施放訓練家卡「${cName}」（檢索／抽取 ${Math.max(1, Math.min(2, val))} 張卡牌）`;
-      if (tk === 2) return `施放恢復訓練家卡「${cName}」（為戰鬥場恢復 ${val} 點體力）`;
-      if (tk === 3) return val === 3 ? `施放干擾訓練家卡「${cName}」（壓縮對手手牌）` : `施放干擾訓練家卡「${cName}」（強制替換對手戰鬥場寶可夢）`;
-      if (tk === 4) return `施放增傷訓練家卡「${cName}」（本回合招式傷害 +${val}）`;
-      if (tk === 5) return val > 0 ? `為戰鬥場裝備道具「${cName}」（最大體力 +20）` : `為戰鬥場裝備道具「${cName}」（反擊傷害 20）`;
-      if (tk === 6) return val === 99 ? `施放「${cName}」（基礎寶可夢直接跳階進化為二階）` : val >= 2 ? `施放「${cName}」（額外補充 1 顆能量）` : `施放機動訓練家卡「${cName}」`;
-      if (tk === 7) return `發動競技場卡「${cName}」（招式傷害 +10）`;
+      if (tk === 1) {
+        if (val === 10) return `施放物品卡「${cName}」（從牌庫檢索 1 張基礎寶可夢加入手牌）`;
+        if (val === 11) return `施放支援者卡「${cName}」（重洗手牌並抽出與對手相同張數）`;
+        if (val === 12) return `施放訓練家卡「${cName}」（與牌庫交換寶可夢卡）`;
+        if (val === 13) return `施放支援者卡「${cName}」（檢索最多 2 張體力 50 以下的基礎寶可夢）`;
+        if (val === 14) return `施放支援者卡「${cName}」（雙方重洗手牌並抽回原張數）`;
+        if (val === 15) return `施放支援者卡「${cName}」（檢視牌庫上方並選擇 1 張加入手牌）`;
+        if (val === 16) return `施放支援者卡「${cName}」（從牌庫檢索 1 張 2 階進化寶可夢）`;
+        if (val === 17) return `施放支援者卡「${cName}」（從牌庫檢索最多 2 張指定進化卡加入手牌）`;
+        return `施放訓練家卡「${cName}」（從牌庫抽出 ${Math.max(1, Math.min(2, val))} 張卡牌）`;
+      }
+      if (tk === 2) {
+        const h = val & 0xff;
+        const cures = (val & 256) !== 0;
+        const full = (val & 4096) !== 0;
+        if (full) return `施放恢復卡「${cName}」（完全恢復戰鬥場體力並棄置全部能量）`;
+        if (h === 0 && cures) return `施放恢復卡「${cName}」（解除戰鬥場全部異常狀態）`;
+        return `施放恢復卡「${cName}」（恢復戰鬥場 ${h} 點體力${cures ? '並解除異常狀態' : ''}）`;
+      }
+      if (tk === 3) {
+        if (val === 1) return `施放干擾卡「${cName}」（對手將戰鬥寶可夢與備戰互換）`;
+        if (val === 2) return `施放干擾卡「${cName}」（拉出對手受傷的備戰寶可夢至戰鬥場）`;
+        if (val === 3 || val === 15) return `施放干擾卡「${cName}」（指定對手備戰寶可夢換上戰鬥場）`;
+        if (val === 4) return `施放干擾卡「${cName}」（對手重洗手牌並改抽 3 張）`;
+        if (val === 5) return `施放干擾卡「${cName}」（對手重洗手牌並依剩餘所需分數抽牌）`;
+        if (val === 6) return `施放干擾卡「${cName}」（丟棄對手場上全部寶可夢道具）`;
+        if (val === 7) return `施放物品卡「${cName}」（移除場上道具或競技場）`;
+        if (val === 8 || val === 14) return `施放干擾卡「${cName}」（破壞對手戰鬥寶可夢身上的能量）`;
+        if (val === 9) return `施放支援者卡「${cName}」（將己方戰鬥寶可夢收回手牌並替補上場）`;
+        if (val === 10) return `施放物品卡「${cName}」（驅離對手戰鬥場的基礎寶可夢）`;
+        if (val === 11) return `施放物品卡「${cName}」（壓縮對手手牌至 4 張）`;
+        if (val === 12) return `施放支援者卡「${cName}」（將對手 1 張支援者放回牌庫）`;
+        return `施放干擾卡「${cName}」`;
+      }
+      if (tk === 4) {
+        if ((val & 1024) !== 0) return `施放支援者卡「${cName}」（本回合下一次擲硬幣必定正面）`;
+        if ((val & 512) !== 0) return `施放防禦卡「${cName}」（下回合己方受到招式傷害 -${val & 0xff}）`;
+        const vsEx = (val & 256) !== 0;
+        return `施放增傷卡「${cName}」（本回合${vsEx ? '對寶可夢ex' : ''}招式傷害 +${val & 0xff}）`;
+      }
+      if (tk === 5) {
+        const toolDesc = {
+          1: '最大體力 +20',
+          2: '最大體力 +30',
+          3: '受擊反彈 20 點傷害',
+          4: '受擊令攻擊者中毒',
+          5: '基礎寶可夢撤退費用 -1',
+          6: '基礎寶可夢受招式傷害 -20',
+          7: '昏厥時補牌至 5 張',
+          8: '回合結束對對手造成 10 點傷害',
+          9: '招式傷害 +20',
+          10: '受招式傷害 -10 並防禦異常狀態',
+          11: '撤退費用 -1'
+        };
+        return `裝備寶可夢道具「${cName}」（${toolDesc[val] || '裝備生效'}）`;
+      }
+      if (tk === 6) {
+        if (val === 99) return `施放「${cName}」（基礎寶可夢跳過 1 階直接進化為 2 階）`;
+        if (val === 1) return `施放「${cName}」（本回合撤退費用 -1）`;
+        if (val === 12) return `施放支援者卡「${cName}」（本回合撤退費用 -2）`;
+        if (val === 13) return `施放支援者卡「${cName}」（免費將戰鬥寶可夢與備戰互換）`;
+        if (val === 6) return `施放支援者卡「${cName}」（將備戰區能量集中至戰鬥場）`;
+        if (val === 7) return `施放物品卡「${cName}」（直接從牌庫進化寶可夢）`;
+        if (val >= 500) return `施放支援者卡「${cName}」（擲硬幣獲得 ${val - 500} 顆能量）`;
+        return `施放充能卡「${cName}」（額外補充 1 顆能量）`;
+      }
+      if (tk === 7) {
+        const stadDesc = {
+          1: '可重抽能量區能量',
+          2: '雙方 1 階進化招式傷害 +10',
+          3: '雙方基礎寶可夢最大體力 +20',
+          4: '雙方撤退費用 -2',
+          5: '雙方每回合額外檢索 1 張卡',
+          6: '雙方對寶可夢ex 招式傷害 +20',
+          7: '雙方回合結束恢復 20 點體力'
+        };
+        return `展開競技場卡「${cName}」（${stadDesc[val] || '場地生效'}）`;
+      }
       return `施放訓練家卡「${cName}」`;
     }
     case 7: {
       const abName = card?.abilities?.[0]?.name ? `「${card.abilities[0].name}」` : '';
-      return `發動${slotLabelZh(step.aux1)}「${cName}」的特性${abName}`;
+      const abOp = step.aux2 & 0xff;
+      const abVal = (step.aux2 >> 8) & 0xff;
+      let det = '';
+      if (abOp === 2) det = '（檢索 1 張寶可夢加入手牌）';
+      else if (abOp === 3) det = abVal === 3 ? '（自身充能 2 顆並承受 30 點傷害）' : '（為自身額外充能 1 顆）';
+      else if (abOp === 4) det = '（為戰鬥場額外充能 1 顆）';
+      else if (abOp === 6) det = `（換上戰鬥場並吸收場上 ${abVal} 顆能量）`;
+      else if (abOp === 7) det = '（強制對手更換戰鬥寶可夢）';
+      else if (abOp === 8) det = `（狙擊對手寶可夢造成 ${abVal} 點傷害）`;
+      else if (abOp === 9) det = `（附能觸發，對對手戰鬥場造成 ${abVal} 點傷害）`;
+      else if (abOp === 15) det = `（為戰鬥場恢復 ${abVal} 點體力）`;
+      else if (abOp === 17) det = '（免費與備戰寶可夢互換）';
+      else if (abOp === 20) {
+        if (abVal === 1 || abVal === 2 || abVal === 3) det = '（強制替換對手戰鬥寶可夢）';
+        else if (abVal === 4) det = '（從牌庫檢索 1 張寶可夢）';
+        else if (abVal === 5 || abVal === 8) det = '（令對手戰鬥寶可夢中毒）';
+        else if (abVal === 6) det = '（令對手戰鬥寶可夢灼傷）';
+        else if (abVal === 7) det = '（令對手戰鬥寶可夢睡眠）';
+        else if (abVal === 9) det = '（令對手戰鬥寶可夢混亂）';
+        else if (abVal === 10) det = '（棄置對手牌庫頂 1 張卡）';
+      } else if (abOp === 22) det = `（電磁牆觸發，對附能目標造成 ${abVal} 點傷害）`;
+      return `發動${slotLabelZh(step.aux1)}「${cName}」的特性${abName}${det}`;
     }
     case 8:
       return `從能量區為${slotLabelZh(step.aux1)}「${cName}」附著 1 顆能量（目前 ${step.aux2} 顆）`;
@@ -1443,16 +1546,74 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
       return `戰鬥場「${cName}」撤退，換上${slotLabelZh(step.aux1)}「${newName}」`;
     }
     case 10: {
-      const atkName = card?.attacks?.[0]?.name ? `「${card.attacks[0].name}」` : '主力招式';
-      const weakBonus = step.aux2 & 0xff;
-      const ko = (step.aux2 >> 8) & 1;
-      const extra = `${weakBonus > 0 ? '，觸發屬性弱點 +20' : ''}${ko ? '，擊倒對手戰鬥場寶可夢！' : ''}`;
-      return `「${cName}」發動招式${atkName}，造成 ${step.aux1} 點傷害${extra}`;
+      const weakBonus = step.aux2 & 0x3f;
+      const ko = (step.aux2 >> 6) & 1;
+      const atkIdx = (step.aux2 >> 7) & 1;
+      const missed = (step.aux2 >> 8) & 1;
+      const effTag = (step.aux2 >> 9) & 0x3f;
+      const effNum = (step.aux2 >> 15) & 0x3ff;
+      const atkObj = card?.attacks?.[atkIdx] || card?.attacks?.[0];
+      const atkName = atkObj?.name ? `「${atkObj.name}」` : '招式';
+
+      if (missed) {
+        if (effTag === 27) return `「${cName}」因混亂擲硬幣為反面，招式${atkName}發動失敗`;
+        if (effTag === 28) return `「${cName}」受干擾擲硬幣為反面，招式${atkName}發動失敗`;
+        if (effTag === 29) return `「${cName}」發動招式${atkName}，但傷害被對手護盾／特性無效化`;
+        return `「${cName}」發動招式${atkName}擲硬幣為反面，招式失敗`;
+      }
+
+      const notes = [];
+      if (weakBonus > 0) notes.push('屬性弱點 +20');
+      if (effTag === 1) notes.push('令對手中毒');
+      else if (effTag === 2) notes.push('令對手灼傷');
+      else if (effTag === 3) notes.push('令對手睡眠');
+      else if (effTag === 4) notes.push('令對手麻痺');
+      else if (effTag === 5) notes.push('令對手混亂');
+      else if (effTag === 6) notes.push(`同時波及對手場上／備戰造成 ${effNum} 點傷害`);
+      else if (effTag === 7) notes.push(`自身承受 ${effNum} 點反作用傷害`);
+      else if (effTag === 8 && effNum > 0) notes.push(`棄置自身 ${effNum} 顆能量`);
+      else if (effTag === 9 && effNum > 0) notes.push(`恢復自身 ${effNum} 點體力`);
+      else if (effTag === 10 && effNum > 0) notes.push(`額外附著 ${effNum} 顆能量`);
+      else if (effTag === 11) notes.push(effNum === 99 ? '下回合免疫招式傷害' : `獲得下回合防護／反擊效果 (${effNum})`);
+      else if (effTag === 12) notes.push(effNum === 99 ? '下回合對手出招須擲硬幣判定' : effNum === 98 ? '下回合對手無法攻擊' : `降低對手下回合攻擊傷害 -${effNum}`);
+      else if (effTag === 13) notes.push('攻擊後換回備戰區');
+      else if (effTag === 14) notes.push('下回合對手無法撤退');
+      else if (effTag === 15) notes.push('強制對手更換戰鬥寶可夢');
+      else if (effTag === 16) notes.push('封鎖對手下回合使用物品卡');
+      else if (effTag === 17) notes.push('棄置對手手牌 1 張支援者卡');
+      else if (effTag === 18) notes.push('封鎖對手下回合使用支援者卡');
+      else if (effTag === 19 && effNum > 0) notes.push(`破壞對手 ${effNum} 顆能量`);
+      else if (effTag === 20) notes.push('補充手牌／備戰');
+      else if (effTag === 21) notes.push('下回合自身無法使用招式');
+      else if (effTag === 22) notes.push('破壞對手寶可夢道具');
+      else if (effTag === 23) notes.push('干擾對手牌面／手牌');
+      else if (effTag === 24) notes.push(`擲硬幣正面 ${effNum} 次`);
+      else if (effTag === 25) notes.push('觸發特殊擊倒／減半效果');
+      else if (effTag === 26 && effNum > 0) notes.push(`遭對手反擊承受 ${effNum} 點傷害`);
+      if (ko) notes.push('擊倒對手戰鬥場寶可夢！');
+
+      const dmgPart = step.aux1 > 0 ? `造成 ${step.aux1} 點傷害` : '觸發追加效果';
+      return `「${cName}」發動招式${atkName}，${dmgPart}${notes.length ? `（${notes.join('；')}）` : ''}`;
     }
     case 11:
       return '結束回合';
-    case 12:
-      return `回合間檢查：${playerSideZh(step.actor)}戰鬥場「${cName}」因異常狀態受到 ${step.aux1} 點傷害${step.aux2 ? '並氣絕！' : ''}`;
+    case 12: {
+      const reason = step.aux2 & 0xf;
+      const ko = (step.aux2 >> 4) & 1;
+      const cured = (step.aux2 >> 5) & 1;
+      const side = playerSideZh(step.actor);
+      if (reason === 1) return `回合間檢查：${side}戰鬥場「${cName}」因中毒受到 ${step.aux1} 點傷害${ko ? '並昏厥！' : ''}`;
+      if (reason === 2) return `回合間檢查：${side}戰鬥場「${cName}」因灼傷受到 20 點傷害${ko ? '並昏厥！' : cured ? '（硬幣正面，灼傷解除）' : '（持續灼傷）'}`;
+      if (reason === 3) return `回合間檢查：${side}戰鬥場「${cName}」睡眠判定${cured ? '為正面，甦醒了！' : '為反面，仍在睡眠中'}`;
+      if (reason === 4) return `回合結束：${side}戰鬥場「${cName}」的麻痺狀態解除`;
+      if (reason === 5) return `回合結束：道具「耍詐針」對${side}戰鬥場「${cName}」造成 10 點傷害${ko ? '並昏厥！' : ''}`;
+      if (reason === 6) return `回合間檢查：特性「夢魘」對睡眠中的${side}「${cName}」造成 ${step.aux1} 點傷害${ko ? '並昏厥！' : ''}`;
+      if (reason === 7) return `回合間檢查：特性「冰雪場地」對${side}戰鬥場「${cName}」造成 10 點傷害${ko ? '並昏厥！' : ''}`;
+      if (reason === 8) return `回合結束：${side}戰鬥場「${cName}」恢復 ${step.aux1} 點體力`;
+      if (reason === 9) return `回合結束：「${cName}」觸發特性抽 1 張卡`;
+      if (reason === 10) return `首回合結束：「${cName}」觸發特性額外附著 1 顆能量`;
+      return `回合間檢查：${side}戰鬥場「${cName}」受到 ${step.aux1} 點傷害${ko ? '並昏厥！' : ''}`;
+    }
     default:
       return '執行對局動作';
   }
@@ -1462,8 +1623,21 @@ function formatFastBoardSide(side, deckCards20) {
   if (!side || side.cardIdx < 0) return '空場（等待替補）';
   const card = deckCards20[side.cardIdx];
   const name = card?.name || '寶可夢';
-  const toolTag = side.tool === 1 ? '·斗蓬' : side.tool === 2 ? '·頭盔' : '';
-  return `<b>${esc(name)}</b>（體力 ${side.hp}/${side.maxHp} · ${side.energy}能${toolTag} · 備戰 ${side.bench} 隻 · 手牌 ${side.hand} 張 · 牌庫 ${side.deck} 張）`;
+  const toolId = side.tool & 0xff;
+  const stMask = (side.tool >> 8) & 0x3f;
+  const toolNames = {
+    1: '大斗篷', 2: '葉子斗篷', 3: '凹凸頭盔', 4: '毒針', 5: '小氣球',
+    6: '進化奇石', 7: '幸運蛋', 8: '耍詐針', 9: '驅勁未來', 10: '鋼鐵圍裙', 11: '水上小艇'
+  };
+  const toolTag = toolNames[toolId] ? `·${toolNames[toolId]}` : '';
+  const stList = [];
+  if (stMask & 3) stList.push('中毒');
+  if (stMask & 4) stList.push('灼傷');
+  if (stMask & 8) stList.push('睡眠');
+  if (stMask & 16) stList.push('麻痺');
+  if (stMask & 32) stList.push('混亂');
+  const stTag = stList.length ? `·${stList.join('/')}` : '';
+  return `<b>${esc(name)}</b>（體力 ${side.hp}/${side.maxHp} · ${side.energy}能${toolTag}${stTag} · 備戰 ${side.bench} 隻 · 手牌 ${side.hand} 張 · 牌庫 ${side.deck} 張）`;
 }
 
 export function buildFullGameFlowModal({

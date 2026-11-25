@@ -686,105 +686,698 @@ export function resolveEvolutionGroup(card, cardsById = null) {
   return (h % 65534) + 1;
 }
 
-// 依實卡招式文本精準估算期望傷害（正確處理 × 倍率、+ 加傷、純效果狙擊、對手反面干擾與棄能/反傷機制旗標）
-export function computeExpectedAttackDamage(atk) {
-  const rawDmgStr = String(atk?.damage || '0').trim();
-  let dmgNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
-  const cost = Math.max(0, Math.min(5, (atk?.cost || []).length));
-  const eff = String(atk?.effect || '');
+// 精準解析單一招式的真實基礎傷害與追加效果操作碼（覆蓋全卡庫 588 種招式效果，供 WASM/WebGPU 雙引擎實戰逐項執行）
+export function encodeAttackForFastSim(atk) {
+  if (!atk) return { cost: 255, dmg: 0, op: 0, val: 0 };
+  const cost = Math.max(0, Math.min(5, (atk.cost || []).length));
+  const rawDmgStr = String(atk.damage || '').trim();
+  const parsedNum = parseInt(rawDmgStr.replace(/[^0-9]/g, ''), 10) || 0;
+  const eff = String(atk.effect || '').trim();
 
-  // 1. 空數值純效果傷害（如古劍豹ex「對手的1隻寶可夢受到130點傷害」）
-  if (dmgNum === 0 && eff.length > 0) {
-    const effDmg = eff.match(/對手的(?:1隻|任1隻|戰鬥|所有).*?寶可夢.*?受到\s*(\d+)\s*點傷害|does\s+(\d+)\s+damage\s+to/i);
-    if (effDmg) dmgNum = Number(effDmg[1] || effDmg[2] || 0);
+  if (!eff) {
+    return { cost, dmg: parsedNum, op: 0, val: 0 };
   }
 
-  // 2. 倍率型招式（×）：區分備戰數量倍率、能量倍率、多硬幣與單硬幣
-  if (rawDmgStr.includes('×') || rawDmgStr.includes('x')) {
-    if (/雙方.*備戰寶可夢|both players.*benched/i.test(eff)) {
-      dmgNum = Math.round(dmgNum * 4.5); // 如水君ex 20×雙方備戰 -> 約 90
-    } else if (/備戰寶可夢|benched Pok[eé]mon/i.test(eff)) {
-      dmgNum = Math.round(dmgNum * 2.5);
-    } else if (/能量.*數量|energy attached/i.test(eff)) {
-      dmgNum = Math.round(dmgNum * Math.max(2.5, cost + 1));
-    } else {
-      const multiCoin = eff.match(/擲\s*(\d+)\s*次硬幣|flip\s+(\d+)\s+coins/i);
-      if (multiCoin) {
-        const nCoins = Math.max(1, Number(multiCoin[1] || multiCoin[2] || 2));
-        dmgNum = Math.round(dmgNum * nCoins * 0.5);
-      } else if (/直到出現反面|until you get tails/i.test(eff)) {
-        dmgNum = Math.round(dmgNum * 1.0);
-      } else {
-        dmgNum = Math.round(dmgNum * 1.5);
-      }
+  // 28. 直接氣絕／丟棄／HP減半（猛雷鼓、吼叫尾、穿著熊、大牙狸）
+  if (/擲\s*2\s*次硬幣.*全部為正面.*氣絕|擲\s*2\s*次硬幣.*全部為正面.*昏厥|flip 2 coins.*both.*Knock Out/i.test(eff)) {
+    return { cost, dmg: 0, op: 28, val: 3 };
+  }
+  if (/將對手的戰鬥寶可夢(?:氣絕|昏厥)|Knock Out your opponent's Active/i.test(eff)) {
+    return { cost, dmg: 0, op: 28, val: 1 };
+  }
+  if (/將對手的戰鬥寶可夢丟棄|discard your opponent's Active Pok[eé]mon/i.test(eff)) {
+    return { cost, dmg: 0, op: 28, val: 2 };
+  }
+  if (/剩餘HP變為一半|remaining HP.*in half/i.test(eff)) {
+    return { cost, dmg: 0, op: 28, val: 4 };
+  }
+
+  // 27. 上場後首次攻擊加傷並麻痺（鐵包袱ex）
+  if (/上場後首次使用招式|first time this Pok[eé]mon has used an attack/i.test(eff)) {
+    const m = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (2 << 8) | Math.min(255, Number(m?.[1] || m?.[2] || 20)) };
+  }
+
+  // 10. 備戰／場上寶可夢數量動態倍率／加傷（水君ex、超級七夕青鳥ex、皮卡丘ex、不良蛙、毒骷蛙）
+  if (/場上寶可夢的數量擲硬幣|flip a coin for each of your Pok[eé]mon/i.test(eff)) {
+    const perM = eff.match(/[×x]\s*(\d+)|(\d+)\s*damage/i);
+    return { cost, dmg: 0, op: 10, val: (3 << 8) | Math.min(255, Number(perM?.[1] || perM?.[2] || parsedNum || 20)) };
+  }
+  if (/備戰寶可夢的數量|備戰區.*寶可夢的數量|benched Pok[eé]mon/i.test(eff) && !/受到.*傷害|damage to.*benched/i.test(eff)) {
+    const perM = eff.match(/[×x]\s*(\d+)|(\d+)\s*(?:more )?damage for each/i);
+    const perUnit = Math.min(255, Number(perM?.[1] || perM?.[2] || parsedNum || 20));
+    const isBoth = /雙方/.test(eff);
+    const isOpp = !isBoth && /對手/.test(eff);
+    const mode = isBoth ? 2 : isOpp ? 1 : 0;
+    const base = rawDmgStr.includes('×') ? 0 : parsedNum;
+    return { cost, dmg: base, op: 10, val: (mode << 8) | perUnit };
+  }
+
+  // 13. 額外附有指定能量數觸發加傷（炎帝ex、水箭龜ex、西獅海壬ex）
+  if (/額外附有|extra.*energy/i.test(eff)) {
+    const reqM = eff.match(/額外附有\s*(\d+)|(\d+)\s*extra/i);
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    const extraNeed = Math.max(1, Math.min(5, Number(reqM?.[1] || reqM?.[2] || 1)));
+    const bonus = Math.min(255, Number(addM?.[1] || addM?.[2] || 40));
+    return { cost, dmg: parsedNum, op: 13, val: (extraNeed << 8) | bonus };
+  }
+
+  // 11. 自身能量數量動態加傷／擲硬幣（密勒頓ex、超級超夢Yex）
+  if (/這隻寶可夢身上.*能量.*數量|這隻寶可夢身上每附有|for each.*Energy attached to this Pok[eé]mon/i.test(eff)) {
+    const perM = eff.match(/[×x]\s*(\d+)|增加\s*(\d+)|(\d+)\s*(?:more )?damage/i);
+    const perUnit = Math.min(255, Number(perM?.[1] || perM?.[2] || perM?.[3] || parsedNum || 20));
+    if (/擲.*硬幣|flip a coin/i.test(eff)) {
+      return { cost, dmg: 0, op: 11, val: 1000 + perUnit };
     }
-  } else if (rawDmgStr.includes('+')) {
-    // 3. 加成型招式（+）：備戰加傷、能量加傷、額外附能、條件加傷、硬幣加傷
-    const benchScale = eff.match(/備戰寶可夢的數量\s*[×x]\s*(\d+)/i);
-    const energyScale = eff.match(/每(?:有|附有)[^，。,.]{0,12}能量.{0,24}?(\d+)\s*點|(\d+)\s*more damage for each.*energy/i);
-    const flatBonus = eff.match(/增加\s*(\d+)\s*點傷害|造成\s*(\d+)\s*點額外傷害|\+\s*(\d+)\s*點傷害|(\d+)\s*more damage/i);
-    if (benchScale) {
-      const perUnit = Number(benchScale[1] || 20);
-      const mult = /雙方/.test(eff) ? 4.2 : 2.5; // 如超級七夕青鳥ex 40 + 2.5*30 = 115
-      dmgNum += Math.round(perUnit * mult);
-    } else if (energyScale) {
-      const perUnit = Number(energyScale[1] || energyScale[2] || 20);
-      dmgNum += Math.round(perUnit * Math.max(3, cost + 1)); // 如密勒頓ex 20 + 4*20 = 100
-    } else if (flatBonus) {
-      const add = Number(flatBonus[1] || flatBonus[2] || flatBonus[3] || flatBonus[4] || 0);
-      if (/額外附有|extra.*energy/i.test(eff)) {
-        dmgNum += Math.round(add * 0.55); // 如炎帝ex 60 + 60*0.55 = 93
-      } else if (/擲.*硬幣|flip a coin/i.test(eff)) {
-        dmgNum += Math.round(add * 0.5);
-      } else {
-        dmgNum += Math.round(add * 0.65); // 如月亮伊布 30 + 50*0.65 = 63
-      }
-    }
+    const base = rawDmgStr.includes('×') ? 0 : parsedNum;
+    return { cost, dmg: base, op: 11, val: perUnit };
   }
 
-  // 4. 僅針對「攻擊方自己擲反面失敗」折減；絕不誤傷「下回合讓對手擲反面失敗」的防禦干擾技（如自爆磁怪）
-  const isOpponentMissDebuff = /在下個對手的回合.*對手擲.*硬幣|during your opponent's next turn.*flip a coin/i.test(eff);
-  if (!isOpponentMissDebuff && /擲1次硬幣[，,。]?\s*若為反面[，,]?\s*(?:則)?這[個招]式失敗|flip a coin\.?\s*if tails,\s*this attack does nothing/i.test(eff)) {
-    dmgNum = Math.round(dmgNum * 0.5);
+  // 12. 對手能量數量動態加傷（愛管侍ex、夢幻、太陽伊布全場能量、卡璞蝶蝶狙擊能量）
+  if (/對手的所有寶可夢身上的能量的數量|for each Energy attached to all of your opponent/i.test(eff)) {
+    const perM = eff.match(/[×x]\s*(\d+)|(\d+)\s*damage/i);
+    const base = rawDmgStr.includes('×') ? 0 : parsedNum;
+    return { cost, dmg: base, op: 12, val: (1 << 8) | Math.min(255, Number(perM?.[1] || perM?.[2] || parsedNum || 20)) };
   }
-  if (isOpponentMissDebuff) {
-    // 對手下回合 50% 機率攻擊落空，等效提升實戰壓制力
-    dmgNum = Math.round(dmgNum * 1.15);
+  if (/對手的1隻寶可夢受到該寶可夢身上的能量的數量|to 1 of your opponent.*for each Energy/i.test(eff)) {
+    const perM = eff.match(/[×x]\s*(\d+)|(\d+)\s*damage/i);
+    return { cost, dmg: 0, op: 12, val: (2 << 8) | Math.min(255, Number(perM?.[1] || perM?.[2] || 20)) };
+  }
+  if (/對手的戰鬥寶可夢身上.*能量.*數量|for each.*Energy attached to your opponent's Active/i.test(eff)) {
+    const perM = eff.match(/[×x]\s*(\d+)|增加\s*(\d+)|(\d+)\s*(?:more )?damage/i);
+    const perUnit = Math.min(255, Number(perM?.[1] || perM?.[2] || perM?.[3] || 20));
+    const base = rawDmgStr.includes('×') ? 0 : parsedNum;
+    return { cost, dmg: base, op: 12, val: perUnit };
   }
 
-  // 5. 冷卻、真實棄能與真實自傷（保留滿額傷害斷點，並以引擎旗標在對局內真實扣血/棄能）
+  // 17. 真實備戰狙擊／全場擴散／隨機選中（古劍豹ex、胡帕ex、帕路奇亞ex、三海地鼠ex、快龍流星群、花巖怪、狙射樹梟ex）
+  const randSpread = eff.match(/隨機(?:選擇對手的1隻寶可夢|被選擇)\s*(\d+)\s*次[^。]*?(?:受到(?:被選擇的次數\s*[×x]\s*)?)(\d+)\s*點傷害|chosen at random\s*(\d+)\s*times[^.]*do\s*(\d+)\s*damage/i);
+  if (randSpread) {
+    const times = Math.max(1, Math.min(5, Number(randSpread[1] || randSpread[3] || 3)));
+    const perHit = Math.min(255, Number(randSpread[2] || randSpread[4] || 50));
+    return { cost, dmg: 0, op: 17, val: ((times + 2) << 8) | perHit };
+  }
+  const allOpp = eff.match(/對手的所有寶可夢受到\s*(\d+)\s*點傷害|does\s+(\d+)\s+damage to each of your opponent's Pok[eé]mon/i);
+  if (allOpp) {
+    return { cost, dmg: 0, op: 17, val: (9 << 8) | Math.min(255, Number(allOpp[1] || allOpp[2] || 10)) };
+  }
+  const dmgSnipe = eff.match(/對手有受到傷害的1隻寶可夢受到\s*(\d+)\s*點傷害|to 1 of your opponent's Pok[eé]mon that has damage/i);
+  if (dmgSnipe) {
+    return { cost, dmg: 0, op: 17, val: (10 << 8) | Math.min(255, Number(dmgSnipe[1] || 100)) };
+  }
+  const allBench = eff.match(/對手的(?:所有|全部).*?備戰寶可夢.*?受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to each of your opponent's Benched/i);
+  if (allBench) {
+    return { cost, dmg: parsedNum, op: 17, val: (1 << 8) | Math.min(255, Number(allBench[1] || allBench[2] || 20)) };
+  }
+  const oneBench = eff.match(/對手的1隻備戰寶可夢.*?受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to 1 of your opponent's Benched/i);
+  if (oneBench) {
+    return { cost, dmg: parsedNum, op: 17, val: (0 << 8) | Math.min(255, Number(oneBench[1] || oneBench[2] || 20)) };
+  }
+  const pureSnipe = eff.match(/對手的(?:1隻|任1隻)寶可夢受到\s*(\d+)\s*點傷害|does\s+(\d+)\s+damage\s+to\s+1\s+of\s+your\s+opponent's\s+Pok[eé]mon/i);
+  if (pureSnipe && parsedNum === 0) {
+    const discAll = /將這隻寶可夢身上的.*能量全部丟棄|discard all.*Energy from this/i.test(eff);
+    const mode = discAll ? 8 : 2;
+    return { cost, dmg: 0, op: 17, val: (mode << 8) | Math.min(255, Number(pureSnipe[1] || pureSnipe[2] || 50)) };
+  }
+
+  // 21. 下回合對手失敗擲幣（自爆磁怪）、無法使用招式（多刺菊石獸/六尾）、降低傷害（叫聲）
+  if (/在下個對手的回合.*對手擲.*硬幣|during your opponent's next turn.*flip a coin/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 21, val: 99 };
+  }
+  if (/受到這個招式的寶可夢無法使用招式|Defending Pok[eé]mon can't attack/i.test(eff)) {
+    const isCoin = /擲1次硬幣|flip a coin/i.test(eff);
+    return { cost, dmg: parsedNum, op: 21, val: isCoin ? 97 : 98 };
+  }
+  const weakenOpp = eff.match(/受到這個招式的寶可夢使用招式(?:造成)?的傷害\s*[-−]\s*(\d+)|Defending Pok[eé]mon do\s*[-−](\d+)\s*damage/i);
+  if (weakenOpp) {
+    return { cost, dmg: parsedNum, op: 21, val: Math.min(96, Number(weakenOpp[1] || weakenOpp[2] || 20)) };
+  }
+
+  // 20. 反擊護盾（超級勾魂眼ex、阿羅拉穿山王）、免疫傷害（飛翔/守住）、自身減傷護盾
+  const counterM = eff.match(/(?:因攻擊而受到傷害|受到招式的傷害時)[^。]*?(?:對攻擊的寶可夢造成|使用招式的寶可夢受到)\s*(\d+)\s*點傷害/i);
+  if (counterM) {
+    return { cost, dmg: parsedNum, op: 20, val: 100 + Math.min(100, Number(counterM[1] || 40)) };
+  }
+  if (/不會受到招式的傷害|prevent all damage from/i.test(eff)) {
+    const alsoFail = /若為反面.*這(?:個招|個|招)式失敗|if tails, this attack does nothing/i.test(eff);
+    return { cost, dmg: parsedNum, op: 20, val: alsoFail ? 98 : 99 };
+  }
+  const selfShield = eff.match(/這隻寶可夢受到招式的傷害\s*[-−]\s*(\d+)|this Pok[eé]mon takes\s*[-−](\d+)\s*damage/i);
+  if (selfShield) {
+    return { cost, dmg: parsedNum, op: 20, val: Math.min(97, Number(selfShield[1] || selfShield[2] || 20)) };
+  }
+
+  // 15. 自身反傷（超級噴火龍Yex 50、胡帕ex 20）或己方備戰傷害（閃電鳥 30）
+  const recoilM = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
+  if (recoilM) {
+    const rec = Math.min(200, Number(recoilM[1] || recoilM[2] || 20));
+    const finalRec = /若為反面|if tails/i.test(eff) ? Math.round(rec * 0.5) : rec;
+    return { cost, dmg: parsedNum, op: 15, val: finalRec };
+  }
+  const selfBenchDmg = eff.match(/自己的(?:1隻)?(?:備戰)?寶可夢也受到\s*(\d+)\s*點傷害/i);
+  if (selfBenchDmg) {
+    return { cost, dmg: parsedNum, op: 15, val: 1000 + Math.min(100, Number(selfBenchDmg[1] || 20)) };
+  }
+
+  // 16. 自身棄能（騎拉帝納ex 棄2、老翁龍 棄1、烈焰猴ex/三首惡龍 棄全部、暴鯉龍ex 雙方隨機棄1）
+  const selfDisc = eff.match(/將這隻寶可夢身上的(?:(?:\[[^\]]+\])?能量全部|所有|隨機\s*(\d+)?\s*個|(\d+)\s*個).*能量丟棄|將這隻寶可夢身上的(?:\[[^\]]+\])?能量全部丟棄|discard\s+(\d+|a|an|all)\s+.*energy\s+from\s+this/i);
+  if (selfDisc) {
+    const isAll = /全部|所有|all/i.test(selfDisc[0]);
+    const nDisc = isAll ? 99 : Math.max(1, Math.min(4, Number(selfDisc[1] || selfDisc[2] || selfDisc[3] || 1)));
+    return { cost, dmg: parsedNum, op: 16, val: nDisc };
+  }
+  if (/從雙方的.*寶可夢身上.*能量.*隨機(?:各)?丟棄/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 16, val: 100 };
+  }
+
+  // 24. 丟棄對手戰鬥寶可夢能量
+  if (/對手的戰鬥寶可夢.*能量丟棄|discard.*energy.*opponent's Active/i.test(eff)) {
+    const mode = /直到出現反面|until you get tails/i.test(eff) ? 3 : /擲1次硬幣|flip a coin/i.test(eff) ? 2 : 1;
+    return { cost, dmg: parsedNum, op: 24, val: mode };
+  }
+
+  // 23. 物品鎖（鈴鐺響）、支援者鎖（可達鴨/耿鬼）、丟棄支援者（超級阿勃梭魯ex）、丟棄道具（姆克兒）、強制換人、禁撤退、吹回牌庫
+  if (/無法從手牌使出物品卡|can't play any Item cards/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 23, val: 3 };
+  }
+  if (/無法從手牌使出支援者卡|can't play any Supporter cards/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 23, val: 5 };
+  }
+  if (/支援者卡.*丟棄|discard.*Supporter/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 23, val: 4 };
+  }
+  if (/對手的戰鬥寶可夢身上的.*寶可夢道具.*丟棄|discard a Pok[eé]mon Tool/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 23, val: 6 };
+  }
+  if (/將對手的戰鬥寶可夢放回(?:牌庫|手牌)|shuffle.*opponent's Active/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 23, val: 8 };
+  }
+  if (/對手.*手牌.*放回(?:對手的)?牌庫/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 23, val: 7 };
+  }
+  if (/無法撤退|can't retreat/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 23, val: 1 };
+  }
+  if (/對手的(?:(?:1隻)?備戰寶可夢|戰鬥寶可夢與備戰寶可夢).*互換|switch.*opponent's.*Active/i.test(eff)) {
+    const m = eff.match(/造成\s*(\d+)\s*點傷害|does\s*(\d+)\s*damage/i);
+    return { cost, dmg: parsedNum || Number(m?.[1] || m?.[2] || 0), op: 23, val: 2 };
+  }
+
+  // 26. 下回合自身無法使用招式 / 下回合自身招式增傷（波克基斯 +60）
   if (/下個自己的回合.*無法使用|can't attack during your next turn/i.test(eff)) {
-    dmgNum = Math.round(dmgNum * 0.72);
+    return { cost, dmg: parsedNum, op: 26, val: 1 };
   }
-  let discardEnergy = 0;
-  const discardMatch = eff.match(/將這隻寶可夢身上的(?:所有|隨機\s*(\d+)?\s*個|(\d+)個).*能量丟棄|discard\s+(\d+|all)\s+.*energy/i);
-  if (discardMatch) {
-    discardEnergy = /所有|all/i.test(discardMatch[0]) ? 2 : Math.min(2, Math.max(1, Number(discardMatch[1] || discardMatch[2] || discardMatch[3] || 1)));
+  const nextBoostM = eff.match(/下個自己的回合[^。]*傷害\s*\+\s*(\d+)/);
+  if (nextBoostM) {
+    return { cost, dmg: parsedNum, op: 26, val: Math.max(10, Math.min(120, Number(nextBoostM[1] || 60))) };
   }
-  let heavyRecoil = false;
-  const recoilMatch = eff.match(/這隻寶可夢也受到\s*(\d+)\s*點傷害|also does\s*(\d+)\s*damage to itself/i);
-  if (recoilMatch) {
-    const recoil = Number(recoilMatch[1] || recoilMatch[2] || 0);
-    if (recoil >= 40) {
-      heavyRecoil = true; // 如超級噴火龍Yex 250 傷自傷 50：引擎實戰真實自扣 50 HP
-    } else if (recoil >= 10) {
-      dmgNum = Math.max(10, dmgNum - Math.round(recoil * 0.4));
+
+  // 8. 多重硬幣乘法（擲 N 次硬幣 × 傷害，或直到反面）
+  if (rawDmgStr.includes('×') || (/擲\s*\d+\s*次硬幣.*正面出現的次數\s*[×x]|flip\s+\d+\s+coins.*for each heads/i.test(eff) && !/增加|more damage/i.test(eff))) {
+    if (/直到出現反面|until you get tails/i.test(eff)) {
+      const perM = eff.match(/[×x]\s*(\d+)|(\d+)\s*damage/i);
+      return { cost, dmg: Number(perM?.[1] || perM?.[2] || parsedNum || 30), op: 8, val: 99 };
+    }
+    const nM = eff.match(/擲\s*(\d+)\s*次硬幣|flip\s+(\d+)\s+coins/i);
+    const perM = eff.match(/[×x]\s*(\d+)|(\d+)\s*damage for each heads/i);
+    if (nM) {
+      return { cost, dmg: Number(perM?.[1] || perM?.[2] || parsedNum || 20), op: 8, val: Math.max(1, Math.min(12, Number(nM[1] || nM[2]))) };
     }
   }
-  return { dmgNum, isOpponentMissDebuff, discardEnergy, heavyRecoil };
+
+  // 9. 擲硬幣追加傷害（含「擲2次硬幣，增加正面出現的次數×20點傷害」、「直到出現反面，增加×40點傷害」）
+  if (/擲.*硬幣|flip a coin|flip \d+ coins/i.test(eff) && /增加|more damage/i.test(eff)) {
+    const addM = eff.match(/增加(?:正面出現的次數\s*[×x]\s*)?\s*(\d+)|(\d+)\s*more damage/i);
+    const bonus = Math.min(255, Number(addM?.[1] || addM?.[2] || 30));
+    if (/直到出現反面|until you get tails/i.test(eff)) {
+      return { cost, dmg: parsedNum, op: 9, val: (99 << 8) | bonus };
+    }
+    const nM = eff.match(/擲\s*(\d+)\s*次硬幣|flip\s+(\d+)\s+coins/i);
+    const nCoins = nM ? Math.min(8, Number(nM[1] || nM[2])) : 1;
+    return { cost, dmg: parsedNum, op: 9, val: (nCoins << 8) | bonus };
+  }
+
+  // 7. 擲硬幣反面招式失敗（修復「這個招式失敗」匹配！）
+  if (/若為反面[^。]*這(?:個招|個|招)式失敗|if tails, this attack does nothing/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 7, val: 1 };
+  }
+
+  // 14. 受傷條件加減傷（對手受傷加傷／自身受傷加傷如熾焰咆哮虎ex／自身受傷減傷如雷吉鐸拉戈／自身受傷等量加傷如雷吉奇卡斯）
+  if (/增加與這隻寶可夢已受到的傷害相同數值的傷害|more damage for each damage/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 14, val: 3 << 8 };
+  }
+  if (/對手的戰鬥寶可夢.*受到傷害|opponent's Active Pok[eé]mon has damage/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 14, val: (0 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 50)) };
+  }
+  if (/這隻寶可夢(?:有|已)?受到傷害|if this Pok[eé]mon has damage/i.test(eff)) {
+    const subM = eff.match(/[-−]\s*(\d+)\s*點|[-−](\d+)\s*damage/i);
+    if (subM) return { cost, dmg: parsedNum, op: 14, val: (2 << 8) | Math.min(255, Number(subM[1] || subM[2] || 100)) };
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 14, val: (1 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 50)) };
+  }
+
+  // 27. 狀態／ex／基礎／道具／報復／支援者／高血／特性／切換／進化 實時條件加傷
+  if (/若對手的戰鬥寶可夢處於(?:中毒|灼傷|睡眠|麻痺|混亂|特殊狀態)|is (?:Poisoned|Burned|Asleep|Paralyzed|Confused)|affected by a Special Condition/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (0 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 60)) };
+  }
+  if (/若對手的戰鬥寶可夢為.*寶可夢ex|opponent's Active Pok[eé]mon is a Pok[eé]mon ex/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (1 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 50)) };
+  }
+  if (/若對手的戰鬥寶可夢為基礎寶可夢|opponent's Active Pok[eé]mon is a Basic/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (3 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 50)) };
+  }
+  if (/若這隻寶可夢身上附有.*寶可夢道具|if this Pok[eé]mon has a Pok[eé]mon Tool/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (4 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 30)) };
+  }
+  if (/若對手的戰鬥寶可夢身上附有.*寶可夢道具|if your opponent's Active.*Pok[eé]mon Tool/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (5 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 30)) };
+  }
+  if (/上個對手的回合.*昏厥了.*增加|Knocked Out by damage.*last turn/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (6 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 60)) };
+  }
+  if (/從手牌使出了支援者卡.*增加|played a Supporter card.*this turn/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (7 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 50)) };
+  }
+  if (/剩餘HP比這隻寶可夢的剩餘HP多|more remaining HP/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (8 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 50)) };
+  }
+  if (/若對手的戰鬥寶可夢擁有特性|opponent's Active.*has an Ability/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (9 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 40)) };
+  }
+  if (/從備戰區將這隻寶可夢放置於戰鬥場.*增加|moved from your Bench to the Active Spot this turn/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (10 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 60)) };
+  }
+  if (/若進化成這隻寶可夢.*增加|if this Pok[eé]mon evolved.*this turn/i.test(eff)) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    return { cost, dmg: parsedNum, op: 27, val: (11 << 8) | Math.min(255, Number(addM?.[1] || addM?.[2] || 20)) };
+  }
+
+  // 6 / 1~5. 真實異常狀態（精準區分中毒/灼傷/睡眠/麻痺/混亂與擲硬幣異常狀態）
+  const hasCoin = /擲1次硬幣|flip a coin/i.test(eff);
+  let statusMask = 0;
+  if (/中毒|Poisoned/i.test(eff)) statusMask |= 1;
+  if (/灼傷|Burned/i.test(eff)) statusMask |= 2;
+  if (/睡眠|Asleep/i.test(eff)) statusMask |= 4;
+  if (/麻痺|Paralyzed/i.test(eff)) statusMask |= 8;
+  if (/混亂|Confused/i.test(eff)) statusMask |= 16;
+  if (statusMask !== 0) {
+    if (hasCoin) return { cost, dmg: parsedNum, op: 6, val: statusMask };
+    if (statusMask & 8) return { cost, dmg: parsedNum, op: 4, val: 1 };
+    if (statusMask & 4) return { cost, dmg: parsedNum, op: 3, val: 1 };
+    if (statusMask & 16) return { cost, dmg: parsedNum, op: 5, val: 1 };
+    if (statusMask & 2) return { cost, dmg: parsedNum, op: 2, val: 1 };
+    return { cost, dmg: parsedNum, op: 1, val: /20點|20 damage/.test(eff) ? 20 : 10 };
+  }
+
+  // 18. 招式自癒／吸血
+  if (/恢復對對手的戰鬥寶可夢造成的傷害相同數值的HP|heal.*equal to the damage/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 18, val: 999 };
+  }
+  const healM = eff.match(/恢復\s*(\d+)\s*HP|heal\s+(\d+)\s+damage/i);
+  if (healM && !/對手的戰鬥寶可夢恢復/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 18, val: Math.min(120, Number(healM[1] || healM[2] || 20)) };
+  }
+
+  // 19. 招式附能（給自己或備戰，修復「附給」匹配如瑪納霏！）
+  if (/能量區.*附(?:於|給)|attach.*energy.*from your Energy Zone/i.test(eff)) {
+    const toBench = /備戰寶可夢|Benched/i.test(eff);
+    const twoBench = toBench && /2隻|2 of your Benched/i.test(eff);
+    return { cost, dmg: parsedNum, op: 19, val: twoBench ? 3 : toBench ? 2 : 1 };
+  }
+
+  // 22. 攻擊後換下場（與自己備戰寶可夢互換）
+  if (/這隻寶可夢與備戰(?:區.*)?寶可夢互換|switch this Pok[eé]mon with 1 of your Benched/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 22, val: 1 };
+  }
+
+  // 25. 招式抽卡／檢索／呼叫夥伴／模仿洗牌（聒噪鳥）
+  if (/將自己的手牌全部放回牌庫.*抽出與對手的手牌張數相同/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 25, val: 4 };
+  }
+  if (/放置於備戰區|onto your Bench/i.test(eff) && /牌庫|deck/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 25, val: 3 };
+  }
+  if (/牌庫.*(?:寶可夢|進化而來的卡).*加入手牌|Pok[eé]mon from your deck into your hand/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 25, val: 2 };
+  }
+  if (/抽出\s*\d+\s*張|draw a card|draw \d+ cards/i.test(eff)) {
+    return { cost, dmg: parsedNum, op: 25, val: 1 };
+  }
+
+  // 剩餘特化條件加傷（如屬性/卡名特定條件）：估算穩健期望值
+  if (rawDmgStr.includes('+')) {
+    const addM = eff.match(/增加\s*(\d+)|(\d+)\s*more damage/i);
+    const add = Number(addM?.[1] || addM?.[2] || 0);
+    if (add > 0) return { cost, dmg: parsedNum + Math.round(add * 0.45), op: 0, val: 0 };
+  }
+  return { cost, dmg: parsedNum, op: 0, val: 0 };
+}
+
+// 精準解析寶可夢特性的真實觸發時機與效果操作碼（覆蓋全卡庫 164 種特性）
+export function encodeAbilityForFastSim(card) {
+  const ab = card?.abilities?.[0];
+  if (!ab?.effect) return { abOp: 0, abVal: 0 };
+  const eff = String(ab.effect);
+
+  // 11. 防 ex 免疫（花舞鳥 神祕守護）
+  if (/不會受到.*寶可夢ex.*招式的傷害|prevent all damage.*Pok[eé]mon ex/i.test(eff)) {
+    return { abOp: 11, abVal: 1 };
+  }
+  // 26. 畫皮首次免傷（謎擬Ｑex）、受擊擲幣閃避（波克基斯/喵喵）、毅力存活（修建老匠）
+  if (/首次受到招式的傷害時.*不會受到該傷害|first time this Pok[eé]mon would be damaged/i.test(eff)) {
+    return { abOp: 26, abVal: 1 };
+  }
+  if (/受到招式的傷害時.*擲1次硬幣.*不會受到該傷害/i.test(eff)) {
+    return { abOp: 26, abVal: 2 };
+  }
+  if (/受到招式的傷害而昏厥時.*剩餘HP為10/i.test(eff)) {
+    return { abOp: 26, abVal: 3 };
+  }
+  // 6. 放上備戰時換上戰鬥場並轉移場上全部能量（密勒頓ex、故勒頓ex 傳說進擊）
+  if (/放置於備戰區.*互換.*能量.*改附|onto your Bench.*switch.*move all.*Energy/i.test(eff)) {
+    return { abOp: 6, abVal: 1 };
+  }
+  // 7. 放上備戰時強制對手換人（轟鳴月）
+  if (/放置於備戰區.*對手的戰鬥寶可夢.*互換|onto your Bench.*switch out your opponent/i.test(eff)) {
+    return { abOp: 7, abVal: 1 };
+  }
+  // 5. 進化當下一次性觸發（火恐龍點火=1、仙子伊布ex抽2=2、呱頭蛙臨場分身=3、變澀蜥20傷=4、怖思壺夥星=5）
+  if (/完成進化時|play this Pok[eé]mon from your hand to evolve/i.test(eff)) {
+    if (/能量.*附於|Energy.*attach/i.test(eff)) return { abOp: 5, abVal: 1 };
+    if (/抽出\s*2\s*張|draw 2/i.test(eff)) return { abOp: 5, abVal: 2 };
+    if (/放置於備戰區|onto your Bench/i.test(eff)) return { abOp: 5, abVal: 3 };
+    if (/對手的戰鬥寶可夢受到\s*20/i.test(eff)) return { abOp: 5, abVal: 4 };
+    if (/獲勝所需的剩餘分數/i.test(eff)) return { abOp: 5, abVal: 5 };
+  }
+  // 9. 每次從能量區附能給這隻寶可夢時對對手戰鬥場造成 20/30 傷害（達克萊伊ex 20、C1 噴火龍 火焰氣場 30）
+  if (/每次從自己的能量區將.*能量附於這隻寶可夢身上時|whenever you attach.*Energy from your Energy Zone to this Pok[eé]mon/i.test(eff)) {
+    const dm = eff.match(/受到\s*(\d+)\s*點傷害|do\s+(\d+)\s+damage/i);
+    return { abOp: 9, abVal: Math.min(60, Number(dm?.[1] || dm?.[2] || 20)) };
+  }
+  // 22. 戰鬥場被動：對手附能時受 20 傷害（雷伊布ex 電磁牆）
+  if (/對手每次從能量區將能量附於寶可夢身上時.*受到\s*(\d+)/i.test(eff)) {
+    const dm = eff.match(/受到\s*(\d+)/);
+    return { abOp: 22, abVal: Math.min(40, Number(dm?.[1] || 20)) };
+  }
+  // 10. 回合結束時若對手戰鬥寶可夢睡眠則造成 20 傷害（達克萊伊 夢魘）
+  if (/回合結束時.*對手的戰鬥寶可夢睡眠.*受到\s*(\d+)|Active Pok[eé]mon is Asleep.*do\s+(\d+)\s+damage/i.test(eff)) {
+    const dm = eff.match(/受到\s*(\d+)|do\s+(\d+)\s+damage/i);
+    return { abOp: 10, abVal: Math.min(60, Number(dm?.[1] || dm?.[2] || 20)) };
+  }
+  // 1. 戰鬥場回合結束抽 1 張（炎帝ex、水君ex 傳說脈動）
+  if (/回合結束時.*在戰鬥場上.*抽|end of your turn.*Active Spot.*draw/i.test(eff)) {
+    return { abOp: 1, abVal: 1 };
+  }
+  // 23. 回合結束／寶可夢檢查被動（冰伊布ex 10傷=1、卡比獸ex 恢復20HP=2、捷拉奧拉首回合+1能=3）
+  if (/在戰鬥場上.*寶可夢檢查時.*受到\s*10/i.test(eff)) return { abOp: 23, abVal: 1 };
+  if (/回合結束時.*在戰鬥場上.*恢復\s*20\s*HP/i.test(eff)) return { abOp: 23, abVal: 2 };
+  if (/最初回合結束時.*能量.*附於這隻寶可夢/i.test(eff)) return { abOp: 23, abVal: 3 };
+  // 2. 戰鬥場回合開始檢索 1 張寶可夢（美洛耶塔 神奇歌聲）
+  if (/回合開始時.*在戰鬥場上.*加入手牌|beginning of your turn.*Active Spot.*into your hand/i.test(eff)) {
+    return { abOp: 2, abVal: 1 };
+  }
+  // 16. 戰鬥場首回合可進化（伊布 提升進化）
+  if (/就算在自己的最初回合.*也可進化|can evolve during your first turn/i.test(eff)) {
+    return { abOp: 16, abVal: 1 };
+  }
+  // 21. 戰鬥場被動：對手無法使用支援者卡（耿鬼ex 影子咒縛）
+  if (/在戰鬥場上.*對手無法從手牌使出支援者卡/i.test(eff)) {
+    return { abOp: 21, abVal: 1 };
+  }
+  // 24. 被動：對手中毒傷害+10（虛吾伊德）
+  if (/對手的戰鬥寶可夢受到中毒的傷害\s*\+\s*10/i.test(eff)) {
+    return { abOp: 24, abVal: 10 };
+  }
+  // 27. 密林霸主（君主蛇：草能量視為2個）
+  if (/視為各提供\s*2\s*個.*能量/i.test(eff)) {
+    return { abOp: 27, abVal: 1 };
+  }
+  // 28. 對手招式能耗+1（長毛狗、黏黏寶）
+  if (/對手的戰鬥寶可夢使用招式所需的能量增加\s*1/i.test(eff)) {
+    return { abOp: 28, abVal: 1 };
+  }
+  // 8. 每回合 1 次對對手任 1 隻寶可夢造成 20/30 傷害（甲賀忍蛙 飛水手裏劍、叉字蝠）
+  if (/可使用1次.*對手的(?:1隻|戰鬥)寶可夢受到\s*(\d+)|Once during your turn.*do\s+(\d+)\s+damage to 1 of your opponent/i.test(eff)) {
+    const dm = eff.match(/受到\s*(\d+)|do\s+(\d+)\s+damage/i);
+    return { abOp: 8, abVal: Math.min(60, Number(dm?.[1] || dm?.[2] || 20)) };
+  }
+  // 3 / 4. 每回合 1 次附能特性（精準區分三首惡龍 +2能受30傷、三合一磁怪 +1能、戟脊龍/哈克龍給戰鬥場）
+  if (/可使用1次.*(?:能量區|棄牌區)[^。]*能量[^。]*附於|Once during your turn.*take a.*Energy.*attach/i.test(eff)) {
+    const isDiscard = /棄牌區|discard pile/i.test(eff);
+    const toSelf = /附於這隻寶可夢|attach it to this Pok[eé]mon/i.test(eff);
+    if (toSelf && /抽出\s*2\s*個.*能量.*受\s*30\s*點傷害/.test(eff)) {
+      return { abOp: 3, abVal: 3 }; // 三首惡龍：+2能且自身受30傷
+    }
+    return { abOp: toSelf ? 3 : 4, abVal: isDiscard ? 2 : 1 };
+  }
+  // 15. 每回合 1 次恢復 HP（愛管侍ex、謝米、胖可丁）
+  if (/可使用1次.*恢復\s*(\d+)\s*HP|Once during your turn.*heal\s+(\d+)\s+damage/i.test(eff)) {
+    const hm = eff.match(/恢復\s*(\d+)|heal\s+(\d+)/i);
+    return { abOp: 15, abVal: Math.min(60, Number(hm?.[1] || hm?.[2] || 20)) };
+  }
+  // 17. 每回合 1 次與己方備戰免費互換（甲賀忍蛙ex 水流變幻、索爾迦雷歐ex、普隆隆姆、鐵火輝夜）
+  if (/可使用1次.*(?:這隻寶可夢與戰鬥寶可夢|自己的?戰鬥場的.*寶可夢與備戰(?:區.*)?寶可夢)互換|Once during your turn.*switch.*your Active/i.test(eff)) {
+    return { abOp: 17, abVal: 1 };
+  }
+  // 20. 每回合 1 次主動干擾／異常／檢索特性（水伊布ex、月亮伊布ex、大食花、大王燕、燈罩夜菇、雙彈瓦斯、火暴獸、引夢貘人、塗標客、超能妙喵、水晶燈火靈）
+  if (/可使用1次.*有受到傷害的1隻備戰寶可夢.*互換/i.test(eff)) return { abOp: 20, abVal: 2 };
+  if (/可使用1次.*對手的(?:備戰區的1隻)?基礎寶可夢.*互換/i.test(eff)) return { abOp: 20, abVal: 3 };
+  if (/可使用1次.*對手的(?:戰鬥寶可夢|1隻備戰寶可夢).*互換|Once during your turn.*switch out your opponent/i.test(eff)) return { abOp: 20, abVal: 1 };
+  if (/可使用1次.*從自己的牌庫隨機將1張寶可夢卡加入手牌/i.test(eff)) return { abOp: 20, abVal: 4 };
+  if (/可使用1次.*將對手的戰鬥寶可夢中毒/i.test(eff)) return { abOp: 20, abVal: /擲1次硬幣/.test(eff) ? 8 : 5 };
+  if (/可使用1次.*將對手的戰鬥寶可夢灼傷/i.test(eff)) return { abOp: 20, abVal: 6 };
+  if (/可使用1次.*將對手的戰鬥寶可夢睡眠/i.test(eff)) return { abOp: 20, abVal: 7 };
+  if (/可使用1次.*將對手的戰鬥寶可夢混亂/i.test(eff)) return { abOp: 20, abVal: 9 };
+  if (/可使用1次.*將對手的牌庫上方1張卡丟棄/i.test(eff)) return { abOp: 20, abVal: 10 };
+  // 14. 戰鬥場受擊反傷／反毒／昏厥反傷（赤面龍、蚊香泳士、堅果啞鈴、鬃巖狼人ex、毒藻龍ex、拳海蔘）
+  if (/在戰鬥場上?受到對手的寶可夢招式的傷害而昏厥時.*受到\s*(\d+)/i.test(eff)) {
+    const dm = eff.match(/受到\s*(\d+)/);
+    return { abOp: 14, abVal: 100 + Math.min(80, Number(dm?.[1] || 50)) };
+  }
+  if (/在戰鬥場上?受到對手的寶可夢招式的傷害時.*中毒/i.test(eff)) {
+    return { abOp: 14, abVal: 99 };
+  }
+  if (/在戰鬥場上?受到對手的寶可夢招式的傷害時.*受到\s*(\d+)|Active Spot and is damaged.*do\s+(\d+)\s+damage to the Attacking/i.test(eff)) {
+    const dm = eff.match(/受到\s*(\d+)|do\s+(\d+)\s+damage/i);
+    return { abOp: 14, abVal: Math.min(50, Number(dm?.[1] || dm?.[2] || 20)) };
+  }
+  // 12. 被動常駐減傷（美錄梅塔 -20、石居蟹 -10、倫琴貓 -20）
+  if (/對手的戰鬥寶可夢使用的招式的傷害\s*[-−]\s*(\d+)/i.test(eff)) {
+    const dm = eff.match(/[-−]\s*(\d+)/);
+    return { abOp: 12, abVal: Math.min(50, Number(dm?.[1] || 20)) };
+  }
+  const redM = eff.match(/受到.*招式的傷害\s*[-−]\s*(\d+)|takes\s*[-−](\d+)\s*damage from attacks/i);
+  if (redM) {
+    const team = /所有|all of your/i.test(eff) ? 100 : 0;
+    return { abOp: 12, abVal: team + Math.min(50, Number(redM[1] || redM[2] || 20)) };
+  }
+  // 13. 被動常駐招式增傷（路卡利歐 +20）
+  const boostM = eff.match(/招式.*傷害\s*\+\s*(\d+)|attacks.*do\s*\+(\d+)\s*damage/i);
+  if (boostM) {
+    return { abOp: 13, abVal: Math.min(50, Number(boostM[1] || boostM[2] || 20)) };
+  }
+  // 25. 被動撤退減費／免撤退（謝米天空支援、毽子棉、騎拉帝納飄浮）
+  if (/戰鬥寶可夢撤退所需的能量全部消除/i.test(eff)) return { abOp: 25, abVal: 2 };
+  if (/戰鬥場的基礎寶可夢撤退所需的能量減少\s*1/i.test(eff)) return { abOp: 25, abVal: 1 };
+  if (/這隻寶可夢.*撤退所需的能量全部消除/i.test(eff)) return { abOp: 25, abVal: 3 };
+  // 18. 免疫異常狀態
+  if (/不會陷入特殊狀態|不會睡眠|can't be affected by any Special Conditions/i.test(eff)) {
+    return { abOp: 18, abVal: 1 };
+  }
+  // 19. 被動常駐提升最大 HP（裙兒小姐 +20、人造細胞卵每能 +30）
+  if (/最大HP.*每1個\s*\+\s*30/i.test(eff)) return { abOp: 19, abVal: 99 };
+  const hpM = eff.match(/最大HP\s*\+\s*(\d+)|gets\s*\+(\d+)\s*HP/i);
+  if (hpM) {
+    return { abOp: 19, abVal: Math.min(60, Number(hpM[1] || hpM[2] || 20)) };
+  }
+  return { abOp: 0, abVal: 0 };
+}
+
+// 精準分類全部 177 張訓練家／道具／競技場卡（杜絕小氣球+20HP、古茲馬當娜姿、虹色洞窟+10傷、可抽獎冰棒誤判等問題）
+export function encodeTrainerForFastSim(card) {
+  const eff = `${card.name || ''} ${card.nameEn || ''} ${card.effect || ''}`;
+  const body = `${card.effect || ''}`;
+  const isSupporter = card.subtype === 'supporter' ? 1 : 0;
+  const isItem = card.subtype === 'item' ? 1 : 0;
+
+  if (card.subtype === 'stadium') {
+    let val = 1; // 1 = 虹色洞窟／中性場地（不再誤給 +10 傷害！）
+    if (/1階進化寶可夢.*傷害\+\d+|Stage 1.*do \+10/i.test(body)) val = 2; // 訓練區（限1階進化+10）
+    else if (/基礎寶可夢.*最大HP\+\d+|Basic.*gets \+20 HP/i.test(body)) val = 3; // 起始平原（基礎+20HP）
+    else if (/撤退.*減少|Retreat Cost.*less/i.test(body)) val = 4; // 奇異廣場（撤退減費）
+    else if (/加入手牌|抽卡直到|put a random|draws cards/i.test(body)) val = 5; // 桌台市／芳香森林／健行步道
+    else if (/寶可夢ex.*傷害\+\d+|Active Pok[eé]mon ex.*\+20/i.test(body)) val = 6; // 古老鬥技場（對ex+20）
+    else if (/恢復\s*20\s*HP|heal 20/i.test(body)) val = 7; // 療癒海邊（回合結束恢復20HP）
+    return { trainerKind: 7, effectVal: val, isSupporter: 0, isItem: 0 };
+  }
+
+  if (card.subtype === 'tool') {
+    let val = 1;
+    if (/最大HP\s*\+\s*30|\+30 HP|最大HP\s*\+\s*40|\+40 HP/i.test(body)) val = 2; // 葉子斗篷／優雅斗篷(+30HP)
+    else if (/大斗蓬|大斗篷|Giant Cape|最大HP\s*\+\s*20|\+20 HP/i.test(eff)) val = 1; // 大斗篷(+20HP)
+    else if (/頭盔|Helmet|受到.*傷害時.*對使用招式的寶可夢.*20點|damaged by an attack.*do 20 damage to the Attacking/i.test(eff)) val = 3; // 凹凸頭盔(20反傷)
+    else if (/毒針|Poison Barb|中毒/i.test(eff)) val = 4; // 毒針(反擊中毒)
+    else if (/小氣球|基礎寶可夢.*撤退費用減少|Basic.*Retreat Cost/i.test(eff)) val = 5; // 小氣球(基礎-1撤退)
+    else if (/氣球|小艇|Balloon|撤退.*減少|Retreat Cost.*less/i.test(eff)) val = 11; // 水上小艇／氣球(-1撤退)
+    else if (/進化奇石|Eviolite|受到.*招式的傷害\s*[-−]\s*20|takes -20 damage/i.test(eff)) val = 6; // 進化奇石(基礎-20傷)
+    else if (/幸運蛋|Lucky Egg|昏厥時.*手牌滿5張|Knocked Out.*draw cards until you have 5/i.test(eff)) val = 7; // 幸運蛋(昏厥補手牌至5張)
+    else if (/耍詐針|回合結束時.*對手的戰鬥寶可夢受到\s*10|end of your turn.*do 10 damage/i.test(eff)) val = 8; // 耍詐針(回合末10傷)
+    else if (/驅勁能量未來|力量頭帶|招式.*傷害\s*\+\s*(?:10|20)|do \+(?:10|20) damage/i.test(eff)) val = 9; // 驅勁能量未來(+20傷)
+    else if (/減傷|受到.*傷害\s*[-−]\s*(?:10|50)|特殊狀態|圍裙|斗篷|Apron|Barrier|Poncho/i.test(eff)) val = 10; // 鋼鐵圍裙(-10傷防狀態)
+    return { trainerKind: 5, effectVal: val, isSupporter: 0, isItem: 0 };
+  }
+
+  // 恢復系優先判定（避免「可抽獎的冰棒」因「放回手牌」被誤分類成回收支援者！）
+  if (/甜甜蜜/i.test(eff)) {
+    return { trainerKind: 2, effectVal: 20 | (1 << 11), isSupporter, isItem };
+  }
+  if (/萬靈藥|將自己的戰鬥寶可夢的特殊狀態全部恢復/i.test(eff)) {
+    return { trainerKind: 2, effectVal: 1 << 8, isSupporter, isItem };
+  }
+  if (/瑪奧|HP全部恢復.*能量全部丟棄/i.test(eff)) {
+    return { trainerKind: 2, effectVal: 90 | (1 << 12), isSupporter, isItem };
+  }
+  if (/傷藥|莉佳|珠貝|莉莉艾|寶可夢中心|卡露妮|冰棒|馬拉薩達|Potion|Erika|Irida|Lillie|Center Lady|Ice Pop|Malasada|恢復\d+HP/i.test(eff)) {
+    const m = body.match(/(\d+)\s*HP|恢復\s*(\d+)/i);
+    let healVal = m ? Math.min(90, Number(m[1] || m[2]) || 30) : 30;
+    const curesStatus = /特殊狀態/i.test(body) ? 1 : 0;
+    const stage2Only = /2階進化|Stage 2/i.test(body) ? 1 : 0;
+    const coinReturn = /不丟棄這張.*放回手牌|into your hand instead/i.test(body) ? 1 : 0;
+    if (/能量丟棄|discard.*energy/i.test(body)) healVal = Math.max(20, Math.round(healVal * 0.55));
+    return { trainerKind: 2, effectVal: healVal | (curesStatus << 8) | (stage2Only << 9) | (coinReturn << 10), isSupporter, isItem };
+  }
+
+  // 能量／進化／撤退／免費換人系（trainerKind = 6）
+  if (/奇異糖果|神奇糖果|Rare Candy/i.test(eff)) return { trainerKind: 6, effectVal: 99, isSupporter, isItem };
+  if (/早熟精華|從該寶可夢進化而來的.*完成進化/i.test(eff)) return { trainerKind: 6, effectVal: 7, isSupporter, isItem };
+  if (/葉子|\bLeaf\b|撤退所需的能量減少\s*2|Retreat Cost.*2 less/i.test(eff)) return { trainerKind: 6, effectVal: 12, isSupporter, isItem };
+  if (/速度強化|X Speed|撤退所需的能量減少\s*1|撤退費用減少/i.test(eff)) return { trainerKind: 6, effectVal: 1, isSupporter, isItem };
+  if (/琴音|風露|新星訓練家|將自己的?.*戰鬥寶可夢與備戰寶可夢互換/i.test(eff)) return { trainerKind: 6, effectVal: 13, isSupporter, isItem };
+  if (/馬志士|雜耍藝人|備戰寶可夢.*所有.*能量改附於自己的戰鬥/i.test(eff)) return { trainerKind: 6, effectVal: 6, isSupporter, isItem };
+  if (/小霞|\bMisty\b|直到出現反面.*水.*能量/i.test(eff)) return { trainerKind: 6, effectVal: 5, isSupporter, isItem };
+  if (/附於2階進化|2階進化寶可夢.*能量|滿充|\bWally\b/i.test(eff)) return { trainerKind: 6, effectVal: 3, isSupporter, isItem };
+  if (/棄牌(?:區|堆).*能量.*附(?:於|加)|火補丁|電次|奧琳博士|Flame Patch|Volkner/i.test(eff)) return { trainerKind: 6, effectVal: 4, isSupporter, isItem };
+  if (/能量區.*附於|改附於.*能量|基因轉換器|小剛|小光|卡奇|梅麗莎|元素切換|阿馴|Brock|Dawn|Elemental Switch|Electric Generator/i.test(eff)) {
+    return { trainerKind: 6, effectVal: 2, isSupporter, isItem };
+  }
+
+  // 干擾／破壞道具場地／換人／洗牌／回收（trainerKind = 3）
+  if (/古茲馬|\bGuzma\b|小菊兒|對手.*寶可夢道具.*丟棄|所有.*寶可夢道具.*放回/i.test(eff)) return { trainerKind: 3, effectVal: 6, isSupporter, isItem };
+  if (/場地吹風機|Field Blower|競技場.*丟棄/i.test(eff)) return { trainerKind: 3, effectVal: 7, isSupporter, isItem };
+  if (/赤日|\bCyrus\b|有受到傷害的1隻備戰/i.test(eff)) return { trainerKind: 3, effectVal: 2, isSupporter, isItem };
+  if (/青綠的挑釁/i.test(eff)) return { trainerKind: 3, effectVal: 3, isSupporter, isItem };
+  if (/水蓮|選擇1隻對手的備戰寶可夢.*互換|選擇對手的1隻備戰寶可夢.*互換/i.test(eff)) return { trainerKind: 3, effectVal: 15, isSupporter, isItem };
+  if (/除蟲噴霧|Repel|戰鬥場的基礎寶可夢與備戰寶可夢互換/i.test(eff)) return { trainerKind: 3, effectVal: 10, isSupporter, isItem };
+  if (/娜姿|\bSabrina\b|對手的戰鬥.*與備戰寶可夢互換/i.test(eff)) return { trainerKind: 3, effectVal: 1, isSupporter, isItem };
+  if (/夥星|\bMars\b|獲勝所需的剩餘分數/i.test(eff)) return { trainerKind: 3, effectVal: 5, isSupporter, isItem };
+  if (/紅牌|Red Card|手牌全部放回牌庫.*抽出3張/i.test(eff)) return { trainerKind: 3, effectVal: 4, isSupporter, isItem };
+  if (/惡搞信|手牌丟棄直到變為4張/i.test(eff)) return { trainerKind: 3, effectVal: 11, isSupporter, isItem };
+  if (/小銀|選擇其中1張支援者卡放回牌庫/i.test(eff)) return { trainerKind: 3, effectVal: 12, isSupporter, isItem };
+  if (/火箭隊手下|Team Rocket Grunt|擲硬幣直到出現反面.*對手.*能量丟棄/i.test(eff)) return { trainerKind: 3, effectVal: 8, isSupporter, isItem };
+  if (/傑尼龜噴壺|重擊錘|聶梓|天星隊手下|對手的.*寶可夢身上.*能量.*丟棄/i.test(eff)) return { trainerKind: 3, effectVal: 14, isSupporter, isItem };
+  if (/弗圖博士|阿桔|新手調查員|奇巴納|阿塞蘿拉|將自己的戰鬥場.*放回手牌|洗入你的牌庫|put 1 of your.*into your hand/i.test(eff)) {
+    return { trainerKind: 3, effectVal: 9, isSupporter, isItem };
+  }
+
+  // 當回合增傷／下回合減傷／必正面系（trainerKind = 4）
+  if (/一樹|擲硬幣時.*一定為正面/i.test(eff)) {
+    return { trainerKind: 4, effectVal: 1 << 10, isSupporter, isItem };
+  }
+  const shieldSup = body.match(/受到對手的.*招式的傷害\s*[-−]\s*(\d+)/);
+  if (shieldSup) {
+    return { trainerKind: 4, effectVal: Math.min(100, Number(shieldSup[1] || 10)) | (1 << 9), isSupporter, isItem };
+  }
+  if (/坂木|赤紅|夏伯|竹蘭|可爾妮|哈烏|Giovanni|\bRed\b|Blaine|Cynthia|Korrina|Hau|招式.*傷害\s*\+\s*\d+/i.test(eff)) {
+    const dm = body.match(/\+\s*(\d+)/);
+    const dmgVal = dm ? Math.min(50, Number(dm[1])) : 10;
+    const vsExOnly = /寶可夢ex|Pok[eé]mon ex/i.test(body) ? 1 : 0;
+    return { trainerKind: 4, effectVal: dmgVal | (vsExOnly << 8), isSupporter, isItem };
+  }
+
+  // 抽牌／檢索系（trainerKind = 1）
+  if (/博士的研究|Professor's Research/i.test(eff)) return { trainerKind: 1, effectVal: 2, isSupporter, isItem };
+  if (/精靈球|Pok[eé] Ball/i.test(eff)) return { trainerKind: 1, effectVal: 10, isSupporter, isItem };
+  if (/模仿少女|Copycat|抽出與對手的手牌張數相同/i.test(eff)) return { trainerKind: 1, effectVal: 11, isSupporter, isItem };
+  if (/小遙|通訊|Communication|寶可夢卡.*放回牌庫/i.test(eff)) return { trainerKind: 1, effectVal: 12, isSupporter, isItem };
+  if (/琉琪亞|Lisia|HP為50以下/i.test(eff)) return { trainerKind: 1, effectVal: 13, isSupporter, isItem };
+  if (/奇樹|\bIono\b|雙方玩家各自將自己的手牌全部放回牌庫/i.test(eff)) return { trainerKind: 1, effectVal: 14, isSupporter, isItem };
+  if (/小青|2 階段寶可夢|2階進化寶可夢.*加入手牌/i.test(eff)) return { trainerKind: 1, effectVal: 16, isSupporter, isItem };
+  if (/希特隆|三合一磁怪.*加入手牌/i.test(eff)) return { trainerKind: 1, effectVal: 17, isSupporter, isItem };
+  if (/莎莉娜|卡魯穆|查看自己的牌庫上方|從自己的牌庫隨機將2張|加入手牌/i.test(eff)) return { trainerKind: 1, effectVal: 15, isSupporter, isItem };
+  return { trainerKind: 1, effectVal: 1, isSupporter, isItem };
+}
+
+// 依實卡招式文本精準估算期望傷害（供相容舊呼叫與 AI 選卡估算；對戰核心已改由 encodeAttackForFastSim 實時結算）
+export function computeExpectedAttackDamage(atk) {
+  const enc = encodeAttackForFastSim(atk);
+  let dmgNum = enc.dmg;
+  const op = enc.op;
+  const val = enc.val;
+  if (op === 8) dmgNum = Math.round(enc.dmg * (val === 99 ? 1.0 : val * 0.5));
+  else if (op === 9) dmgNum = enc.dmg + Math.round((val & 0xff) * ((val >> 8) === 99 ? 1.0 : 0.5));
+  else if (op === 10) {
+    const mode = val >> 8;
+    const per = val & 0xff;
+    dmgNum = enc.dmg + Math.round(per * (mode === 2 ? 4.5 : 2.5));
+  } else if (op === 11) {
+    dmgNum = val >= 1000 ? Math.round((val - 1000) * Math.max(2, enc.cost) * 0.5) : enc.dmg + val * Math.max(3, enc.cost + 1);
+  } else if (op === 12) {
+    dmgNum = enc.dmg + val * 2;
+  } else if (op === 13) {
+    dmgNum = enc.dmg + Math.round((val & 0xff) * 0.55);
+  } else if (op === 14) {
+    const mode = val >> 8;
+    const delta = val & 0xff;
+    dmgNum = mode === 2 ? Math.max(10, enc.dmg - Math.round(delta * 0.4)) : enc.dmg + Math.round(delta * 0.55);
+  } else if (op === 17) {
+    const mode = val >> 8;
+    const sn = val & 0xff;
+    if (mode === 2) dmgNum = sn;
+    else if (mode >= 3) dmgNum = (mode - 2) * sn;
+    else dmgNum = enc.dmg + Math.round(sn * (mode === 1 ? 1.2 : 0.6));
+  } else if (op === 7) {
+    dmgNum = Math.round(enc.dmg * 0.5);
+  } else if (op === 21 && val === 99) {
+    dmgNum = Math.round(enc.dmg * 1.15);
+  } else if (op === 26) {
+    dmgNum = Math.round(enc.dmg * 0.72);
+  } else if (op === 28) {
+    dmgNum = val === 1 ? 160 : 60;
+  }
+  return {
+    dmgNum,
+    isOpponentMissDebuff: op === 21 && val === 99,
+    discardEnergy: op === 16 ? (val >= 2 ? 2 : 1) : 0,
+    heavyRecoil: op === 15 && val >= 40
+  };
 }
 
 export function encodeCardForFastSim(card, strategyBonus = 0, cardsById = null) {
   if (!card) {
     return {
-      isPokemon: 1, stage: 0, evoGroup: 0, typeCode: 9, weakCode: 255, hp: 60, retreat: 1,
-      prize: 1, atkCost: 1, atkDmg: 20, atkFlags: 0, abFlags: 0,
+      isPokemon: 1, stage: 0, evoGroup: 0, isSupporter: 0, isItem: 0, isFossil: 0,
+      typeCode: 9, weakCode: 255, hp: 60, retreat: 1, prize: 1,
+      a1Cost: 1, a1Dmg: 20, a1Op: 0, a1Val: 0,
+      a2Cost: 255, a2Dmg: 0, a2Op: 0, a2Val: 0,
+      abOp: 0, abVal: 0,
+      atkCost: 1, atkDmg: 20, atkFlags: 0, abFlags: 0,
       trainerKind: 0, effectVal: 0, strategyBonus: Number(strategyBonus || 0)
     };
   }
   const name = `${card.name || ''} ${card.nameEn || ''}`;
-  const isFossil = card.subtype === 'fossil' || /化石|Fossil/i.test(name);
-  const isPokemon = card.type === 'pokemon' || isFossil ? 1 : 0;
+  const isFossil = (card.subtype === 'fossil' || /化石|Fossil/i.test(name)) ? 1 : 0;
+  const isPokemon = (card.type === 'pokemon' || isFossil) ? 1 : 0;
   const stage = card.stage === 'stage2' ? 2 : card.stage === 'stage1' ? 1 : 0;
   const evoGroup = isPokemon ? resolveEvolutionGroup(card, cardsById) : 0;
   const primaryType = (card.types?.[0] || 'colorless').toLowerCase();
@@ -797,98 +1390,50 @@ export function encodeCardForFastSim(card, strategyBonus = 0, cardsById = null) 
   const isEx = cats.includes('ex') || isMega;
   const prize = isMega ? 3 : isEx ? 2 : 1;
 
-  let bestDmg = 0;
-  let bestCost = 1;
-  let bestAtkFlags = 0;
-  for (const atk of card.attacks || []) {
-    const cost = Math.max(0, Math.min(5, (atk.cost || []).length));
-    const eff = String(atk.effect || '');
-    const { dmgNum, isOpponentMissDebuff, discardEnergy, heavyRecoil } = computeExpectedAttackDamage(atk);
-    const effCost = Math.max(1, cost);
-    let flags = 0;
-    if (eff.length > 0) flags |= 1;
-    if (/備戰|bench|對手的(?:1隻|任1隻)寶可夢受到/i.test(eff) && /傷害|damage/i.test(eff)) flags |= 2;
-    if (isOpponentMissDebuff || /中毒|灼傷|睡眠|麻痺|混亂|poison|burn|asleep|paralyz|confus/i.test(eff)) flags |= 4;
-    if (/恢復|heal/i.test(eff)) flags |= 8;
-    if (/能量區.*附|附於.*能量|attach.*energy/i.test(eff)) flags |= 16;
-    if (heavyRecoil) flags |= 32;
-    if (discardEnergy >= 2) flags |= 128;
-    else if (discardEnergy === 1) flags |= 64;
+  const atks = Array.isArray(card.attacks) ? card.attacks : [];
+  const a1 = isPokemon && !isFossil && atks[0] ? encodeAttackForFastSim(atks[0]) : { cost: isFossil ? 255 : 1, dmg: isFossil ? 0 : 20, op: 0, val: 0 };
+  const a2 = isPokemon && !isFossil && atks[1] ? encodeAttackForFastSim(atks[1]) : { cost: 255, dmg: 0, op: 0, val: 0 };
 
-    if (dmgNum > bestDmg || (dmgNum === bestDmg && effCost < bestCost)) {
-      bestDmg = dmgNum;
-      bestCost = effCost;
-      bestAtkFlags = flags;
-    }
-  }
-  if (isPokemon && bestDmg === 0) bestDmg = isFossil ? 0 : 20;
+  const { abOp, abVal } = isPokemon ? encodeAbilityForFastSim(card) : { abOp: 0, abVal: 0 };
+  const trn = !isPokemon ? encodeTrainerForFastSim(card) : { trainerKind: 0, effectVal: 0, isSupporter: 0, isItem: 0 };
+
+  // 向下相容舊版欄位（供既有用例與選卡估算使用）
+  const exp1 = atks[0] ? computeExpectedAttackDamage(atks[0]) : { dmgNum: a1.dmg, discardEnergy: 0, heavyRecoil: false };
+  const exp2 = atks[1] ? computeExpectedAttackDamage(atks[1]) : null;
+  const pick2 = Boolean(exp2 && (exp2.dmgNum > exp1.dmgNum || (exp2.dmgNum === exp1.dmgNum && a2.cost < a1.cost)));
+  const bestExp = pick2 ? exp2 : exp1;
+  const bestAtk = pick2 ? a2 : a1;
+  let atkFlags = 0;
+  if (bestAtk.op !== 0) atkFlags |= 1;
+  if (bestAtk.op === 17) atkFlags |= 2;
+  if ([1, 2, 3, 4, 5, 6].includes(bestAtk.op) || (bestAtk.op === 21 && bestAtk.val === 99)) atkFlags |= 4;
+  if (bestAtk.op === 18) atkFlags |= 8;
+  if (bestAtk.op === 19) atkFlags |= 16;
+  if (bestAtk.op === 15 && bestAtk.val >= 40) atkFlags |= 32;
+  if (bestAtk.op === 16 && bestAtk.val >= 2) atkFlags |= 128;
+  else if (bestAtk.op === 16 && bestAtk.val === 1) atkFlags |= 64;
 
   let abFlags = 0;
-  for (const ab of card.abilities || []) {
-    abFlags |= 1;
-    const eff = String(ab.effect || '');
-    const isOneTimeEvolve = /完成進化時|當從手牌使出這張卡.*進化|when you play this Pok[eé]mon from your hand to evolve/i.test(eff);
-    if (/抽.*張|draw/i.test(eff)) abFlags |= 2;
-    const isEnergyTriggerOnly = /每次從自己的能量區將.*能量附於.*時|whenever you attach.*energy.*from your energy zone/i.test(eff);
-    if (!isEnergyTriggerOnly && /(?:從自己的(?:能量區|棄牌區)[^。]*能量[^。]*附於|轉移[^。]*能量|attach.*energy.*from|move.*energy)/i.test(eff)) {
-      if (isOneTimeEvolve) abFlags |= 32; // 僅進化當下觸發 1 次（如火恐龍「點火」）
-      else abFlags |= 4; // 每回合可發動 1 次（如三合一磁怪、哈克龍）
-    }
-    if (/恢復|heal/i.test(eff)) abFlags |= 8;
-    if (/傷害|damage/i.test(eff) && !/不會受到/.test(eff)) abFlags |= 16;
-    // 防 ex 免疫特性（如花舞鳥「神祕守護」）：引擎真實判定寶可夢 ex 攻擊無效
-    if (/不會受到.*寶可夢ex.*招式的傷害|prevent all damage done to this Pok[eé]mon by attacks from.*Pok[eé]mon ex/i.test(eff)) {
-      abFlags |= 64;
-    }
-  }
-
-  let trainerKind = 0;
-  let effectVal = 0;
-  if (!isPokemon) {
-    const eff = `${card.name || ''} ${card.nameEn || ''} ${card.effect || ''}`;
-    const body = `${card.effect || ''}`;
-    if (card.subtype === 'stadium') {
-      trainerKind = 7;
-      effectVal = /傷害\+\d+|\+\d+點/i.test(body) ? 10 : 5;
-    } else if (card.subtype === 'tool') {
-      trainerKind = 5;
-      effectVal = /最大HP\+30/i.test(body) ? 25
-        : /斗蓬|斗篷|Cape|HP\+20/i.test(eff) ? 20
-        : /頭盔|Helmet|20點傷害/i.test(eff) ? -20
-        : /撤退/i.test(body) ? 8
-        : 10;
-    } else if (/奇異糖果|神奇糖果|Rare Candy/i.test(eff)) {
-      trainerKind = 6; effectVal = 99;
-    } else if (/附於2階進化|2階進化寶可夢.*能量|滿充/i.test(eff)) {
-      trainerKind = 6; effectVal = 3; // 限場上有 2 階進化寶可夢時使用
-    } else if (/棄牌區.*能量附於|火補丁|電次|Flame Patch|Volkner/i.test(eff)) {
-      trainerKind = 6; effectVal = 4; // 限棄牌區有能量（中後期或有寶可夢倒下）時使用
-    } else if (/能量區.*附於|改附於.*能量|小霞|小剛|小光|卡奇|梅麗莎|Misty|Brock|Dawn/i.test(eff)) {
-      trainerKind = 6; effectVal = 2;
-    } else if (/撤退所需的能量減少|撤退費用減少|速度強化|葉子|X Speed|Leaf/i.test(eff)) {
-      trainerKind = 6; effectVal = 1;
-    } else if (/大木博士|博士的研究|精靈球|模仿少女|奇樹|通訊|Research|Poké Ball|Copycat|Iono|Communication|抽\d+張|加入手牌/i.test(eff)) {
-      trainerKind = 1; effectVal = /大木|博士的研究|Research/i.test(eff) ? 2 : 1;
-    } else if (/傷藥|莉佳|珠貝|莉莉艾|寶可夢中心|卡露妮|Potion|Erika|Irida|Lillie|Center Lady|恢復\d+HP/i.test(eff)) {
-      trainerKind = 2;
-      const m = body.match(/(\d+)\s*HP|恢復\s*(\d+)/i);
-      let healVal = m ? Math.min(80, Number(m[1] || m[2]) || 30) : 30;
-      if (/能量丟棄|discard.*energy/i.test(body)) healVal = Math.max(20, Math.round(healVal * 0.5));
-      effectVal = healVal;
-    } else if (/娜姿|赤日|古茲馬|夥星|紅牌|Sabrina|Cyrus|Guzma|Mars|Red Card|互換|放回牌庫/i.test(eff)) {
-      trainerKind = 3;
-      effectVal = /赤日|Cyrus/i.test(eff) ? 2 : /夥星|紅牌|Mars|Red Card/i.test(eff) ? 3 : 1;
-    } else if (/坂木|赤紅|夏伯|竹蘭|可爾妮|哈烏|Giovanni|Red\b|Blaine|Cynthia|\+\d+點/i.test(eff)) {
-      trainerKind = 4; effectVal = /赤紅|Red\b|\+20|\+30/i.test(eff) ? 20 : 10;
-    } else {
-      trainerKind = 1; effectVal = 1;
-    }
-  }
+  if (abOp !== 0) abFlags |= 1;
+  if (abOp === 1 || abOp === 2) abFlags |= 2;
+  if (abOp === 3 || abOp === 4 || abOp === 6) abFlags |= 4;
+  if (abOp === 15) abFlags |= 8;
+  if (abOp === 8 || abOp === 9 || abOp === 10) abFlags |= 16;
+  if (abOp === 5) abFlags |= 32;
+  if (abOp === 11) abFlags |= 64;
 
   return {
-    isPokemon, stage, evoGroup, typeCode, weakCode, hp, retreat, prize,
-    atkCost: bestCost, atkDmg: bestDmg, atkFlags: bestAtkFlags, abFlags,
-    trainerKind, effectVal, strategyBonus: Number(strategyBonus || 0)
+    isPokemon, stage, evoGroup,
+    isSupporter: trn.isSupporter, isItem: trn.isItem, isFossil,
+    typeCode, weakCode, hp, retreat, prize,
+    a1Cost: a1.cost, a1Dmg: a1.dmg, a1Op: a1.op, a1Val: a1.val,
+    a2Cost: a2.cost, a2Dmg: a2.dmg, a2Op: a2.op, a2Val: a2.val,
+    abOp, abVal,
+    atkCost: Math.max(1, bestAtk.cost === 255 ? 1 : bestAtk.cost),
+    atkDmg: bestExp.dmgNum,
+    atkFlags, abFlags,
+    trainerKind: trn.trainerKind, effectVal: trn.effectVal,
+    strategyBonus: Number(strategyBonus || 0)
   };
 }
 
@@ -1780,6 +2325,9 @@ export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
   if (!isCardCompatibleWithDeck(card, ctx)) {
     if (card.type === 'pokemon') {
       base.stage = 99;
+      base.a1Cost = 255; base.a1Dmg = 0; base.a1Op = 0; base.a1Val = 0;
+      base.a2Cost = 255; base.a2Dmg = 0; base.a2Op = 0; base.a2Val = 0;
+      base.abOp = 0; base.abVal = 0;
       base.atkDmg = 0;
       base.atkFlags = 0;
       base.abFlags = 0;
@@ -1796,27 +2344,30 @@ export function encodeCardForOptimizer(card, strategyBonus = 0, ctx = null) {
     if (attacks.length > 0 && deckEnergySet?.size > 0) {
       let playableDmg = 0;
       let playableCost = 99;
-      for (const atk of attacks) {
+      attacks.forEach((atk, idx) => {
         const costs = Array.isArray(atk.cost) ? atk.cost : [];
         const canPay = costs.every((sym) => {
           const k = String(sym || '').toLowerCase();
           return !k || k === 'colorless' || deckEnergySet.has(k);
         });
-        if (canPay) {
+        if (!canPay) {
+          if (idx === 0) { base.a1Cost = 255; base.a1Dmg = 0; base.a1Op = 0; base.a1Val = 0; }
+          if (idx === 1) { base.a2Cost = 255; base.a2Dmg = 0; base.a2Op = 0; base.a2Val = 0; }
+        } else {
           const { dmgNum } = computeExpectedAttackDamage(atk);
-          const costLen = Math.max(1, Math.min(5, costs.length || 1));
+          const costLen = Math.max(0, Math.min(5, costs.length));
           if (dmgNum > playableDmg || (dmgNum === playableDmg && costLen < playableCost)) {
             playableDmg = dmgNum;
             playableCost = costLen;
           }
         }
-      }
+      });
       if (playableCost === 99) {
         base.atkDmg = 0;
         base.atkFlags = 0;
       } else {
         base.atkDmg = playableDmg;
-        base.atkCost = playableCost;
+        base.atkCost = Math.max(1, playableCost);
       }
     }
   }
@@ -2000,18 +2551,20 @@ export function buildLegalReplacementCandidates({
     const enc = encodeCardForOptimizer(card, bonus, optCtx);
 
     // Skip functionally identical reprints of the exact same card already being replaced
-    if (limitKey === origLimitKey && enc.hp === origEnc.hp && enc.atkDmg === origEnc.atkDmg && enc.atkCost === origEnc.atkCost && enc.trainerKind === origEnc.trainerKind && enc.effectVal === origEnc.effectVal) {
+    if (limitKey === origLimitKey && enc.hp === origEnc.hp && enc.a1Cost === origEnc.a1Cost && enc.a1Dmg === origEnc.a1Dmg && enc.a1Op === origEnc.a1Op && enc.a1Val === origEnc.a1Val && enc.a2Cost === origEnc.a2Cost && enc.a2Dmg === origEnc.a2Dmg && enc.abOp === origEnc.abOp && enc.abVal === origEnc.abVal && enc.trainerKind === origEnc.trainerKind && enc.effectVal === origEnc.effectVal) {
       groups.get(origGroupKey).representedCount++;
       continue;
     }
 
-    // 依卡牌實質功能分組（訓練家直接以卡名分組，避免同效異畫重複測試，但保留所有不同名稱的訓練家卡！）
+    // 依卡牌實質功能分組（訓練家直接以卡名分組，寶可夢完整區分雙招式與特性，避免不同版本的同名寶可夢被合併！）
     const fKey = card.type === 'trainer'
       ? `T|${normCardNameKey(limitKey)}`
       : [
           'P', normCardNameKey(limitKey), enc.stage, enc.typeCode, enc.weakCode,
-          enc.hp, enc.retreat, enc.prize, enc.atkCost, enc.atkDmg,
-          enc.atkFlags, enc.abFlags
+          enc.hp, enc.retreat, enc.prize,
+          enc.a1Cost, enc.a1Dmg, enc.a1Op, enc.a1Val,
+          enc.a2Cost, enc.a2Dmg, enc.a2Op, enc.a2Val,
+          enc.abOp, enc.abVal
         ].join('|');
 
     const pref = rarityPreferenceScore(card, collection);
