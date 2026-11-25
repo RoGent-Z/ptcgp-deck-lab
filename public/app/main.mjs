@@ -30,6 +30,7 @@ import {
   deleteDeck,
   ensureFullMeta,
   ensurePairwiseStrategies,
+  ensureQrEntityMap,
   ensureStrategyLexicon,
   exportFullBackupJson,
   freshnessStatus,
@@ -73,6 +74,8 @@ import {
   buildCollectionToolsModal,
   buildDeckShowcaseModal,
   buildMetaDetailModal,
+  buildQrExportModal,
+  buildQrImportModal,
   filterCatalogCards,
   renderBattle,
   renderCatalog,
@@ -210,6 +213,172 @@ const draftDrawerEl = document.getElementById('draft-drawer');
 const drawerFabEl = document.getElementById('drawer-fab');
 const drawerFabCountEl = document.getElementById('drawer-fab-count');
 const importInputEl = document.getElementById('import-file');
+const qrImageInputEl = document.getElementById('qr-image-file');
+
+// === 遊戲內卡組二維碼：相機掃描、截圖識別與雙向匯出 ===
+let qrCameraStream = null;
+let qrScanTimer = null;
+let qrScanBusy = false;
+let qrModulePromise = null;
+let lastQrExport = null;
+
+function loadQrModule() {
+  if (!qrModulePromise) qrModulePromise = import('./deck-qr.mjs');
+  return qrModulePromise;
+}
+
+function stopQrCamera() {
+  if (qrScanTimer) {
+    clearTimeout(qrScanTimer);
+    qrScanTimer = null;
+  }
+  qrScanBusy = false;
+  if (qrCameraStream) {
+    for (const track of qrCameraStream.getTracks()) {
+      try { track.stop(); } catch {}
+    }
+    qrCameraStream = null;
+  }
+  const vid = document.getElementById('qr-video');
+  if (vid) vid.srcObject = null;
+  uiState.qrImport.scanning = false;
+}
+
+function refreshQrImportModal() {
+  if (!dialogEl.open || !uiState.qrImport.open) return;
+  dialogBodyEl.innerHTML = buildQrImportModal();
+  bindFoilEffects(dialogBodyEl);
+}
+
+async function applyDecodedQrPayload(rawPayload) {
+  const [qrMod, entityMap] = await Promise.all([loadQrModule(), ensureQrEntityMap()]);
+  if (!entityMap) throw Error('無法載入卡牌代碼對照表，請重新整理後再試');
+  const decoded = qrMod.decodeDeckQrPayload(rawPayload);
+  const resolved = qrMod.resolveDecodedPayloadToDeck(decoded, entityMap, state.cardsById, state.collection);
+  if (!resolved.cards.length) throw Error('無法識別此卡組碼中的卡牌');
+  stopQrCamera();
+  uiState.qrImport.error = '';
+  uiState.qrImport.statusText = '';
+  uiState.qrImport.decoding = false;
+  uiState.qrImport.result = resolved;
+  try { navigator.vibrate?.(60); } catch {}
+  refreshQrImportModal();
+  showNotice(`已識別遊戲牌組「${resolved.name}」（${resolved.totalCards} 張）`);
+}
+
+async function decodeQrImageFileAndPreview(file) {
+  if (!file) return;
+  stopQrCamera();
+  uiState.qrImport.error = '';
+  uiState.qrImport.decoding = true;
+  uiState.qrImport.statusText = '正在解析圖片中的卡組二維碼…';
+  refreshQrImportModal();
+  try {
+    const [qrMod] = await Promise.all([loadQrModule(), ensureQrEntityMap()]);
+    const res = await qrMod.decodeQrFromImageFile(file);
+    if (!res?.payload) {
+      throw Error('圖片中未識別到有效的遊戲卡組二維碼，請確認截圖清晰完整（或試著放大二維碼區域再試）');
+    }
+    await applyDecodedQrPayload(res.payload);
+  } catch (err) {
+    uiState.qrImport.decoding = false;
+    uiState.qrImport.statusText = '';
+    uiState.qrImport.error = err?.message || '無法識別圖片中的卡組碼';
+    refreshQrImportModal();
+  }
+}
+
+async function startQrCameraScan() {
+  stopQrCamera();
+  uiState.qrImport.error = '';
+  uiState.qrImport.result = null;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    uiState.qrImport.error = '目前環境不支援開啟相機，請點擊「選擇遊戲截圖」匯入相簿截圖。';
+    refreshQrImportModal();
+    return;
+  }
+  uiState.qrImport.statusText = '正在請求相機權限…';
+  refreshQrImportModal();
+  try {
+    const [qrMod] = await Promise.all([loadQrModule(), ensureQrEntityMap()]);
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false
+    });
+    if (!dialogEl.open || !uiState.qrImport.open) {
+      for (const t of stream.getTracks()) try { t.stop(); } catch {}
+      return;
+    }
+    qrCameraStream = stream;
+    uiState.qrImport.scanning = true;
+    uiState.qrImport.statusText = '相機已開啟，請對準遊戲內的牌組二維碼';
+    refreshQrImportModal();
+
+    const vid = document.getElementById('qr-video');
+    if (!vid) { stopQrCamera(); return; }
+    vid.srcObject = stream;
+    await vid.play().catch(() => {});
+
+    const scanCanvas = document.createElement('canvas');
+    const scanCtx = scanCanvas.getContext('2d', { willReadFrequently: true });
+    let nativeDetector = null;
+    if (typeof window.BarcodeDetector === 'function') {
+      try { nativeDetector = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch {}
+    }
+
+    const tick = async () => {
+      if (!qrCameraStream || !uiState.qrImport.scanning || !uiState.qrImport.open) return;
+      if (!qrScanBusy && vid.readyState >= 2 && vid.videoWidth > 0 && vid.videoHeight > 0) {
+        qrScanBusy = true;
+        try {
+          const maxW = 960;
+          const scale = vid.videoWidth > maxW ? maxW / vid.videoWidth : 1;
+          const cw = Math.round(vid.videoWidth * scale);
+          const ch = Math.round(vid.videoHeight * scale);
+          if (scanCanvas.width !== cw || scanCanvas.height !== ch) {
+            scanCanvas.width = cw;
+            scanCanvas.height = ch;
+          }
+          scanCtx.drawImage(vid, 0, 0, cw, ch);
+
+          let rawPayload = '';
+          if (nativeDetector) {
+            try {
+              const found = await nativeDetector.detect(scanCanvas);
+              if (found?.[0]?.rawValue) rawPayload = found[0].rawValue;
+            } catch {}
+          }
+          if (!rawPayload) {
+            const imgData = scanCtx.getImageData(0, 0, cw, ch);
+            const dec = qrMod.decodeQrFromImageData(imgData, { fastCamera: true });
+            if (dec?.payload) rawPayload = dec.payload;
+          }
+          if (rawPayload) {
+            try {
+              qrMod.decodeDeckQrPayload(rawPayload);
+              await applyDecodedQrPayload(rawPayload);
+              return;
+            } catch {
+              // 掃到非遊戲牌組二維碼，持續等待正確圖碼
+            }
+          }
+        } finally {
+          qrScanBusy = false;
+        }
+      }
+      qrScanTimer = setTimeout(tick, 280);
+    };
+    qrScanTimer = setTimeout(tick, 320);
+  } catch (err) {
+    stopQrCamera();
+    const denied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
+    uiState.qrImport.statusText = '';
+    uiState.qrImport.error = denied
+      ? '尚未授權相機權限，請在系統設定允許相機，或直接點「選擇遊戲截圖」匯入。'
+      : `無法開啟相機（${err?.message || '未偵測到可用鏡頭'}），請改用「選擇遊戲截圖」。`;
+    refreshQrImportModal();
+  }
+}
 
 let noticeTimer = null;
 function showNotice(msg) {
@@ -648,6 +817,141 @@ async function handleAction(el) {
   if (action === 'import-deck-trigger') {
     importInputEl.value = '';
     importInputEl.click();
+    return;
+  }
+
+  if (action === 'open-qr-import') {
+    stopQrCamera();
+    uiState.qrImport = {
+      open: true,
+      scanning: false,
+      decoding: false,
+      statusText: '',
+      error: '',
+      result: null,
+      rawText: ''
+    };
+    openModal('掃碼匯入遊戲牌組', buildQrImportModal());
+    ensureQrEntityMap().catch(() => null);
+    loadQrModule().catch(() => null);
+    return;
+  }
+
+  if (action === 'qr-start-camera') {
+    await startQrCameraScan();
+    return;
+  }
+
+  if (action === 'qr-stop-camera') {
+    stopQrCamera();
+    uiState.qrImport.statusText = '';
+    refreshQrImportModal();
+    return;
+  }
+
+  if (action === 'qr-pick-image') {
+    if (qrImageInputEl) {
+      qrImageInputEl.value = '';
+      qrImageInputEl.click();
+    }
+    return;
+  }
+
+  if (action === 'qr-parse-text') {
+    const raw = document.getElementById('qr-raw-code-input')?.value?.trim() || '';
+    uiState.qrImport.rawText = raw;
+    if (!raw) {
+      uiState.qrImport.error = '請先貼上遊戲卡組代碼';
+      refreshQrImportModal();
+      return;
+    }
+    try {
+      await applyDecodedQrPayload(raw);
+    } catch (err) {
+      uiState.qrImport.error = err?.message || '代碼解析失敗';
+      refreshQrImportModal();
+    }
+    return;
+  }
+
+  if (action === 'qr-reset') {
+    stopQrCamera();
+    uiState.qrImport.result = null;
+    uiState.qrImport.error = '';
+    uiState.qrImport.statusText = '';
+    uiState.qrImport.decoding = false;
+    refreshQrImportModal();
+    return;
+  }
+
+  if (action === 'qr-confirm-save' || action === 'qr-confirm-battle') {
+    const res = uiState.qrImport.result;
+    if (!res?.cards?.length) return;
+    const customName = document.getElementById('qr-deck-name-input')?.value?.trim() || res.name || '掃碼匯入牌組';
+    const saved = await saveDeck({
+      id: crypto.randomUUID(),
+      name: customName.slice(0, 150),
+      cards: res.cards,
+      energy: res.energy,
+      customOrder: true
+    });
+    state.selectedDeckId = saved.id;
+    uiState.qrImport.open = false;
+    uiState.qrImport.result = null;
+    if (dialogEl.open) dialogEl.close();
+    if (action === 'qr-confirm-battle') {
+      uiState.battle.deckId = saved.id;
+      location.hash = '#battle';
+    } else {
+      if (currentRoute() !== 'decks') location.hash = '#decks';
+      else renderRoute();
+    }
+    showNotice(`已將「${saved.name}」加入我的牌組`);
+    return;
+  }
+
+  if (action === 'export-deck-qr') {
+    const d = state.decks.find((x) => x.id === id);
+    if (!d) return;
+    try {
+      const [qrMod, entityMap] = await Promise.all([loadQrModule(), ensureQrEntityMap()]);
+      if (!entityMap) throw Error('無法載入卡牌代碼對照表');
+      const qrRes = qrMod.encodeDeckToGameQr(d, entityMap, state.cardsById);
+      lastQrExport = { deck: d, qrRes };
+      openModal(`遊戲二維碼 · ${d.name}`, buildQrExportModal(d, qrRes));
+    } catch (err) {
+      showNotice(err?.message || '產生遊戲二維碼失敗');
+    }
+    return;
+  }
+
+  if (action === 'qr-download-png') {
+    if (!lastQrExport?.qrRes?.payload) return;
+    try {
+      const qrMod = await loadQrModule();
+      const dataUrl = qrMod.renderDeckQrToPngDataUrl(lastQrExport.qrRes.payload, { size: 520 });
+      const a = document.createElement('a');
+      a.href = dataUrl;
+      a.download = `${(lastQrExport.deck?.name || 'pocket-deck').replace(/[\\/:*?"<>|]/g, '_')}-qr.png`;
+      a.click();
+      showNotice('已下載遊戲卡組二維碼圖片');
+    } catch (err) {
+      showNotice(err?.message || '下載圖片失敗');
+    }
+    return;
+  }
+
+  if (action === 'qr-copy-code') {
+    const val = document.getElementById('qr-export-code-val')?.value || lastQrExport?.qrRes?.payload || '';
+    if (!val) return;
+    try {
+      await navigator.clipboard.writeText(val);
+      showNotice('已複製遊戲卡組代碼');
+    } catch {
+      const inp = document.getElementById('qr-export-code-val');
+      if (inp) { inp.select(); document.execCommand?.('copy'); }
+      showNotice('已選取卡組代碼');
+    }
     return;
   }
 
@@ -1579,9 +1883,53 @@ importInputEl.addEventListener('change', async () => {
   }
 });
 
+qrImageInputEl?.addEventListener('change', async () => {
+  const file = qrImageInputEl.files?.[0];
+  if (!file) return;
+  await decodeQrImageFileAndPreview(file);
+});
+
+document.addEventListener('paste', async (e) => {
+  if (!dialogEl.open || !uiState.qrImport.open || uiState.qrImport.result) return;
+  const items = e.clipboardData?.items || [];
+  for (const item of items) {
+    if (item.type && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) {
+        e.preventDefault();
+        await decodeQrImageFileAndPreview(file);
+        return;
+      }
+    }
+  }
+});
+
+dialogBodyEl?.addEventListener('dragover', (e) => {
+  const dz = e.target.closest?.('#qr-dropzone');
+  if (!dz) return;
+  e.preventDefault();
+  dz.classList.add('is-drag');
+});
+dialogBodyEl?.addEventListener('dragleave', (e) => {
+  const dz = e.target.closest?.('#qr-dropzone');
+  if (dz) dz.classList.remove('is-drag');
+});
+dialogBodyEl?.addEventListener('drop', async (e) => {
+  const dz = e.target.closest?.('#qr-dropzone');
+  if (!dz) return;
+  e.preventDefault();
+  dz.classList.remove('is-drag');
+  const file = e.dataTransfer?.files?.[0];
+  if (file && file.type.startsWith('image/')) {
+    await decodeQrImageFileAndPreview(file);
+  }
+});
+
 document.getElementById('dialog-close')?.addEventListener('click', () => dialogEl.close());
 dialogEl?.addEventListener('click', (e) => { if (e.target === dialogEl) dialogEl.close(); });
 dialogEl?.addEventListener('close', () => {
+  stopQrCamera();
+  uiState.qrImport.open = false;
   uiState.battle.deepAbortCtrl?.abort();
   uiState.battle.optAbortCtrl?.abort();
   dialogEl.classList.remove('is-wide');

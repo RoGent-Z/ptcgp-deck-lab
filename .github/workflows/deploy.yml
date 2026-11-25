@@ -69,7 +69,7 @@ jobs:
           fi
 
       - name: Run verification tests before publish
-        run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs
+        run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs tests/deck-qr.test.mjs
 
       - name: Persist refreshed tournament meta snapshot to main
         if: github.event.schedule == '17 */3 * * *' || (github.event_name == 'workflow_dispatch' && inputs.sync_meta == 'true')

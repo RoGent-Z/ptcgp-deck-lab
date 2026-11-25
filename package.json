@@ -1,10 +1,10 @@
 {
   "name": "pocket-lab",
-  "version": "0.0.15",
+  "version": "0.0.16",
   "private": true,
   "description": "Pocket Lab — 寶可夢卡牌 Pocket 牌組構築與賽事對戰研究站",
   "scripts": {
-    "test": "node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs",
+    "test": "node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs tests/deck-qr.test.mjs",
     "android:icons": "python tools/mobile/build_icons.py",
     "android:sync": "npx cap sync android"
   },
@@ -13,6 +13,9 @@
     "@capacitor/core": "8.6.2"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.6.2"
+    "@capacitor/cli": "8.6.2",
+    "jsqr": "^1.4.0",
+    "pngjs": "^7.0.0",
+    "qrcode-generator": "^2.0.4"
   }
 }

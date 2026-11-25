@@ -124,7 +124,16 @@ export const uiState = {
     duelResult: null,
     duelAbortCtrl: null
   },
-  auth: { mode: 'login' }
+  auth: { mode: 'login' },
+  qrImport: {
+    open: false,
+    scanning: false,
+    decoding: false,
+    statusText: '',
+    error: '',
+    result: null,
+    rawText: ''
+  }
 };
 
 function deckTotalCount(deck) {
@@ -758,9 +767,10 @@ export function renderDecks() {
   if (!selected) {
     detailHtml = `<div class="empty-box is-dashed">
       <strong>還沒有已儲存的牌組</strong>
-      <p>你可以前往「卡牌圖鑑」組建並儲存草稿、匯入 JSON 牌表，或從「賽事環境」複製一套代表構築。</p>
+      <p>你可以掃描《寶可夢卡牌 Pocket》遊戲內的牌組二維碼直接匯入、前往「卡牌圖鑑」組牌，或從「賽事環境」複製代表構築。</p>
       <div class="actions">
-        <a class="btn btn-primary" href="#catalog">前往圖鑑組牌</a>
+        <button class="btn btn-primary" type="button" data-action="open-qr-import">${icon('scan', 16)}掃碼匯入牌組</button>
+        <a class="btn btn-outline" href="#catalog">前往圖鑑組牌</a>
         <button class="btn btn-outline" type="button" data-action="import-deck-trigger">匯入 JSON 牌表</button>
       </div>
     </div>`;
@@ -828,6 +838,7 @@ export function renderDecks() {
           <button class="btn btn-outline" type="button" data-action="load-to-draft" data-id="${esc(selected.id)}">載入至草稿編輯</button>
           <button class="btn btn-outline" type="button" data-action="feature-deck" data-id="${esc(selected.id)}">${isFeatured ? '★ 已陳列於首頁' : '☆ 設為首頁陳列'}</button>
           <button class="btn btn-outline" type="button" data-action="duplicate-deck" data-id="${esc(selected.id)}">${icon('copy', 15)}複製</button>
+          <button class="btn btn-outline" type="button" data-action="export-deck-qr" data-id="${esc(selected.id)}" ${isValid ? '' : 'disabled'}>${icon('qr', 15)}遊戲二維碼</button>
           <button class="btn btn-outline" type="button" data-action="export-deck" data-id="${esc(selected.id)}">${icon('download', 15)}匯出 JSON</button>
         </div>
         <button class="btn btn-danger" type="button" data-action="delete-deck" data-id="${esc(selected.id)}">刪除</button>
@@ -844,7 +855,8 @@ export function renderDecks() {
     <div class="decks-layout">
       <aside class="panel decks-list-col">
         <div class="actions block-gap">
-          <button class="btn btn-primary" type="button" data-action="create-empty-deck">+ 新增空白</button>
+          <button class="btn btn-primary" type="button" data-action="open-qr-import">${icon('scan', 15)}掃碼匯入</button>
+          <button class="btn btn-outline" type="button" data-action="create-empty-deck">+ 新增空白</button>
           <button class="btn btn-outline" type="button" data-action="import-deck-trigger">${icon('upload', 15)}匯入 JSON</button>
         </div>
         <div class="saved-deck-list">
@@ -1591,6 +1603,108 @@ export function buildAccountModal() {
           </form>
         </details>
       ` : ''}
+    </div>
+  `;
+}
+
+export function buildQrImportModal() {
+  const qs = uiState.qrImport;
+  const res = qs.result;
+
+  if (res) {
+    const ownership = evaluateDeckOwnership(res, state.collection, state.cardsById);
+    const rows = (res.cards || []).map((c, idx) => {
+      const card = state.cardsById.get(c.id);
+      const thumb = card ? renderCardImgTag(card, { className: 'rep-thumb', alt: card.name }) : '';
+      const miss = ownership.byEntryIndex[idx]?.missing || 0;
+      const missHtml = state.showMissingBadges && miss > 0
+        ? `<span class="rep-miss-tag">缺 ${miss}</span>`
+        : '';
+      return `
+        <li class="rep-row ${card ? '' : 'is-missing'}">
+          ${thumb ? `<span class="rep-thumb-wrap">${thumb}</span>` : ''}
+          <span class="rep-id">${esc(c.id)}</span>
+          <span class="rep-name">${card ? esc(card.name) : esc(c.id)}${missHtml}</span>
+          ${card ? `<span class="tokens-inline">${cardPrimaryTypes(card).map((t) => renderEnergyToken(t.key, 'sm')).join('')}</span>` : ''}
+          <strong class="rep-qty">×${c.count}</strong>
+        </li>
+      `;
+    }).join('');
+    const warnUnknown = res.unknownEntities?.length
+      ? `<div class="status-note is-warn">有 ${res.unknownEntities.length} 張卡牌編號尚未收錄於目前卡庫，已略過。</div>`
+      : '';
+
+    return `
+      <div class="modal-stack qr-modal">
+        <div class="status-note">已成功識別遊戲牌組（共 <b>${res.totalCards}</b> 張 · 能量 ${(res.energy || []).map((e) => renderEnergyToken(e, 'sm')).join(' ')}）</div>
+        ${warnUnknown}
+        <label class="field-label">
+          <span>牌組名稱</span>
+          <input id="qr-deck-name-input" type="text" maxlength="150" value="${esc(res.name || '掃碼匯入牌組')}" placeholder="輸入牌組名稱">
+        </label>
+        <div class="actions">
+          <button class="btn btn-primary" type="button" data-action="qr-confirm-save">${icon('check', 16)}加入我的牌組</button>
+          <button class="btn btn-outline" type="button" data-action="qr-confirm-battle">${icon('battle', 16)}加入並前往對戰測試</button>
+          <button class="btn btn-outline" type="button" data-action="qr-reset">重新掃描</button>
+        </div>
+        <div class="detail-section">
+          <strong>識別結果預覽（${res.totalCards}/20）</strong>
+          <ul class="rep-list qr-preview-list">${rows}</ul>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="modal-stack qr-modal">
+      <p class="desc">直接掃描《寶可夢卡牌 Pocket》遊戲內「分享牌組」產生的二維碼，或從相簿選擇完整遊戲截圖（無需裁切），系統會自動識別全部 20 張卡牌與能量。</p>
+      ${qs.error ? `<div class="status-note is-warn">${esc(qs.error)}</div>` : ''}
+      ${qs.statusText ? `<div class="status-note">${esc(qs.statusText)}</div>` : ''}
+
+      <div class="actions">
+        ${qs.scanning
+          ? `<button class="btn btn-danger" type="button" data-action="qr-stop-camera">關閉相機</button>`
+          : `<button class="btn btn-primary" type="button" data-action="qr-start-camera">${icon('camera', 16)}開啟相機掃碼</button>`
+        }
+        <button class="btn btn-outline" type="button" data-action="qr-pick-image">${icon('upload', 16)}選擇遊戲截圖</button>
+      </div>
+
+      <div id="qr-camera-box" class="qr-camera-wrap" ${qs.scanning ? '' : 'hidden'}>
+        <video id="qr-video" autoplay playsinline muted></video>
+        <div class="qr-scan-frame" aria-hidden="true"></div>
+        <span class="qr-camera-tip">請將遊戲內的牌組二維碼對準紅框內</span>
+      </div>
+
+      <div class="qr-dropzone" id="qr-dropzone" data-action="qr-pick-image" role="button" tabindex="0">
+        ${icon('qr', 28)}
+        <strong>${qs.decoding ? '正在辨識圖片中的卡組碼…' : '點擊選擇相簿截圖、拖曳圖片到此，或直接按 Ctrl+V 貼上截圖'}</strong>
+        <small class="muted">支援遊戲內藍色圓點帶圖示的原始完整截圖，也支援標準黑白卡組二維碼</small>
+      </div>
+
+      <div class="detail-section">
+        <strong>或貼上遊戲卡組代碼</strong>
+        <div class="qr-code-row">
+          <input id="qr-raw-code-input" type="text" value="${esc(qs.rawText || '')}" placeholder="貼上掃描工具讀出的卡組代碼…" autocomplete="off">
+          <button class="btn btn-outline" type="button" data-action="qr-parse-text">解析代碼</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+export function buildQrExportModal(deck, qrRes) {
+  return `
+    <div class="modal-stack qr-export-box">
+      <p class="desc">在《寶可夢卡牌 Pocket》遊戲內進入「牌組 → 新增牌組 → 掃描二維碼」，對準下方圖碼即可直接匯入「<b>${esc(deck.name)}</b>」（共 20 張 · ${(deck.energy || []).map((e) => renderEnergyToken(e, 'sm')).join(' ')}）。</p>
+      <div class="qr-svg-frame">${qrRes.svg}</div>
+      <div class="actions qr-export-actions">
+        <button class="btn btn-primary" type="button" data-action="qr-download-png" data-id="${esc(deck.id)}">${icon('download', 16)}下載二維碼圖片</button>
+        <button class="btn btn-outline" type="button" data-action="qr-copy-code">${icon('copy', 15)}複製卡組代碼</button>
+      </div>
+      <div class="detail-section">
+        <span class="field-caption">遊戲卡組代碼</span>
+        <input id="qr-export-code-val" class="qr-code-readonly" type="text" readonly value="${esc(qrRes.payload)}">
+      </div>
     </div>
   `;
 }

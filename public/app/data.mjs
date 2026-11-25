@@ -49,6 +49,7 @@ export const state = {
   strategyIndex: null,
   strategyLexicon: null,
   pairwiseStrategies: null,
+  qrEntityMap: null,
   coverageMap: null,
   cloudSession: null,
   lastSyncedUserId: null,
@@ -298,6 +299,21 @@ export async function ensurePairwiseStrategies() {
       .finally(() => { pairwiseStrategiesPromise = null; });
   }
   return pairwiseStrategiesPromise;
+}
+
+let qrEntityMapPromise = null;
+export async function ensureQrEntityMap() {
+  if (state.qrEntityMap) return state.qrEntityMap;
+  if (!qrEntityMapPromise) {
+    qrEntityMapPromise = fetchJsonOptional('data/qr-entity-map.json')
+      .then((doc) => {
+        if (doc) state.qrEntityMap = doc;
+        return state.qrEntityMap;
+      })
+      .catch(() => null)
+      .finally(() => { qrEntityMapPromise = null; });
+  }
+  return qrEntityMapPromise;
 }
 
 export async function ensureFullMeta() {

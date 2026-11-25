@@ -17,4 +17,4 @@ jobs:
       - name: Check Python build scripts syntax
         run: python3 -m py_compile tools/cards/build.py tools/mobile/build_icons.py
       - name: Run test suite
-        run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs
+        run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs tests/deck-qr.test.mjs
