@@ -514,7 +514,14 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
   });
   assert.ok(calVs9.wins / calVs9.completed < 0.72, `Calibrated #1 vs #9 (Giratina ex/Dragonair) must be < 72%, got ${calVs9.wins}/${calVs9.completed}`);
 
-  const { runGtgDuelConvergence } = await import("../public/app/battle.mjs");
+  const { areDecksIdentical, countDeckDifferences, runGtgDuelConvergence } = await import("../public/app/battle.mjs");
+  // Verify mirror detection & card diff counter for custom-deck GTG duel
+  const reorderedDeck0 = { cards: [...top10[0].representative.cards].reverse() };
+  assert.equal(areDecksIdentical(top10[0].representative, reorderedDeck0), true);
+  assert.equal(countDeckDifferences(top10[0].representative, reorderedDeck0), 0);
+  assert.equal(areDecksIdentical(top10[0].representative, top10[1].representative), false);
+  assert.ok(countDeckDifferences(top10[0].representative, top10[1].representative) >= 8);
+
   const gtgTestRes = await runGtgDuelConvergence({
     opp: top10[1],
     myFastDeck: expand(top10[0].representative),
@@ -536,11 +543,36 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
   assert.equal(gtgTestRes.finalEval.total, 500);
   assert.equal(gtgTestRes.finalEval.sampleOutcomesStr.length, 500);
   assert.ok(gtgTestRes.history.length === gtgTestRes.rounds + 1);
-  // Monotonic best-response guard: neither side's round gain can ever be negative
+  // Monotonic best-response guard & complete history metrics (oppWinRate, drawRate, scoreRate)
+  for (const h of gtgTestRes.history) {
+    assert.ok(h.oppWinRate >= 0 && h.oppWinRate <= 1);
+    assert.ok(h.scoreRate >= 0 && h.scoreRate <= 1);
+  }
   for (const h of gtgTestRes.history.slice(1)) {
     assert.ok(h.playerGain >= 0, `Player learning must be monotonic, got ${h.playerGain}`);
     assert.ok(h.enemyGain >= 0, `Opponent learning must be monotonic, got ${h.enemyGain}`);
   }
   const anyOppImproved = gtgTestRes.history.slice(1).some((h) => h.enemyGain > 0);
   assert.equal(anyOppImproved, true, "GTG opponent should actively learn stronger counter-strategy");
+
+  // Verify symmetric mirror GTG keeps wP === wE strictly identical and lands near 50% score rate
+  const gtgMirrorRes = await runGtgDuelConvergence({
+    opp: top10[0],
+    myFastDeck: expandWithEvo(top10[0].representative),
+    oppFastDeck: expandWithEvo(top10[0].representative),
+    initPlayerWeights: gtgModel.weights,
+    initEnemyWeights: gtgModel.weights,
+    symmetricMirror: true,
+    roundGames: 400,
+    evalGames: 1000,
+    candCount: 10,
+    tol: 0.001,
+    maxRounds: 3,
+    seedPrefix: "ut-gtg-mirror",
+    fastSim,
+    gpuSim: null
+  });
+  assert.deepEqual(gtgMirrorRes.finalPlayerWeights, gtgMirrorRes.finalEnemyWeights, "Symmetric mirror GTG must preserve wP === wE");
+  const mirrorScore = (gtgMirrorRes.finalEval.wins + 0.5 * gtgMirrorRes.finalEval.draws) / gtgMirrorRes.finalEval.total;
+  assert.ok(Math.abs(mirrorScore - 0.5) < 0.06, `Symmetric mirror score rate must stay near 50%, got ${(mirrorScore * 100).toFixed(2)}%`);
 });

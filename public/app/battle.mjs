@@ -1650,6 +1650,45 @@ function sampleArrayToStr(arr500) {
   return out;
 }
 
+// 比對兩副牌組是否完全相同（忽略排序，精準比對卡號與張數）
+export function areDecksIdentical(deckA, deckB) {
+  const mapA = new Map();
+  const mapB = new Map();
+  for (const item of deckA?.cards || []) {
+    if (!item?.id || !item.count) continue;
+    mapA.set(item.id, (mapA.get(item.id) || 0) + Number(item.count));
+  }
+  for (const item of deckB?.cards || []) {
+    if (!item?.id || !item.count) continue;
+    mapB.set(item.id, (mapB.get(item.id) || 0) + Number(item.count));
+  }
+  if (mapA.size === 0 || mapA.size !== mapB.size) return false;
+  for (const [id, cnt] of mapA) {
+    if (mapB.get(id) !== cnt) return false;
+  }
+  return true;
+}
+
+// 計算兩副 20 張牌組相異的卡牌張數（0 代表完全相同的鏡像）
+export function countDeckDifferences(deckA, deckB) {
+  const mapA = new Map();
+  const mapB = new Map();
+  for (const item of deckA?.cards || []) {
+    if (!item?.id || !item.count) continue;
+    mapA.set(item.id, (mapA.get(item.id) || 0) + Number(item.count));
+  }
+  for (const item of deckB?.cards || []) {
+    if (!item?.id || !item.count) continue;
+    mapB.set(item.id, (mapB.get(item.id) || 0) + Number(item.count));
+  }
+  const allIds = new Set([...mapA.keys(), ...mapB.keys()]);
+  let diffSum = 0;
+  for (const id of allIds) {
+    diffSum += Math.abs((mapA.get(id) || 0) - (mapB.get(id) || 0));
+  }
+  return Math.ceil(diffSum / 2);
+}
+
 // ============================================================================
 // GTG 精英輕量模型：對單一對手進行雙邊同步 1M 局對弈迭代，直到勝率變化 < 0.1% 收斂
 // ============================================================================
@@ -1659,6 +1698,7 @@ export async function runGtgDuelConvergence({
   oppFastDeck,
   initPlayerWeights,
   initEnemyWeights,
+  symmetricMirror = false,
   roundGames = 1000000,
   evalGames = 20000,
   candCount = 20,
@@ -1887,33 +1927,81 @@ export async function runGtgDuelConvergence({
   }
 
   let wP = [...initPlayerWeights];
-  let wE = [...initEnemyWeights];
+  let wE = symmetricMirror ? [...initPlayerWeights] : [...initEnemyWeights];
 
   // 第 0 輪基準勝率（初始專屬策略對陣）
   let prevEval = await evalHeadToHead(wP, wE);
   if (!prevEval || signal?.aborted) return null;
   let prevWr = prevEval.winRate;
-  const history = [{ round: 0, winRate: prevWr, delta: null, gamesThisRound: 0, playerGain: 0, enemyGain: 0 }];
+  const makeHistEntry = (round, ev, delta, gamesThisRound, playerGain, enemyGain) => ({
+    round,
+    winRate: ev.winRate,
+    oppWinRate: ev.total ? ev.losses / ev.total : 0,
+    drawRate: ev.total ? ev.draws / ev.total : 0,
+    scoreRate: ev.total ? (ev.wins + 0.5 * ev.draws) / ev.total : 0,
+    delta,
+    gamesThisRound,
+    playerGain,
+    enemyGain
+  });
+  const history = [makeHistEntry(0, prevEval, null, 0, 0, 0)];
   let converged = false;
   let totalCoEvoGames = 0;
 
-  onRoundProgress?.({ round: 0, maxRounds, winRate: prevWr, delta: null, frac: 0.08 });
+  onRoundProgress?.({
+    round: 0,
+    maxRounds,
+    winRate: prevWr,
+    oppWinRate: history[0].oppWinRate,
+    delta: null,
+    frac: 0.08,
+    history: [...history]
+  });
 
   for (let round = 1; round <= maxRounds; round++) {
     if (signal?.aborted) return null;
     const radiusScale = Math.max(0.18, Math.pow(0.78, round - 1));
     const alpha = Math.max(0.32, 0.62 * Math.pow(0.88, round - 1));
-    const pCands = buildExplorationCandidates(wP, `${seedPrefix}:p:${opp.id}:r${round}`, candCount, radiusScale);
-    const eCands = buildExplorationCandidates(wE, `${seedPrefix}:e:${opp.id}:r${round}`, candCount, radiusScale);
 
-    // 雙邊同步基於「本輪開始前的凍結策略」各自對弈 50 萬局（合計 100 萬局/輪），同時學習各自獲勝局並單調擇優
-    const resP = await learnOneSide(myFastDeck, oppFastDeck, wP, wE, pCands, `${seedPrefix}:gp:${opp.id}:r${round}`, opp.id, alpha);
-    if (!resP || signal?.aborted) return null;
-    onRoundProgress?.({ round, maxRounds, winRate: prevWr, delta: null, frac: Math.min(0.95, (round - 0.5) / Math.max(3, Math.min(maxRounds, 6))) });
+    let resP;
+    let resE;
+    if (symmetricMirror) {
+      // 完全相同牌組（鏡像對局）：雙方以同一套對稱候選集合同步學習，數學上嚴格保持 wP === wE，杜絕隨機種子偏斜
+      const mCands = buildExplorationCandidates(wP, `${seedPrefix}:m:${opp.id}:r${round}`, candCount, radiusScale);
+      resP = await learnOneSide(myFastDeck, oppFastDeck, wP, wE, mCands, `${seedPrefix}:gm:${opp.id}:r${round}`, opp.id, alpha);
+      if (!resP || signal?.aborted) return null;
+      resE = { weights: [...resP.weights], improved: resP.improved, gain: resP.gain };
+      totalCoEvoGames += halfRoundGames * 2;
+      onRoundProgress?.({
+        round,
+        maxRounds,
+        winRate: prevWr,
+        oppWinRate: history[history.length - 1].oppWinRate,
+        delta: null,
+        frac: Math.min(0.95, (round - 0.3) / Math.max(3, Math.min(maxRounds, 6))),
+        history: [...history]
+      });
+    } else {
+      const pCands = buildExplorationCandidates(wP, `${seedPrefix}:p:${opp.id}:r${round}`, candCount, radiusScale);
+      const eCands = buildExplorationCandidates(wE, `${seedPrefix}:e:${opp.id}:r${round}`, candCount, radiusScale);
 
-    const resE = await learnOneSide(oppFastDeck, myFastDeck, wE, wP, eCands, `${seedPrefix}:ge:${opp.id}:r${round}`, `player:${opp.id}`, alpha);
-    if (!resE || signal?.aborted) return null;
-    totalCoEvoGames += halfRoundGames * 2;
+      // 雙邊同步基於「本輪開始前的凍結策略」各自對弈 50 萬局（合計 100 萬局/輪），同時學習各自獲勝局並單調擇優
+      resP = await learnOneSide(myFastDeck, oppFastDeck, wP, wE, pCands, `${seedPrefix}:gp:${opp.id}:r${round}`, opp.id, alpha);
+      if (!resP || signal?.aborted) return null;
+      onRoundProgress?.({
+        round,
+        maxRounds,
+        winRate: prevWr,
+        oppWinRate: history[history.length - 1].oppWinRate,
+        delta: null,
+        frac: Math.min(0.95, (round - 0.5) / Math.max(3, Math.min(maxRounds, 6))),
+        history: [...history]
+      });
+
+      resE = await learnOneSide(oppFastDeck, myFastDeck, wE, wP, eCands, `${seedPrefix}:ge:${opp.id}:r${round}`, `player:${opp.id}`, alpha);
+      if (!resE || signal?.aborted) return null;
+      totalCoEvoGames += halfRoundGames * 2;
+    }
 
     // 雙方同時採用驗證更強的新策略
     wP = resP.weights;
@@ -1924,11 +2012,20 @@ export async function runGtgDuelConvergence({
     if (!curEval || signal?.aborted) return null;
     const curWr = curEval.winRate;
     const delta = Math.abs(curWr - prevWr);
-    history.push({ round, winRate: curWr, delta, gamesThisRound: halfRoundGames * 2, playerGain: resP.gain, enemyGain: resE.gain });
+    const entry = makeHistEntry(round, curEval, delta, halfRoundGames * 2, resP.gain, resE.gain);
+    history.push(entry);
 
     prevEval = curEval;
     prevWr = curWr;
-    onRoundProgress?.({ round, maxRounds, winRate: curWr, delta, frac: Math.min(0.98, round / Math.max(3, Math.min(maxRounds, 6))) });
+    onRoundProgress?.({
+      round,
+      maxRounds,
+      winRate: curWr,
+      oppWinRate: entry.oppWinRate,
+      delta,
+      frac: Math.min(0.98, round / Math.max(3, Math.min(maxRounds, 6))),
+      history: [...history]
+    });
 
     // 至少完成 2 輪雙邊博弈迭代（避免第 1 輪雙方同步大幅加分互相抵銷造成偽收斂），
     // 或當雙方均無法再找到任何更優策略時即判定達均衡收斂
@@ -1951,6 +2048,244 @@ export async function runGtgDuelConvergence({
   };
 }
 
+// 自己的兩副牌組之間進行 GTG 雙邊同步博弈互打（對稱起跑、各自學習、直到勝率差 < 0.1% 收斂）
+export async function executeCustomDeckGtgDuel({
+  deckA,
+  deckB,
+  baseWeights,
+  simProfile = null,
+  onProgress = null,
+  signal = null
+}) {
+  const { ready, fastSim, gpuSim, error } = await probeEngine();
+  if (!ready) throw Error(error);
+
+  const profile = resolveModelSimProfile(simProfile || { id: 'gtg-elite-lite' });
+  const [lexicon, pairwiseDb] = await Promise.all([
+    ensureStrategyLexicon(),
+    ensurePairwiseStrategies()
+  ]);
+
+  const isMirror = areDecksIdentical(deckA, deckB);
+  const diffCount = countDeckDifferences(deckA, deckB);
+
+  // 雙邊採用完全一致的起始基準策略，確保兩副自訂牌組絕對公平對弈
+  const matchedA = matchDeckStrategies(deckA, [], lexicon, baseWeights, pairwiseDb, state.cardsById);
+  const matchedB = isMirror
+    ? matchedA
+    : matchDeckStrategies(deckB, [], lexicon, baseWeights, pairwiseDb, state.cardsById);
+
+  const myFastDeck = expandDeckForFastSim(deckA, matchedA.cardBonusById);
+  const oppFastDeck = expandDeckForFastSim(deckB, matchedB.cardBonusById);
+  const useGpu = Boolean(gpuSim?.ready);
+  const evalGames = useGpu
+    ? (profile.evalGamesPerOpponent || 20000)
+    : (profile.evalGamesPerOpponentCpu || 5000);
+  const roundGames = useGpu
+    ? (profile.roundGamesPerOpponent || 1000000)
+    : Math.min(profile.roundGamesPerOpponent || 1000000, 160000);
+
+  const oppWrapper = {
+    id: deckB.id,
+    name: deckB.name,
+    representative: {
+      cards: deckB.cards,
+      energy: deckB.energy || [],
+      featuredPokemon: deckB.featuredPokemon || []
+    }
+  };
+  const seedPrefix = `custom-gtg:${deckA.id}:${deckB.id}`;
+
+  const gtg = await runGtgDuelConvergence({
+    opp: oppWrapper,
+    myFastDeck,
+    oppFastDeck,
+    initPlayerWeights: matchedA.lexiconSeedWeights,
+    initEnemyWeights: matchedB.lexiconSeedWeights,
+    symmetricMirror: isMirror,
+    roundGames,
+    evalGames,
+    candCount: profile.candidateCount || 20,
+    tol: profile.convergenceTolerance ?? 0.001,
+    maxRounds: profile.maxRounds || 12,
+    seedPrefix,
+    fastSim,
+    gpuSim,
+    signal,
+    onRoundProgress: (info) => {
+      onProgress?.({
+        round: info.round,
+        maxRounds: info.maxRounds,
+        winRate: info.winRate,
+        oppWinRate: info.oppWinRate,
+        delta: info.delta,
+        frac: info.frac,
+        history: info.history || []
+      });
+    }
+  });
+  if (!gtg || signal?.aborted) return null;
+
+  const gtgProfile = {
+    ...profile,
+    mode: 'gtg',
+    label: profile.label || 'GTG精英轻量模型',
+    gamesPerOpponent: evalGames,
+    deepGamesPerOpponent: evalGames,
+    firstSeatGames: Math.floor(evalGames / 2)
+  };
+
+  return {
+    deckA,
+    deckB,
+    opp: oppWrapper,
+    isMirror,
+    diffCount,
+    profile: gtgProfile,
+    baseWeights,
+    playerWeights: gtg.finalPlayerWeights,
+    enemyWeights: gtg.finalEnemyWeights,
+    rounds: gtg.rounds,
+    converged: gtg.converged,
+    history: gtg.history || [],
+    agg: gtg.finalEval,
+    evalGames,
+    seedPrefix: `${seedPrefix}:eval`,
+    testSeedBase: gtg.evalSeedBase,
+    myFastDeck,
+    oppFastDeck,
+    completedAt: new Date().toISOString()
+  };
+}
+
+// 渲染自訂牌組 GTG 互打進度與完整勝率報告（極簡零技術術語）
+export function renderCustomDuelReport(duelResult, progress = null, options = {}) {
+  if (progress?.running) {
+    const pct = Math.min(99.9, Math.max(2, Number(progress.frac || 0) * 100)).toFixed(1);
+    const roundText = progress.round > 0 ? ` · 第 ${progress.round} 次迭代` : '';
+    const liveHist = Array.isArray(progress.history) ? progress.history : [];
+    const latest = liveHist[liveHist.length - 1];
+    const liveSub = latest
+      ? `最新試算：我方 ${(latest.winRate * 100).toFixed(2)}% ／ 對手 ${(latest.oppWinRate * 100).toFixed(2)}%`
+      : '正在準備雙方牌組對陣…';
+    return `
+      <div class="report-shell">
+        <div class="strategy-synth-banner is-running">
+          <div class="strategy-synth-head">
+            <div>
+              <strong>正在進行 GTG 互打模擬（${esc(progress.deckAName || '我方')} vs ${esc(progress.deckBName || '對手')}${roundText} · ${pct}%）…</strong>
+              <p class="sub">${liveSub}</p>
+            </div>
+            <button class="btn btn-outline" type="button" data-action="cancel-custom-duel">取消</button>
+          </div>
+          <div class="progress-track is-slim">
+            <i style="width:${pct}%"></i>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!duelResult?.agg) {
+    return `<div class="empty-box is-dashed"><strong>尚無互打測試紀錄</strong><p>在上方選擇我方與對手兩副牌組，點擊「開始 GTG 互打」即可查看雙方實戰勝率、先後攻表現、迭代次數與對局回放。</p></div>`;
+  }
+
+  const { deckA, deckB, opp, isMirror, diffCount, rounds, converged, history, agg, evalGames } = duelResult;
+  const total = Math.max(1, Number(agg.total || 0));
+  const myWr = ((agg.wins / total) * 100).toFixed(2) + '%';
+  const oppWr = ((agg.losses / total) * 100).toFixed(2) + '%';
+  const myScorePct = (((agg.wins + 0.5 * agg.draws) / total) * 100).toFixed(2) + '%';
+  const f1Tot = Math.max(1, agg.firstWins + agg.firstDraws + agg.firstLosses);
+  const f2Tot = Math.max(1, agg.secondWins + agg.secondDraws + agg.secondLosses);
+  const f1Pct = ((agg.firstWins / f1Tot) * 100).toFixed(2) + '%';
+  const f2Pct = ((agg.secondWins / f2Tot) * 100).toFixed(2) + '%';
+  const avgTurns = agg.turnsSum ? (agg.turnsSum / total).toFixed(1) + ' 回合' : '—';
+  const convLabel = converged ? '已達收斂均衡' : '已達最大迭代';
+  const halfGames = Math.floor((evalGames || total) / 2);
+  const stripEvents = buildSampleEventsFromCompact(opp.id, agg, evalGames || total);
+
+  const histRows = (history || []).map((h) => {
+    const label = h.round === 0 ? '第 0 次（初始）' : `第 ${h.round} 次迭代`;
+    const pPct = (h.winRate * 100).toFixed(2) + '%';
+    const ePct = (Number(h.oppWinRate ?? (1 - h.winRate)) * 100).toFixed(2) + '%';
+    const dPct = (Number(h.drawRate || 0) * 100).toFixed(2) + '%';
+    const deltaStr = h.delta == null ? '—' : `${(h.delta * 100).toFixed(2)}%`;
+    return `<tr><td>${label}</td><td class="num">${pPct}</td><td class="num">${ePct}</td><td class="num">${dPct}</td><td class="num">${deltaStr}</td></tr>`;
+  }).join('');
+
+  return `
+    <div class="report-shell">
+      <div class="report-hero">
+        <div class="report-kpi">
+          <span class="report-kpi-label">我方實戰勝率 · ${esc(deckA.name)}</span>
+          <strong class="report-kpi-num">${myWr}</strong>
+          <span class="report-kpi-ci">共 ${agg.total.toLocaleString('zh-TW')} 局 · 迭代 ${rounds} 次 · GTG精英轻量模型${isMirror ? ' · 相同牌組鏡像' : ` · 相異卡牌 ${diffCount} 張`}</span>
+        </div>
+        <div class="report-totals">
+          <div class="tot-box is-win"><b>${agg.wins.toLocaleString('zh-TW')}</b><span>我方勝</span></div>
+          <div class="tot-box is-draw"><b>${agg.draws.toLocaleString('zh-TW')}</b><span>和</span></div>
+          <div class="tot-box is-loss"><b>${agg.losses.toLocaleString('zh-TW')}</b><span>對手勝</span></div>
+        </div>
+      </div>
+
+      <div class="composite-kpi-grid" aria-label="自訂牌組互打指標">
+        <div class="comp-card is-accent">
+          <span class="comp-label">對手勝率 · ${esc(deckB.name)}</span>
+          <strong class="comp-val">${oppWr}</strong>
+          <small class="comp-sub">${agg.losses.toLocaleString('zh-TW')}勝 ${agg.draws.toLocaleString('zh-TW')}和 ${agg.wins.toLocaleString('zh-TW')}敗</small>
+        </div>
+        <div class="comp-card">
+          <span class="comp-label">我方先攻勝率</span>
+          <strong class="comp-val">${f1Pct}</strong>
+          <small class="comp-sub">${agg.firstWins.toLocaleString('zh-TW')}勝 ${agg.firstDraws.toLocaleString('zh-TW')}和 ${agg.firstLosses.toLocaleString('zh-TW')}敗</small>
+        </div>
+        <div class="comp-card">
+          <span class="comp-label">我方後攻勝率</span>
+          <strong class="comp-val">${f2Pct}</strong>
+          <small class="comp-sub">${agg.secondWins.toLocaleString('zh-TW')}勝 ${agg.secondDraws.toLocaleString('zh-TW')}和 ${agg.secondLosses.toLocaleString('zh-TW')}敗</small>
+        </div>
+        <div class="comp-card">
+          <span class="comp-label">平均回合與收斂</span>
+          <strong class="comp-val is-sm">${avgTurns}</strong>
+          <small class="comp-sub">迭代 ${rounds} 次 · ${convLabel}<br>含和局折算得分率：${myScorePct}</small>
+        </div>
+      </div>
+
+      <div class="battle-row duel-replay-row">
+        <div class="battle-opp-info">
+          <div class="battle-opp-head">
+            <span class="pill-sub">迭代 ${rounds} 次</span>
+            <strong class="battle-opp-name">${esc(deckA.name)} vs ${esc(deckB.name)}</strong>
+          </div>
+          <div class="battle-opp-meta">
+            <span>點擊右側任一格可直接查看該局完整中文回放</span>
+          </div>
+          <div class="battle-opp-actions">
+            ${options.canReplay ? `<button class="mini" type="button" data-action="replay-custom-duel" data-idx="0">檢視對局回放</button>` : ''}
+          </div>
+        </div>
+        <div class="battle-strip-col">
+          ${renderGameStrip(opp.id, stripEvents, Boolean(options.canReplay), 500, 'replay-custom-duel', 0, 500, evalGames || total, halfGames)}
+        </div>
+      </div>
+
+      ${histRows ? `
+        <div class="duel-history-block">
+          <h3>GTG 迭代收斂歷程（共 ${rounds} 次迭代）</h3>
+          <div class="bench-table-wrap">
+            <table class="bench-table">
+              <thead>
+                <tr><th>迭代輪次</th><th class="num">我方勝率</th><th class="num">對手勝率</th><th class="num">和局率</th><th class="num">與上次差值</th></tr>
+              </thead>
+              <tbody>${histRows}</tbody>
+            </table>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
 // 單一對手卡組專項執行器（支援 1B5M / 1M5Q / GTG 精英輕量模型）
 export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simProfile = null, onProgress, signal }) {
   const { ready, fastSim, gpuSim, error } = await probeEngine();
@@ -1960,8 +2295,9 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simPro
     ensureStrategyLexicon(),
     ensurePairwiseStrategies()
   ]);
-  const oppEliteWeights = getOpponentEliteWeights(opp.id, baseWeights);
   const isGtg = profile.mode === 'gtg';
+  const isMirror = isGtg && areDecksIdentical(deck, opp.representative);
+  const oppEliteWeights = isMirror ? baseWeights : getOpponentEliteWeights(opp.id, baseWeights);
   const matched = matchDeckStrategies(deck, isGtg ? [] : [{ rank: 1, entry: opp }], lexicon, baseWeights, pairwiseDb, state.cardsById);
   const oppMatched = matchDeckStrategies(opp.representative, [], lexicon, oppEliteWeights, pairwiseDb, state.cardsById);
 
@@ -1979,6 +2315,7 @@ export async function executeSingleOpponentDeep({ opp, deck, baseWeights, simPro
       oppFastDeck,
       initPlayerWeights: matched.lexiconSeedWeights,
       initEnemyWeights: oppMatched.lexiconSeedWeights,
+      symmetricMirror: isMirror,
       roundGames: profile.roundGamesPerOpponent || 1000000,
       evalGames,
       candCount: profile.candidateCount || 20,
@@ -2384,10 +2721,11 @@ export async function executeBattleBatch({ run, deck, lineup, weights, simProfil
         continue;
       }
 
-      // 雙邊完全對稱初始化各自專屬策略（不給單邊額外克制偏置，完全交由雙邊 1M 局實戰博弈收斂）
+      // 雙邊完全對稱初始化各自專屬策略（鏡像對局採完全一致基準與對稱探索，確保同牌組嚴格公平）
+      const isMirror = areDecksIdentical(deck, opp.representative);
       const myMatchupMatched = matchDeckStrategies(deck, [], lexicon, weights, pairwiseDb, state.cardsById);
       run.matchedStrategies.myCardBonusByOpp[opp.id] = myMatchupMatched.cardBonusById;
-      const oppInitBase = getOpponentEliteWeights(opp.id, weights);
+      const oppInitBase = isMirror ? weights : getOpponentEliteWeights(opp.id, weights);
       const oppMatched = matchDeckStrategies(opp.representative, [], lexicon, oppInitBase, pairwiseDb, state.cardsById);
       const myFastDeck = expandDeckForFastSim(deck, myMatchupMatched.cardBonusById);
       const oppFastDeck = expandDeckForFastSim(opp.representative, oppMatched.cardBonusById);
@@ -2398,6 +2736,7 @@ export async function executeBattleBatch({ run, deck, lineup, weights, simProfil
         oppFastDeck,
         initPlayerWeights: myMatchupMatched.lexiconSeedWeights,
         initEnemyWeights: oppMatched.lexiconSeedWeights,
+        symmetricMirror: isMirror,
         roundGames: profile.roundGamesPerOpponent || 1000000,
         evalGames,
         candCount: profile.candidateCount || 20,

@@ -1681,6 +1681,113 @@ input::placeholder { color: var(--text-faint); }
 .meta-crown { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-num); color: var(--gold); justify-content: flex-end; font-weight: 700; }
 
 /* 對戰測試與 50 格點陣 */
+.battle-mode-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+  padding: 4px;
+  border-radius: var(--r-ctrl);
+  border: 1px solid var(--line);
+  background: var(--grey-0);
+}
+.battle-mode-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-mute);
+  font-weight: 700;
+  font-size: 0.9rem;
+  padding: 8px 16px;
+  border-radius: calc(var(--r-ctrl) - 2px);
+  cursor: pointer;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.battle-mode-tab:hover { color: var(--text); }
+.battle-mode-tab.is-active {
+  background: var(--swiss-red);
+  color: #fff;
+  border-color: var(--swiss-red);
+}
+
+.duel-preview-stack {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.duel-preview-card {
+  padding: 12px 14px;
+  border-radius: var(--r-ctrl);
+  border: 1px solid var(--line);
+  background: var(--grey-0);
+  min-width: 0;
+}
+.duel-preview-card.is-me { border-left: 3px solid var(--swiss-red); }
+.duel-preview-card.is-opp { border-left: 3px solid var(--ink, #1f2937); }
+.duel-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  color: var(--text-mute);
+  margin-bottom: 6px;
+}
+.duel-preview-role { font-weight: 700; color: var(--text); }
+.duel-preview-cnt { font-family: var(--font-num); }
+.duel-preview-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.duel-preview-title strong {
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.duel-vs-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-num);
+  font-size: 0.78rem;
+  font-weight: 800;
+  color: var(--swiss-red);
+  letter-spacing: 0.12em;
+}
+.duel-diff-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border-radius: var(--r-ctrl);
+  border: 1px solid var(--line);
+  background: var(--grey-0);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+.duel-diff-cols {
+  margin-top: 6px;
+  display: grid;
+  gap: 4px;
+  color: var(--text-mute);
+  font-size: 0.8rem;
+}
+.duel-diff-cols span { font-weight: 700; color: var(--text); }
+.duel-replay-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  margin-top: 16px;
+}
+.duel-history-block {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+}
+.duel-history-block h3 {
+  margin: 0;
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+
 .battle-setup-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -2365,7 +2472,7 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.72); }
   .catalog-layout, .decks-layout, .battle-setup-grid, .sources-grid { grid-template-columns: minmax(0, 1fr); }
   .card-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .draft-sidebar { position: static; }
-  .battle-row { grid-template-columns: minmax(0, 1fr); }
+  .battle-row, .duel-replay-row { grid-template-columns: minmax(0, 1fr); }
   .battle-row > * { min-width: 0; max-width: 100%; }
   .battle-strip-col { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .report-shell { max-width: 100%; overflow-x: hidden; }
@@ -2403,6 +2510,8 @@ dialog::backdrop { background: rgba(20, 20, 20, 0.72); }
   .site-footer a:first-of-type { margin-left: 0; }
 
   .panel { padding: 14px; }
+  .battle-mode-tabs { display: flex; width: 100%; }
+  .battle-mode-tab { flex: 1; text-align: center; padding: 8px 10px; font-size: 0.84rem; }
   .btn { white-space: normal; text-align: center; line-height: 1.35; }
   .showcase-board { padding: 12px; }
   .hero-copy { padding: 20px 16px; }

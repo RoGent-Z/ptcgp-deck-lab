@@ -53,12 +53,14 @@ import {
   buildStrategyLexiconModal,
   ensureCardCoverage,
   executeBattleBatch,
+  executeCustomDeckGtgDuel,
   executeDeckCardOptimize,
   executeFixturePreviewBatch,
   executeSingleOpponentDeep,
   fnv1a32,
   probeEngine,
   renderBattleReport,
+  renderCustomDuelReport,
   renderDeckOptimizerModal,
   renderSingleOpponentDeepModal,
   renderSingleOpponentDeepProgress,
@@ -149,6 +151,10 @@ function applySwissSelectValue(selectId, value) {
   } else if (selectId === 'battle-model-select') {
     uiState.battle.modelId = value;
     uiState.battle.activeRunId = null;
+  } else if (selectId === 'battle-duel-deck-a') {
+    uiState.battle.duelDeckAId = value;
+  } else if (selectId === 'battle-duel-deck-b') {
+    uiState.battle.duelDeckBId = value;
   }
   uiState.openSelect = null;
   renderRoute();
@@ -940,6 +946,161 @@ async function handleAction(el) {
     await ensureFullMeta();
     renderRoute();
     showNotice('已載入全部原型與賽事明細');
+    return;
+  }
+
+  if (action === 'battle-tab') {
+    uiState.battle.tab = el.dataset.tab === 'my-duel' ? 'my-duel' : 'meta';
+    renderRoute();
+    return;
+  }
+
+  if (action === 'swap-custom-duel-decks') {
+    if (uiState.battle.duelRunning) return;
+    const prevA = uiState.battle.duelDeckAId;
+    uiState.battle.duelDeckAId = uiState.battle.duelDeckBId;
+    uiState.battle.duelDeckBId = prevA;
+    renderRoute();
+    return;
+  }
+
+  if (action === 'quick-load-meta-deck-pair') {
+    const entries = (state.meta?.entries || []).filter((e) => e.representative?.cards?.length);
+    if (!entries.length) { showNotice('目前無可用的賽事代表牌組'); return; }
+    const createdIds = [];
+    for (const idx of [0, 1]) {
+      const entry = entries[idx];
+      if (!entry?.representative) continue;
+      if (state.decks.length >= 2 && idx === 1) break;
+      const autoFeatured = resolveFeaturedPokemon(entry.representative, state.cardsById, state.spriteMap).map((x) => x.slug);
+      const rankLabel = idx === 0 ? '榜首代表' : '亞軍代表';
+      const created = await saveDeck({
+        id: crypto.randomUUID(),
+        name: `${entry.name} (${rankLabel})`,
+        cards: sortDeckEntriesPtcgpDefault(entry.representative.cards, state.cardsById),
+        energy: structuredClone(entry.representative.energy),
+        featuredPokemon: autoFeatured,
+        customOrder: true
+      });
+      createdIds.push(created.id);
+    }
+    if (createdIds.length >= 2) {
+      uiState.battle.duelDeckAId = createdIds[0];
+      uiState.battle.duelDeckBId = createdIds[1];
+    } else if (createdIds.length === 1) {
+      if (!uiState.battle.duelDeckAId) uiState.battle.duelDeckAId = state.decks[0]?.id || createdIds[0];
+      uiState.battle.duelDeckBId = createdIds[0];
+    }
+    renderRoute();
+    showNotice('已匯入熱門牌組供 GTG 互打測試');
+    return;
+  }
+
+  if (action === 'start-custom-duel') {
+    if (uiState.battle.duelRunning || uiState.battle.running) return;
+    const deckA = state.decks.find((d) => d.id === uiState.battle.duelDeckAId) || state.decks[0];
+    const deckB = state.decks.find((d) => d.id === uiState.battle.duelDeckBId) || state.decks[1] || deckA;
+    if (!deckA || !deckB) { showNotice('請先選擇兩副已儲存的牌組'); return; }
+    if (!state.engineReady) { showNotice('對戰模擬功能尚未就緒'); return; }
+
+    if (state.runtimeFn) {
+      const coverIds = [...(deckA.cards || []).map((c) => c.id), ...(deckB.cards || []).map((c) => c.id)];
+      ensureCardCoverage(coverIds);
+    }
+    const gtgModel = state.modelsById.get('gtg-elite-lite') || getSelectedBattleModel();
+    const baseWeights = gtgModel?.weights || state.modelInfo?.weights || Array(22).fill(0);
+    const gtgProfile = resolveModelSimProfile(gtgModel || { id: 'gtg-elite-lite' });
+
+    uiState.battle.duelAbortCtrl?.abort();
+    const ctrl = new AbortController();
+    uiState.battle.duelAbortCtrl = ctrl;
+    uiState.battle.duelRunning = true;
+    uiState.battle.duelProgress = {
+      running: true,
+      deckAName: deckA.name,
+      deckBName: deckB.name,
+      round: 0,
+      frac: 0.05,
+      history: []
+    };
+    renderRoute();
+
+    try {
+      const duelRes = await executeCustomDeckGtgDuel({
+        deckA,
+        deckB,
+        baseWeights,
+        simProfile: gtgProfile,
+        signal: ctrl.signal,
+        onProgress: (info) => {
+          if (ctrl.signal.aborted) return;
+          uiState.battle.duelProgress = {
+            running: true,
+            deckAName: deckA.name,
+            deckBName: deckB.name,
+            ...info
+          };
+          const area = document.getElementById('custom-duel-report-area');
+          if (area) {
+            area.innerHTML = renderCustomDuelReport(null, uiState.battle.duelProgress, { canReplay: state.engineReady });
+          }
+        }
+      });
+      if (!duelRes || ctrl.signal.aborted) {
+        showNotice('已取消牌組互打模擬');
+      } else {
+        uiState.battle.duelResult = duelRes;
+        showNotice(`已完成「${deckA.name}」vs「${deckB.name}」GTG 互打測試`);
+      }
+    } catch (err) {
+      showNotice(err?.message || '牌組互打模擬失敗');
+    } finally {
+      uiState.battle.duelRunning = false;
+      uiState.battle.duelProgress = null;
+      renderRoute();
+    }
+    return;
+  }
+
+  if (action === 'cancel-custom-duel') {
+    uiState.battle.duelAbortCtrl?.abort();
+    uiState.battle.duelRunning = false;
+    uiState.battle.duelProgress = null;
+    renderRoute();
+    showNotice('已取消牌組互打模擬');
+    return;
+  }
+
+  if (action === 'reset-custom-duel') {
+    uiState.battle.duelResult = null;
+    uiState.battle.duelProgress = null;
+    renderRoute();
+    showNotice('已清空本次互打紀錄');
+    return;
+  }
+
+  if (action === 'replay-custom-duel') {
+    const duelRes = uiState.battle.duelResult;
+    if (!duelRes) { showNotice('請先執行牌組 GTG 互打測試'); return; }
+    const idx = Number(el.dataset.idx) || 0;
+    const html = buildFullGameFlowModal({
+      opp: duelRes.opp,
+      oppId: duelRes.opp.id,
+      idx,
+      run: { modelVersion: 'gtg-elite-lite', simProfile: duelRes.profile },
+      deck: duelRes.deckA,
+      weights: duelRes.baseWeights,
+      customSimProfile: duelRes.profile,
+      customGamesPerOpp: duelRes.evalGames,
+      customWeights: duelRes.playerWeights,
+      customEnemyWeights: duelRes.enemyWeights,
+      customSeedPrefix: duelRes.seedPrefix,
+      customSeedBase: duelRes.testSeedBase,
+      customMyFastDeck: duelRes.myFastDeck,
+      customOppFastDeck: duelRes.oppFastDeck,
+      replayAction: 'replay-custom-duel'
+    });
+    openModal(`對局回放 · ${duelRes.deckA.name} vs ${duelRes.deckB.name}（第 ${(idx + 1).toLocaleString('zh-TW')} 局）`, html, { wide: true });
     return;
   }
 

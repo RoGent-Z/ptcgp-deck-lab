@@ -37,7 +37,15 @@ import {
 } from './cardface.mjs';
 import { findVariantsForCard, foldText, state } from './data.mjs';
 import { icon } from './icons.mjs';
-import { ensureCardCoverage, getUnsupportedCards, renderBattleReport, resolveOpponentLineup } from './battle.mjs';
+import {
+  areDecksIdentical,
+  countDeckDifferences,
+  ensureCardCoverage,
+  getUnsupportedCards,
+  renderBattleReport,
+  renderCustomDuelReport,
+  resolveOpponentLineup
+} from './battle.mjs';
 
 function renderPokemonPicker(deck, mode = 'draft') {
   if (mode !== 'draft') return '';
@@ -102,7 +110,20 @@ export const uiState = {
   },
   decks: { view: 'showcase' },
   meta: { sort: 'count', q: '', page: 1, perPage: 40 },
-  battle: { deckId: null, modelId: null, running: false, activeRunId: null, abortCtrl: null },
+  battle: {
+    tab: 'meta',
+    deckId: null,
+    modelId: null,
+    running: false,
+    activeRunId: null,
+    abortCtrl: null,
+    duelDeckAId: null,
+    duelDeckBId: null,
+    duelRunning: false,
+    duelProgress: null,
+    duelResult: null,
+    duelAbortCtrl: null
+  },
   auth: { mode: 'login' }
 };
 
@@ -1029,11 +1050,174 @@ export function renderBattle() {
     ? '繼續勝率模擬'
     : '開始勝率模擬';
 
+  const battleTab = uiState.battle.tab === 'my-duel' ? 'my-duel' : 'meta';
+  const duelDeckA = decks.find((d) => d.id === uiState.battle.duelDeckAId) || selectedDeck || decks[0] || null;
+  if (duelDeckA && uiState.battle.duelDeckAId !== duelDeckA.id) uiState.battle.duelDeckAId = duelDeckA.id;
+  const fallbackDeckB = decks.find((d) => d.id !== duelDeckA?.id) || duelDeckA || null;
+  const duelDeckB = decks.find((d) => d.id === uiState.battle.duelDeckBId) || fallbackDeckB;
+  if (duelDeckB && uiState.battle.duelDeckBId !== duelDeckB.id) uiState.battle.duelDeckBId = duelDeckB.id;
+
+  const duelALegal = duelDeckA && (state.cardsMissing || validateDeck(duelDeckA, state.cardsById).length === 0) && deckTotalCount(duelDeckA) === 20;
+  const duelBLegal = duelDeckB && (state.cardsMissing || validateDeck(duelDeckB, state.cardsById).length === 0) && deckTotalCount(duelDeckB) === 20;
+  const duelUnsupportedA = duelDeckA ? getUnsupportedCards(duelDeckA.cards) : [];
+  const duelUnsupportedB = duelDeckB ? getUnsupportedCards(duelDeckB.cards) : [];
+  const canRunDuel = Boolean(
+    state.engineReady
+    && duelDeckA
+    && duelDeckB
+    && duelALegal
+    && duelBLegal
+    && duelUnsupportedA.length === 0
+    && duelUnsupportedB.length === 0
+    && !uiState.battle.duelRunning
+    && !uiState.battle.running
+  );
+  const duelIsMirror = Boolean(duelDeckA && duelDeckB && areDecksIdentical(duelDeckA, duelDeckB));
+  const duelDiffCount = duelDeckA && duelDeckB ? countDeckDifferences(duelDeckA, duelDeckB) : 0;
+
+  const renderDuelDeckPreviewCard = (deck, roleLabel, cls) => {
+    if (!deck) {
+      return `<div class="duel-preview-card ${cls}"><div class="duel-preview-role">${roleLabel}</div><p class="muted">尚未選擇牌組</p></div>`;
+    }
+    const tokens = (deck.energy || []).map((e) => renderEnergyToken(e, 'sm')).join('');
+    const sprites = renderPokemonSprites(resolveFeaturedPokemon(deck, state.cardsById, state.spriteMap), 'md');
+    const totalCards = deckTotalCount(deck);
+    return `
+      <div class="duel-preview-card ${cls}">
+        <div class="duel-preview-head">
+          <span class="duel-preview-role">${roleLabel}</span>
+          <span class="duel-preview-cnt">${totalCards}/20 張</span>
+        </div>
+        <div class="duel-preview-title">
+          <span class="tokens-inline">${tokens}</span>
+          ${sprites}
+          <strong>${esc(deck.name)}</strong>
+        </div>
+      </div>
+    `;
+  };
+
+  const renderDuelDiffSummary = () => {
+    if (!duelDeckA || !duelDeckB) return '';
+    if (duelIsMirror) {
+      return `<div class="duel-diff-note">目前雙方為 <strong>完全相同的牌組（鏡像對局）</strong>，雙方將以完全對稱基準公平互打。</div>`;
+    }
+    const mapA = getCardMapCount(duelDeckA);
+    const mapB = getCardMapCount(duelDeckB);
+    const allIds = new Set([...mapA.keys(), ...mapB.keys()]);
+    const onlyA = [];
+    const onlyB = [];
+    for (const id of allIds) {
+      const a = mapA.get(id) || 0;
+      const b = mapB.get(id) || 0;
+      const nm = state.cardsById.get(id)?.name || id;
+      if (a > b) onlyA.push(`${nm} ×${a - b}`);
+      else if (b > a) onlyB.push(`${nm} ×${b - a}`);
+    }
+    return `
+      <div class="duel-diff-note">
+        <strong>相異卡牌 ${duelDiffCount} 張</strong>
+        <div class="duel-diff-cols">
+          <div><span>我方獨有：</span>${esc(onlyA.slice(0, 6).join('、') || '無')}${onlyA.length > 6 ? ' 等' : ''}</div>
+          <div><span>對手獨有：</span>${esc(onlyB.slice(0, 6).join('、') || '無')}${onlyB.length > 6 ? ' 等' : ''}</div>
+        </div>
+      </div>
+    `;
+  };
+
+  const modeTabsHtml = `
+    <div class="battle-mode-tabs" role="tablist" aria-label="對戰測試模式">
+      <button class="battle-mode-tab ${battleTab === 'meta' ? 'is-active' : ''}" type="button" role="tab" aria-selected="${battleTab === 'meta'}" data-action="battle-tab" data-tab="meta">對陣前十熱門</button>
+      <button class="battle-mode-tab ${battleTab === 'my-duel' ? 'is-active' : ''}" type="button" role="tab" aria-selected="${battleTab === 'my-duel'}" data-action="battle-tab" data-tab="my-duel">我的牌組互打 (GTG)</button>
+    </div>
+  `;
+
+  if (battleTab === 'my-duel') {
+    const deckOptions = decks.length
+      ? decks.map((d) => ({ value: d.id, label: `${d.name} (${deckTotalCount(d)}/20)` }))
+      : [{ value: '', label: '尚無已儲存牌組（可下方匯入熱門牌組）' }];
+
+    const matchedDuelResult = uiState.battle.duelResult
+      && uiState.battle.duelResult.deckA?.id === duelDeckA?.id
+      && uiState.battle.duelResult.deckB?.id === duelDeckB?.id
+      ? uiState.battle.duelResult
+      : null;
+
+    return `
+      <div class="page-head">
+        <h1>對戰測試與勝率模擬</h1>
+        <p class="desc">使用 GTG精英轻量模型，讓你自己的兩副牌組直接互打、同步學習迭代並檢驗實戰勝率。</p>
+      </div>
+
+      ${modeTabsHtml}
+
+      <div class="battle-setup-grid">
+        <section class="panel">
+          <h2>1. 選擇互打牌組（GTG精英轻量模型）</h2>
+          <div class="field-stack">
+            <div class="field-label">
+              <span>我方牌組（A）</span>
+              ${renderSwissSelect({
+                id: 'battle-duel-deck-a',
+                title: '選擇我方牌組（A）',
+                value: duelDeckA?.id || '',
+                fullWidth: true,
+                disabled: !decks.length || uiState.battle.duelRunning,
+                options: deckOptions
+              })}
+            </div>
+            <div class="field-label">
+              <span>對手牌組（B）</span>
+              ${renderSwissSelect({
+                id: 'battle-duel-deck-b',
+                title: '選擇對手牌組（B）',
+                value: duelDeckB?.id || '',
+                fullWidth: true,
+                disabled: !decks.length || uiState.battle.duelRunning,
+                options: deckOptions
+              })}
+            </div>
+            ${duelDeckA && !duelALegal ? `<div class="status-note is-warn">我方牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
+            ${duelDeckB && !duelBLegal ? `<div class="status-note is-warn">對手牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
+            ${duelUnsupportedA.length ? `<div class="status-note is-warn">我方牌組含暫不支援對戰模擬的卡牌：${duelUnsupportedA.map((c) => esc(c.id)).join('、')}</div>` : ''}
+            ${duelUnsupportedB.length ? `<div class="status-note is-warn">對手牌組含暫不支援對戰模擬的卡牌：${duelUnsupportedB.map((c) => esc(c.id)).join('、')}</div>` : ''}
+            ${!state.engineReady ? `<div class="status-note">${esc(state.engineError || '對戰模擬功能載入中…')}</div>` : ''}
+          </div>
+          <div class="actions block-gap">
+            <button class="btn btn-primary" type="button" data-action="start-custom-duel" ${canRunDuel ? '' : 'disabled'}>
+              ${icon('play', 15)}<span>開始 GTG 互打</span>
+            </button>
+            <button class="btn btn-outline" type="button" data-action="swap-custom-duel-decks" ${decks.length >= 2 && !uiState.battle.duelRunning ? '' : 'disabled'}>交換雙方</button>
+            ${uiState.battle.duelRunning ? `<button class="btn btn-outline" type="button" data-action="cancel-custom-duel">${icon('pause', 15)}取消</button>` : ''}
+            ${(decks.length < 2 && m?.entries?.length && !uiState.battle.duelRunning) ? `<button class="btn btn-outline" type="button" data-action="quick-load-meta-deck-pair">${icon('plus', 15)}匯入熱門牌組試測</button>` : ''}
+            ${matchedDuelResult && !uiState.battle.duelRunning ? `<button class="btn btn-outline" type="button" data-action="reset-custom-duel">清空重測</button>` : ''}
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>2. 雙方陣容對照</h2>
+          <div class="duel-preview-stack">
+            ${renderDuelDeckPreviewCard(duelDeckA, '我方（A）', 'is-me')}
+            <div class="duel-vs-divider" aria-hidden="true"><span>VS</span></div>
+            ${renderDuelDeckPreviewCard(duelDeckB, '對手（B）', 'is-opp')}
+          </div>
+          ${renderDuelDiffSummary()}
+        </section>
+      </div>
+
+      <section class="panel block-gap" id="custom-duel-report-area">
+        ${renderCustomDuelReport(matchedDuelResult, uiState.battle.duelProgress, { canReplay: state.engineReady })}
+      </section>
+    `;
+  }
+
   return `
     <div class="page-head">
       <h1>對戰測試與勝率模擬</h1>
       <p class="desc">測試牌組對陣當前環境前十熱門牌組的實戰勝率與對局詳情。</p>
     </div>
+
+    ${modeTabsHtml}
 
     <div class="battle-setup-grid">
       <section class="panel">

@@ -284,7 +284,8 @@ test('project UI rule: battle page & card detail never expose internal decision 
   const battleViewBody = viewsSrc.slice(viewsSrc.indexOf('export function renderBattle()'), viewsSrc.indexOf('export function renderSources()'));
   const cardDetailBody = viewsSrc.slice(viewsSrc.indexOf('export function buildCardDetailModal('));
   const battleReportBody = battleSrc.slice(battleSrc.indexOf('export function renderBattleReport('), battleSrc.indexOf('const ENERGY_ZH_MAP'));
-  const deepModalBody = battleSrc.slice(battleSrc.indexOf('export function renderSingleOpponentDeepProgress('), battleSrc.indexOf('// 執行兩階段真實勝率推演'));
+  const customDuelBody = battleSrc.slice(battleSrc.indexOf('export function renderCustomDuelReport('), battleSrc.indexOf('// 單一對手卡組專項執行器'));
+  const deepModalBody = battleSrc.slice(battleSrc.indexOf('export function renderSingleOpponentDeepProgress('), battleSrc.indexOf('// 執行勝率推演'));
 
   const forbidden = [
     /GPU 顯存加速/,
@@ -306,6 +307,7 @@ test('project UI rule: battle page & card detail never expose internal decision 
     ['renderBattle', battleViewBody],
     ['buildCardDetailModal', cardDetailBody],
     ['renderBattleReport', battleReportBody],
+    ['renderCustomDuelReport', customDuelBody],
     ['renderSingleOpponentDeep', deepModalBody]
   ]) {
     for (const rx of forbidden) {
