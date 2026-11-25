@@ -68,11 +68,74 @@ function notifyCloudStatus() {
   if (cloudSyncListener) cloudSyncListener();
 }
 
-async function fetchJsonOptional(url, noStore = false) {
-  const res = await fetch(url, noStore ? { cache: 'no-store' } : undefined);
+const REMOTE_PAGES_BASE = 'https://rogent-z.github.io/ptcgp-deck-lab/';
+const LIVE_META_CACHE_KEY = 'pocketlab_live_meta_top_v1';
+
+function isNativeAppHost() {
+  return typeof window !== 'undefined'
+    && Boolean(window.Capacitor?.isNativePlatform?.() || typeof window.PocketLabNative !== 'undefined');
+}
+
+function metaTimestamp(meta) {
+  return Math.max(Date.parse(meta?.asOf || '') || 0, Date.parse(meta?.latestEvent || '') || 0);
+}
+
+function pickNewerMeta(baseMeta, candidateMeta) {
+  if (!candidateMeta?.entries?.length) return baseMeta;
+  if (!baseMeta?.entries?.length) return candidateMeta;
+  return metaTimestamp(candidateMeta) > metaTimestamp(baseMeta) ? candidateMeta : baseMeta;
+}
+
+async function fetchJsonOptional(url, noStore = false, timeoutMs = 0) {
+  const targetUrl = noStore ? `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}` : url;
+  const opts = {};
+  if (noStore) opts.cache = 'no-store';
+  if (timeoutMs > 0 && typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+    opts.signal = AbortSignal.timeout(timeoutMs);
+  }
+  const res = await fetch(targetUrl, Object.keys(opts).length ? opts : undefined);
   if (res.status === 404) return null;
   if (!res.ok) throw Error(`載入 ${url} 失敗 (${res.status})`);
   return res.json();
+}
+
+function readCachedLiveMeta() {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(LIVE_META_CACHE_KEY) : null;
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedLiveMeta(doc) {
+  try {
+    if (typeof localStorage !== 'undefined' && doc?.entries?.length) {
+      localStorage.setItem(LIVE_META_CACHE_KEY, JSON.stringify(doc));
+    }
+  } catch {
+    // 忽略儲存配額限制
+  }
+}
+
+async function fetchBestMetaTop(forceRefresh = false) {
+  const localMeta = await fetchJsonOptional('data/meta.top.json', forceRefresh)
+    .then((d) => d || fetchJsonOptional('data/meta.json', forceRefresh))
+    .catch(() => null);
+  let best = localMeta;
+  if (isNativeAppHost()) {
+    best = pickNewerMeta(best, readCachedLiveMeta());
+    try {
+      const remoteMeta = await fetchJsonOptional(`${REMOTE_PAGES_BASE}data/meta.top.json`, true, 6000);
+      if (remoteMeta?.entries?.length) {
+        best = pickNewerMeta(best, remoteMeta);
+        if (best === remoteMeta) writeCachedLiveMeta(remoteMeta);
+      }
+    } catch {
+      // 離線或逾時時安靜使用本地／快取快照
+    }
+  }
+  return best;
 }
 
 function indexCards(cards, foldMap) {
@@ -102,9 +165,7 @@ export async function loadInitialData(forceRefresh = false) {
     Object.keys(state.foldMap).length
       ? Promise.resolve(state.foldMap)
       : fetchJsonOptional('assets/han-fold.json').catch(() => ({})),
-    fetchJsonOptional('data/meta.top.json', forceRefresh)
-      .then((d) => d || fetchJsonOptional('data/meta.json', forceRefresh))
-      .catch(() => null),
+    fetchBestMetaTop(forceRefresh).catch(() => null),
     fetchJsonOptional('data/cards.json', forceRefresh).catch(() => null),
     fetchJsonOptional('data/catalog.json', forceRefresh).catch(() => null),
     fetchJsonOptional('battle/models/manifest.json', forceRefresh).catch(() => null),
@@ -241,7 +302,12 @@ export async function ensurePairwiseStrategies() {
 
 export async function ensureFullMeta() {
   if (state.metaFullLoaded && state.meta && !state.meta.truncated) return state.meta;
-  const full = await fetchJsonOptional('data/meta.json', false);
+  let full = null;
+  if (isNativeAppHost()) {
+    full = await fetchJsonOptional(`${REMOTE_PAGES_BASE}data/meta.json`, true, 8000).catch(() => null);
+  }
+  const localFull = await fetchJsonOptional('data/meta.json', false).catch(() => null);
+  full = pickNewerMeta(localFull, full);
   if (full) {
     indexMetaEntries(full, state.foldMap);
     state.meta = full;

@@ -22,7 +22,7 @@ on:
     - cron: "0 19 * * 0"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -51,8 +51,13 @@ jobs:
             pocket-lab-sources-
 
       - name: Sync Limitless tournament meta snapshot
-        if: github.event.schedule == '17 */3 * * *' || (github.event_name == 'workflow_dispatch' && inputs.sync_meta == 'true')
-        run: node tools/meta/sync.mjs
+        if: github.event_name == 'push' || github.event.schedule == '17 */3 * * *' || (github.event_name == 'workflow_dispatch' && inputs.sync_meta == 'true')
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            node tools/meta/sync.mjs || echo "::warning::Limitless meta sync skipped on push; keeping repo snapshot"
+          else
+            node tools/meta/sync.mjs
+          fi
 
       - name: Sync CHT card catalog (daily/weekly 02:30-03:00 CST schedule or manual trigger)
         if: github.event.schedule == '30 18 * * *' || github.event.schedule == '0 19 * * 0' || (github.event_name == 'workflow_dispatch' && inputs.sync_cards == 'true')
@@ -65,6 +70,18 @@ jobs:
 
       - name: Run verification tests before publish
         run: node --test tests/meta.test.mjs tests/workbench.test.mjs tests/frontend.test.mjs tests/cards.test.mjs tests/cloud.test.mjs tests/mobile.test.mjs tests/battle-engine.test.mjs
+
+      - name: Persist refreshed tournament meta snapshot to main
+        if: github.event.schedule == '17 */3 * * *' || (github.event_name == 'workflow_dispatch' && inputs.sync_meta == 'true')
+        run: |
+          if ! git diff --quiet public/data/meta.json public/data/meta.top.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add public/data/meta.json public/data/meta.top.json
+            git commit -m "chore(meta): sync Limitless tournament snapshot [skip ci]"
+            git pull --rebase --autostash origin main || true
+            git push origin HEAD:main || echo "::warning::Could not push refreshed meta snapshot back to main"
+          fi
 
       - name: Upload Pages artifact (public/)
         uses: actions/upload-pages-artifact@v3
