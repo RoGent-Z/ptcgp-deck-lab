@@ -147,6 +147,8 @@ struct CompactCard {
     a1_aux: u16,
     a1_val1: i32,
     a1_val2: i32,
+    a1_ecost: u32,
+    a1_eff_etype: u8,
 
     a2_cost: u8,
     a2_flags: u16,
@@ -156,11 +158,15 @@ struct CompactCard {
     a2_aux: u16,
     a2_val1: i32,
     a2_val2: i32,
+    a2_ecost: u32,
+    a2_eff_etype: u8,
 
     ab_op: u8,
     ab_cond: u8,
     ab_aux: u16,
     ab_val: i32,
+    ab_trn_etype: u8,
+    deck_emask: u8,
 
     trn_kind: u8,
     trn_sub: u8,
@@ -209,6 +215,7 @@ struct Slot {
     hp: i16,
     max_hp: i16,
     energy: u8,
+    e_pack: u32, // 8x4-bit nibbles for colored types 0..7; Colorless [C] = energy - sum(nibbles)
     tool: u8,
     tool2: u8,
     status: u32,
@@ -337,6 +344,14 @@ fn decode_card_from_slice(buf: &[i32], off: usize, bonus_q: i32, forced_slot: i1
     let a1_op1 = (a1_ops & 0xff) as u8;
     let a2_cost = (a2_cf & 0xff) as u8;
     let a2_op1 = (a2_ops & 0xff) as u8;
+    let a1_ecost = buf[off + 25] as u32;
+    let a2_ecost = buf[off + 26] as u32;
+    let r27 = buf[off + 27] as u32;
+    let raw_emask = (r27 & 0xff) as u8;
+    let deck_emask = if raw_emask != 0 { raw_emask } else { 0x02u8 };
+    let ab_trn_etype = ((r27 >> 8) & 0xff) as u8;
+    let a1_eff_etype = ((r27 >> 16) & 0xff) as u8;
+    let a2_eff_etype = ((r27 >> 24) & 0xff) as u8;
 
     let p1 = if a1_cost != 255 { est_atk_power_v3(a1_dmg, a1_op1, a1_val1) } else { 0 };
     let p2 = if a2_cost != 255 { est_atk_power_v3(a2_dmg, a2_op1, a2_val1) } else { 0 };
@@ -366,6 +381,8 @@ fn decode_card_from_slice(buf: &[i32], off: usize, bonus_q: i32, forced_slot: i1
         a1_aux: ((a1_ops >> 16) & 0xffff) as u16,
         a1_val1,
         a1_val2,
+        a1_ecost,
+        a1_eff_etype,
 
         a2_cost,
         a2_flags: ((a2_cf >> 8) & 0xffff) as u16,
@@ -375,11 +392,15 @@ fn decode_card_from_slice(buf: &[i32], off: usize, bonus_q: i32, forced_slot: i1
         a2_aux: ((a2_ops >> 16) & 0xffff) as u16,
         a2_val1,
         a2_val2,
+        a2_ecost,
+        a2_eff_etype,
 
         ab_op: (ab_pk & 0xff) as u8,
         ab_cond: ((ab_pk >> 8) & 0xff) as u8,
         ab_aux: ((ab_pk >> 16) & 0xffff) as u16,
         ab_val: buf[off + 18],
+        ab_trn_etype,
+        deck_emask,
 
         trn_kind: (trn_pk & 0xff) as u8,
         trn_sub: ((trn_pk >> 8) & 0xff) as u8,
@@ -439,11 +460,15 @@ fn push_replay_step(
             REPLAY_BUF[bo] = if act.occ { act.card.slot_id as i32 } else { -1 };
             REPLAY_BUF[bo + 1] = if act.occ { act.hp as i32 } else { 0 };
             REPLAY_BUF[bo + 2] = if act.occ { act.max_hp as i32 } else { 0 };
-            REPLAY_BUF[bo + 3] = if act.occ { act.energy as i32 } else { 0 };
+            REPLAY_BUF[bo + 3] = if act.occ { act.e_pack as i32 } else { 0 };
             REPLAY_BUF[bo + 4] = bench_cnt;
             REPLAY_BUF[bo + 5] = hand_len[p] as i32;
             REPLAY_BUF[bo + 6] = lib_len[p] as i32;
-            REPLAY_BUF[bo + 7] = if act.occ { (act.tool as i32) | (((act.status & ST_SPECIAL_MASK) as i32) << 8) } else { 0 };
+            REPLAY_BUF[bo + 7] = if act.occ {
+                (act.tool as i32) | (((act.status & ST_SPECIAL_MASK) as i32) << 8) | ((act.energy as i32) << 16)
+            } else {
+                0
+            };
         }
         REPLAY_LEN += 1;
     }
@@ -544,16 +569,232 @@ fn count_bench(side: &[Slot; 4]) -> i32 {
 }
 
 #[inline(always)]
-fn eff_energy(board: &[[Slot; 4]; 2], p: usize, s: usize, stadium: u8, turn: u8) -> i32 {
-    let e = board[p][s].energy as i32;
-    if board[p][s].card.has_type(0) {
-        for k in 0..4 {
-            if ab_active(board, p, k, stadium, turn) && board[p][k].card.ab_op == 15 && board[p][k].card.ab_val == 8 {
-                return e * 2;
+fn e_cnt(e_pack: u32, t: u32) -> i32 {
+    if t < 8 { ((e_pack >> (t * 4)) & 15) as i32 } else { 0 }
+}
+
+#[inline(always)]
+fn e_sum_typed(e_pack: u32) -> i32 {
+    let mut s = 0i32;
+    for t in 0..8u32 { s += ((e_pack >> (t * 4)) & 15) as i32; }
+    s
+}
+
+#[inline(always)]
+fn e_type_mask(e_pack: u32) -> u32 {
+    let mut m = 0u32;
+    for t in 0..8u32 { if ((e_pack >> (t * 4)) & 15) != 0 { m |= 1u32 << t; } }
+    m
+}
+
+#[inline(always)]
+fn e_distinct_types(e_pack: u32) -> i32 {
+    e_type_mask(e_pack).count_ones() as i32
+}
+
+#[inline(always)]
+fn slot_add_e(sl: &mut Slot, etype: u32, n: i32) {
+    if n <= 0 { return; }
+    sl.energy = sl.energy.saturating_add(n.min(255) as u8);
+    if etype < 8 {
+        let sh = etype * 4;
+        let cur = ((sl.e_pack >> sh) & 15) as i32;
+        let nxt = (cur + n).min(15) as u32;
+        sl.e_pack = (sl.e_pack & !(15u32 << sh)) | (nxt << sh);
+    }
+}
+
+#[inline(always)]
+fn slot_clear_e(sl: &mut Slot) {
+    sl.energy = 0;
+    sl.e_pack = 0;
+}
+
+#[inline(always)]
+fn slot_rem_typed_e(sl: &mut Slot, etype: u32, n: i32) -> i32 {
+    if etype >= 8 || n <= 0 || sl.energy == 0 { return 0; }
+    let sh = etype * 4;
+    let have = ((sl.e_pack >> sh) & 15) as i32;
+    let take = have.min(n).min(sl.energy as i32);
+    if take <= 0 { return 0; }
+    let nxt = (have - take) as u32;
+    sl.e_pack = (sl.e_pack & !(15u32 << sh)) | (nxt << sh);
+    sl.energy = sl.energy.saturating_sub(take as u8);
+    take
+}
+
+#[inline(never)]
+fn slot_rem_any_e(sl: &mut Slot, n: i32, keep_ecost: u32) -> i32 {
+    if n <= 0 || sl.energy == 0 { return 0; }
+    let mut rem = n.min(sl.energy as i32);
+    let mut removed = 0i32;
+    // 1. Remove Colorless surplus first
+    let c_surp = (sl.energy as i32 - e_sum_typed(sl.e_pack)).max(0);
+    if c_surp > 0 {
+        let tk = rem.min(c_surp);
+        sl.energy = sl.energy.saturating_sub(tk as u8);
+        rem -= tk;
+        removed += tk;
+    }
+    // 2. Remove colored types above keep_ecost requirements
+    if rem > 0 {
+        for t in 0..8u32 {
+            if rem <= 0 { break; }
+            let have = e_cnt(sl.e_pack, t);
+            let keep = e_cnt(keep_ecost, t);
+            if have > keep {
+                let tk = slot_rem_typed_e(sl, t, (have - keep).min(rem));
+                rem -= tk;
+                removed += tk;
             }
         }
     }
-    e
+    // 3. Remove any remaining colored energy
+    if rem > 0 {
+        for t in 0..8u32 {
+            if rem <= 0 { break; }
+            let tk = slot_rem_typed_e(sl, t, rem);
+            rem -= tk;
+            removed += tk;
+        }
+    }
+    removed
+}
+
+#[inline(never)]
+fn slot_move_all_e(src: &mut Slot, dst: &mut Slot) -> i32 {
+    let tot = src.energy as i32;
+    if tot <= 0 { return 0; }
+    let mut typed = 0i32;
+    for t in 0..8u32 {
+        let cnt = e_cnt(src.e_pack, t);
+        if cnt > 0 {
+            slot_add_e(dst, t, cnt);
+            typed += cnt;
+        }
+    }
+    let c_cnt = (tot - typed).max(0);
+    if c_cnt > 0 { slot_add_e(dst, 9, c_cnt); }
+    slot_clear_e(src);
+    tot
+}
+
+#[inline(always)]
+fn card_max_req_t(c: &CompactCard, t: u32) -> i32 {
+    let r1 = if c.a1_cost != 255 { e_cnt(c.a1_ecost, t) } else { 0 };
+    let r2 = if c.a2_cost != 255 { e_cnt(c.a2_ecost, t) } else { 0 };
+    if r2 > r1 { r2 } else { r1 }
+}
+
+#[inline(never)]
+fn slot_move_typed_e(src: &mut Slot, dst: &mut Slot, etype: u32, max_n: i32) -> i32 {
+    if max_n <= 0 || src.energy == 0 { return 0; }
+    if etype < 8 {
+        let mv = slot_rem_typed_e(src, etype, max_n);
+        if mv > 0 { slot_add_e(dst, etype, mv); }
+        return mv;
+    }
+    if etype == 250 {
+        // Elemental Switch: [R]=1, [W]=2, [L]=3; prefer type dst needs first
+        let mut moved = 0i32;
+        for pass in 0..2 {
+            for t in 1..=3u32 {
+                if moved >= max_n { break; }
+                let want = card_max_req_t(&dst.card, t) > e_cnt(dst.e_pack, t);
+                if pass == 0 && !want { continue; }
+                let tk = slot_rem_typed_e(src, t, max_n - moved);
+                if tk > 0 { slot_add_e(dst, t, tk); moved += tk; }
+            }
+        }
+        return moved;
+    }
+    if max_n >= 99 { return slot_move_all_e(src, dst); }
+    // Untyped move (Dawn / Morpeko / Raticate ex / Psychic): prefer type dst needs
+    let mut moved = 0i32;
+    for pass in 0..2 {
+        for t in 0..8u32 {
+            if moved >= max_n { break; }
+            let want = card_max_req_t(&dst.card, t) > e_cnt(dst.e_pack, t);
+            if pass == 0 && !want { continue; }
+            let tk = slot_rem_typed_e(src, t, max_n - moved);
+            if tk > 0 { slot_add_e(dst, t, tk); moved += tk; }
+        }
+    }
+    if moved < max_n {
+        let c_surp = (src.energy as i32 - e_sum_typed(src.e_pack)).max(0);
+        let tk = c_surp.min(max_n - moved);
+        if tk > 0 {
+            src.energy = src.energy.saturating_sub(tk as u8);
+            slot_add_e(dst, 9, tk);
+            moved += tk;
+        }
+    }
+    moved
+}
+
+#[inline(always)]
+fn pick_deck_etype(emask: u8, rng: &mut Rng32) -> u8 {
+    let m: u32 = if emask != 0 { emask as u32 } else { 2u32 };
+    let cnt = m.count_ones();
+    if cnt <= 1 { return m.trailing_zeros() as u8; }
+    let pick = rng.next_u32() % cnt;
+    let mut seen = 0u32;
+    for t in 0..8u32 {
+        if (m & (1u32 << t)) != 0 {
+            if seen == pick { return t as u8; }
+            seen += 1;
+        }
+    }
+    m.trailing_zeros() as u8
+}
+
+#[inline(never)]
+fn pick_needed_etype(sl: &Slot, emask: u8) -> u8 {
+    let m: u32 = if emask != 0 { emask as u32 } else { 2u32 };
+    // 1. Type in emask with colored shortfall on sl
+    for t in 0..8u32 {
+        if (m & (1u32 << t)) != 0 && card_max_req_t(&sl.card, t) > e_cnt(sl.e_pack, t) {
+            return t as u8;
+        }
+    }
+    // 2. Any type with colored shortfall on sl
+    for t in 0..8u32 {
+        if card_max_req_t(&sl.card, t) > e_cnt(sl.e_pack, t) {
+            return t as u8;
+        }
+    }
+    // 3. First type in emask
+    m.trailing_zeros() as u8
+}
+
+#[inline(always)]
+fn has_serperior(board: &[[Slot; 4]; 2], p: usize, stadium: u8, turn: u8) -> bool {
+    for k in 0..4 {
+        if ab_active(board, p, k, stadium, turn) && board[p][k].card.ab_op == 15 && board[p][k].card.ab_val == 8 {
+            return true;
+        }
+    }
+    false
+}
+
+#[inline(always)]
+fn eff_typed_energy(board: &[[Slot; 4]; 2], p: usize, s: usize, etype: u32, stadium: u8, turn: u8) -> i32 {
+    let cnt = e_cnt(board[p][s].e_pack, etype);
+    if etype == 0 && board[p][s].card.has_type(0) && has_serperior(board, p, stadium, turn) {
+        cnt * 2
+    } else {
+        cnt
+    }
+}
+
+#[inline(always)]
+fn eff_energy(board: &[[Slot; 4]; 2], p: usize, s: usize, stadium: u8, turn: u8) -> i32 {
+    let e = board[p][s].energy as i32;
+    if board[p][s].card.has_type(0) && has_serperior(board, p, stadium, turn) {
+        e + e_cnt(board[p][s].e_pack, 0)
+    } else {
+        e
+    }
 }
 
 #[inline(never)]
@@ -714,7 +955,8 @@ fn has_status_immunity(board: &[[Slot; 4]; 2], p: usize, s: usize, stadium: u8, 
     if sl.energy > 0 {
         for k in 0..4 {
             if ab_active(board, p, k, stadium, turn) && board[p][k].card.ab_op == 17 && board[p][k].card.ab_val == 2 {
-                return true; // Ogerpon ex / Comfey
+                let et = board[p][k].card.ab_trn_etype as u32;
+                if et >= 8 || e_cnt(sl.e_pack, et) > 0 { return true; } // Ogerpon ex / Comfey [P] / Magearna [M]
             }
         }
     }
@@ -880,6 +1122,7 @@ fn can_pay_attack(
     cur: usize,
     foe: usize,
     base_cost: u8,
+    base_ecost: u32,
     atk_flags: u16,
     barry_disc: i32,
     lib_len_cur: usize,
@@ -918,26 +1161,57 @@ fn can_pay_attack(
         if !(u && a) { return false; }
     }
 
-    let mut need = base_cost as i32;
-    if (atk_flags & AF_COST_1_IF_DAMAGED) != 0 && act.hp < act.max_hp { need = 1; }
-    if (atk_flags & AF_COST_1_IF_DECK_EMPTY) != 0 && lib_len_cur == 0 { need = 1; }
+    let mut need_total = base_cost as i32;
+    let mut req_ecost = base_ecost;
+    if (atk_flags & AF_COST_1_IF_DAMAGED) != 0 && act.hp < act.max_hp {
+        need_total = 1;
+        req_ecost = 1u32 << (3 * 4); // 1 [L]
+    }
+    if (atk_flags & AF_COST_1_IF_DECK_EMPTY) != 0 && lib_len_cur == 0 {
+        need_total = 1;
+        req_ecost = 1u32 << (2 * 4); // 1 [W]
+    }
 
-    // Own cost reductions (Iron Valiant Future -1, Abomasnow/Cherubi -1, Barry -2)
+    let mut colored_sum = e_sum_typed(req_ecost);
+    let mut c_need = (need_total - colored_sum).max(0);
+
+    // Own cost reductions (Cherubi -1 [G], Iron Valiant Future -1 [C], Barry -2 [C])
     for k in 0..4 {
         if ab_active(board, cur, k, stadium, turn) && board[cur][k].card.ab_op == 15 && (board[cur][k].card.ab_val & 0xff) == 4 {
             let sub = (board[cur][k].card.ab_val >> 8) & 0xff;
-            if sub == 1 && c.is_future() { need -= 1; }
-            else if sub == 0 && k == 0 { need -= 1; }
+            if sub == 1 && c.is_future() {
+                c_need = (c_need - 1).max(0);
+            } else if sub == 0 && k == 0 {
+                let red_t = board[cur][k].card.ab_trn_etype as u32;
+                if red_t < 8 {
+                    let cur_r = e_cnt(req_ecost, red_t);
+                    if cur_r > 0 {
+                        let sh = red_t * 4;
+                        req_ecost = (req_ecost & !(15u32 << sh)) | (((cur_r - 1) as u32) << sh);
+                        colored_sum -= 1;
+                    }
+                } else {
+                    c_need = (c_need - 1).max(0);
+                }
+            }
         }
     }
-    need -= barry_disc;
-    // Opponent cost tax (Stoutland / Goomy +1, Porygon-Z / Wo-Chien / TR Tinkaton)
-    need += act.cost_tax as i32;
+    c_need = (c_need - barry_disc).max(0);
+
+    // Opponent cost tax (always adds [C] cost!)
+    c_need += act.cost_tax as i32;
     if board[foe][0].occ && ab_active(board, foe, 0, stadium, turn) && board[foe][0].card.ab_op == 15 && board[foe][0].card.ab_val == 5 {
-        need += 1;
+        c_need += 1;
     }
-    if need < 0 { need = 0; }
-    eff_energy(board, cur, 0, stadium, turn) >= need
+
+    // Strict per-type colored energy verification
+    for t in 0..8u32 {
+        let req_t = e_cnt(req_ecost, t);
+        if req_t > 0 && eff_typed_energy(board, cur, 0, t, stadium, turn) < req_t {
+            return false;
+        }
+    }
+    eff_energy(board, cur, 0, stadium, turn) >= colored_sum + c_need
 }
 
 #[inline(never)]
@@ -949,6 +1223,8 @@ fn eval_cond_op7(
     cur: usize,
     foe: usize,
     atk_cost: u8,
+    atk_ecost: u32,
+    atk_eff_etype: u8,
     supporter_used: bool,
     ko_last_turn: &[u8; 2],
     points: &[u8; 2],
@@ -962,7 +1238,16 @@ fn eval_cond_op7(
     let act = board[cur][0];
     let foe_s = board[foe][0];
     match cond_id {
-        0 => eff_energy(board, cur, 0, stadium, turn) >= (atk_cost as i32) + extra,
+        0 => {
+            if eff_energy(board, cur, 0, stadium, turn) < (atk_cost as i32) + extra { return false; }
+            if (atk_eff_etype as u32) < 8 {
+                let et = atk_eff_etype as u32;
+                let req_et = e_cnt(atk_ecost, et);
+                eff_typed_energy(board, cur, 0, et, stadium, turn) >= req_et + extra
+            } else {
+                true
+            }
+        }
         1 => foe_s.occ && foe_s.hp < foe_s.max_hp,
         2 | 3 => act.hp < act.max_hp,
         4 => act.hp >= act.max_hp,
@@ -993,12 +1278,17 @@ fn eval_cond_op7(
         26 => (act.energy as i32) + (if foe_s.occ { foe_s.energy as i32 } else { 0 }) >= extra,
         27 => {
             let mut tot = 0i32;
-            for s in 0..4 { if board[cur][s].occ { tot += board[cur][s].energy as i32; } }
+            for s in 0..4 {
+                if board[cur][s].occ {
+                    if (atk_eff_etype as u32) < 8 { tot += eff_typed_energy(board, cur, s, atk_eff_etype as u32, stadium, turn); }
+                    else { tot += eff_energy(board, cur, s, stadium, turn); }
+                }
+            }
             tot >= extra
         }
         28 => foe_s.occ && act.energy > foe_s.energy,
         29 => foe_s.occ && act.energy == foe_s.energy,
-        30 => foe_s.occ && act.energy > 0 && foe_s.energy > 0 && act.card.type_code == foe_s.card.type_code,
+        30 => foe_s.occ && (e_type_mask(act.e_pack) & e_type_mask(foe_s.e_pack)) != 0,
         31 => match extra {
             0 => hand_len[cur] == 1 || hand_len[cur] == 3 || hand_len[cur] == 5,
             1 => hand_len[cur] == 2 || hand_len[cur] == 4 || hand_len[cur] == 6,
@@ -1041,7 +1331,13 @@ fn eval_cond_op7(
         38 => false, // evaluated live on attack (discards top card)
         39 => if extra == 1 { disc_volbeat[cur] != 0 } else { disc_quick_grow[cur] != 0 },
         40 => {
-            if extra >= 10 { act.energy > 0 } else { (act.energy as i32) >= extra }
+            if extra >= 10 {
+                e_cnt(act.e_pack, (extra - 10) as u32) > 0
+            } else {
+                let mut m = 0u32;
+                for s in 0..4 { if board[cur][s].occ { m |= e_type_mask(board[cur][s].e_pack); } }
+                (m.count_ones() as i32) >= extra
+            }
         }
         _ => false,
     }
@@ -1052,6 +1348,7 @@ fn eval_count_op6(
     sub: i32,
     extra: i32,
     aux: u16,
+    atk_eff_etype: u8,
     board: &[[Slot; 4]; 2],
     cur: usize,
     foe: usize,
@@ -1084,10 +1381,18 @@ fn eval_count_op6(
             for s in 1..4 { if board[cur][s].occ && board[cur][s].card.stage > 0 { n += 1; } }
             n
         }
-        5 => eff_energy(board, cur, 0, stadium, turn),
+        5 => {
+            if (atk_eff_etype as u32) < 8 { eff_typed_energy(board, cur, 0, atk_eff_etype as u32, stadium, turn) }
+            else { eff_energy(board, cur, 0, stadium, turn) }
+        }
         6 => {
             let mut n = 0;
-            for s in 0..4 { if board[cur][s].occ { n += board[cur][s].energy as i32; } }
+            for s in 0..4 {
+                if board[cur][s].occ {
+                    if extra < 8 { n += eff_typed_energy(board, cur, s, extra as u32, stadium, turn); }
+                    else { n += eff_energy(board, cur, s, stadium, turn); }
+                }
+            }
             n
         }
         7 => if board[foe][0].occ { board[foe][0].energy as i32 } else { 0 },
@@ -1149,8 +1454,8 @@ fn eval_count_op6(
             }
             n
         }
-        25 => (board[cur][0].energy as i32).min(3),
-        26 => board[cur][0].energy as i32,
+        25 => e_distinct_types(board[cur][0].e_pack),
+        26 => e_cnt(board[cur][0].e_pack, 1) + e_cnt(board[cur][0].e_pack, 3),
         27 => {
             let mut n = 0;
             for hi in 0..hand_len[cur] { if hands[cur][hi].is_tool() { n += 1; } }
@@ -1192,6 +1497,8 @@ fn eval_live_attack_dmg_v3(
     cur: usize,
     foe: usize,
     cost: u8,
+    ecost: u32,
+    eff_etype: u8,
     base_dmg: i16,
     op1: u8,
     val1: i32,
@@ -1219,6 +1526,11 @@ fn eval_live_attack_dmg_v3(
     let b0 = val1 & 0xff;
     let b1 = (val1 >> 8) & 0xff;
     let b2 = (val1 >> 16) & 0xff;
+    let scale_e = if (eff_etype as u32) < 8 {
+        eff_typed_energy(board, cur, 0, eff_etype as u32, stadium, turn)
+    } else {
+        eff_energy(board, cur, 0, stadium, turn)
+    };
     match op1 {
         3 => {
             if b0 == 3 { (base_dmg + (b1 as i16) / 2, false) }
@@ -1226,8 +1538,8 @@ fn eval_live_attack_dmg_v3(
             else { (base_dmg / 2, false) }
         }
         4 => {
-            if (b2 & 32) != 0 { (base_dmg + ((b1 * 3) / 2) as i16, false) }
-            else if (b2 & 8) != 0 { (((eff_energy(board, cur, 0, stadium, turn) * b1) / 2) as i16, false) }
+            if (b2 & 32) != 0 { (base_dmg + ((b1 * scale_e.min(3)) / 2) as i16, false) }
+            else if (b2 & 8) != 0 { (((scale_e * b1) / 2) as i16, false) }
             else if (b2 & 2) != 0 { ((((1 + count_bench(&board[cur])) * b1) / 2) as i16, false) }
             else if (b2 & 4) != 0 {
                 let mut n = 0;
@@ -1248,23 +1560,23 @@ fn eval_live_attack_dmg_v3(
             if b0 == 97 { (base_dmg + 45, false) }
             else if b0 == 98 { (base_dmg + (b1 / 4) as i16, false) }
             else if b0 == 99 { (base_dmg + b1 as i16, false) }
-            else if b2 == 2 { (base_dmg + ((eff_energy(board, cur, 0, stadium, turn) * b1) / 2) as i16, false) }
+            else if b2 == 2 { (base_dmg + ((scale_e * b1) / 2) as i16, false) }
             else if b2 == 3 { (base_dmg, false) }
             else { (base_dmg + ((b1 * b0) / 2) as i16, false) }
         }
         6 => {
-            let cnt = eval_count_op6(b0, b2, aux, board, cur, foe, hands, hand_len, libs, lib_len, points, pts_last_turn, ko_count, sweets_total, disc_poke, disc_poke_p, disc_item, disc_supp, stadium, turn);
+            let cnt = eval_count_op6(b0, b2, aux, eff_etype, board, cur, foe, hands, hand_len, libs, lib_len, points, pts_last_turn, ko_count, sweets_total, disc_poke, disc_poke_p, disc_item, disc_supp, stadium, turn);
             if b0 == 33 { ((base_dmg as i32 + cnt).max(0) as i16, false) }
             else { (base_dmg + (cnt * b1) as i16, false) }
         }
         7 => {
-            let ok = eval_cond_op7(b0, b2, aux, board, cur, foe, cost, supporter_used, ko_last_turn, points, hand_len, sweets_used_last, disc_quick_grow, disc_volbeat, stadium, turn);
+            let ok = eval_cond_op7(b0, b2, aux, board, cur, foe, cost, ecost, eff_etype, supporter_used, ko_last_turn, points, hand_len, sweets_used_last, disc_quick_grow, disc_volbeat, stadium, turn);
             if b0 == 3 { (if ok { (base_dmg - b1 as i16).max(0) } else { base_dmg }, false) }
             else { (base_dmg + if ok { b1 as i16 } else { 0 }, false) }
         }
         8 => {
             if b0 == 2 || b0 == 3 || b0 == 4 || b0 == 6 || b0 == 8 || b0 == 10 || b0 == 11 || b0 == 12 || b0 == 14 {
-                let est = if b0 == 8 { b1 * (if b2 == 99 { eff_energy(board, cur, 0, stadium, turn) } else { b2.max(1) }) }
+                let est = if b0 == 8 { b1 * (if b2 == 99 { scale_e } else { b2.max(1) }) }
                 else if b0 == 11 {
                     let mut me = 0;
                     for s in 0..4 { if board[foe][s].occ && (board[foe][s].energy as i32) > me { me = board[foe][s].energy as i32; } }
@@ -1394,9 +1706,10 @@ fn handle_active_ko(
                     }
                 }
                 5 => {
-                    // Passimian ex: move all energy to 1 Bench
+                    // Passimian ex: move all [F] energy to 1 Bench
                     let prom = best_bench_promote(&board[victim]);
-                    if prom < 4 { board[victim][prom].energy = board[victim][prom].energy.saturating_add(v_slot.energy); }
+                    let f_cnt = e_cnt(v_slot.e_pack, 5);
+                    if prom < 4 && f_cnt > 0 { slot_add_e(&mut board[victim][prom], 5, f_cnt); }
                 }
                 7 => {
                     // Galarian Cursola: flip coin -> KO attacker!
@@ -1408,12 +1721,12 @@ fn handle_active_ko(
         }
     }
 
-    // Tool: Electrical Cord (tool 25) -> move up to 2 energy to bench
-    if by_attack && v_slot.has_tool(25) && v_card.has_type(3) && v_slot.energy > 0 {
-        let mut left = v_slot.energy.min(2);
+    // Tool: Electrical Cord (tool 25) -> move up to 2 [L] energy to bench
+    if by_attack && v_slot.has_tool(25) && v_card.has_type(3) {
+        let mut left = e_cnt(v_slot.e_pack, 3).min(2);
         for s in 1..4 {
-            if left == 0 { break; }
-            if board[victim][s].occ { board[victim][s].energy = board[victim][s].energy.saturating_add(1); left -= 1; }
+            if left <= 0 { break; }
+            if board[victim][s].occ { slot_add_e(&mut board[victim][s], 3, 1); left -= 1; }
         }
     }
     let had_lucky_egg = by_attack && v_slot.has_tool(23);
@@ -1535,6 +1848,7 @@ fn simulate_i32_impl<const RECORD: bool>(
     points_out: &mut [u8; 2],
 ) -> (u8, u8, bool) {
     let mut rng = Rng32::new(seed);
+    let deck_emask = [d0[0].deck_emask, d1[0].deck_emask];
     let mut libs = [*d0, *d1];
     let mut lib_len = [20usize, 20usize];
     let mut hands = [[CompactCard::default(); 12]; 2];
@@ -1713,6 +2027,32 @@ fn simulate_i32_impl<const RECORD: bool>(
         }
 
         let mut energy_attached = turn == 1;
+        let turn_etype: u8 = if turn >= 2 {
+            let mut et = pick_deck_etype(deck_emask[cur], &mut rng);
+            // Rainbow Cave (stadium == 1): once per turn re-roll Energy Zone if multi-color rolled unneeded type
+            if stadium == 1 && deck_emask[cur].count_ones() >= 2 {
+                let mut et_wanted = false;
+                let mut other_wanted = false;
+                for s in 0..4 {
+                    if !board[cur][s].occ { continue; }
+                    if card_max_req_t(&board[cur][s].card, et as u32) > e_cnt(board[cur][s].e_pack, et as u32) {
+                        et_wanted = true;
+                    }
+                    for t in 0..8u32 {
+                        if t != et as u32 && ((deck_emask[cur] as u32) & (1u32 << t)) != 0
+                            && card_max_req_t(&board[cur][s].card, t) > e_cnt(board[cur][s].e_pack, t) {
+                            other_wanted = true;
+                        }
+                    }
+                }
+                if !et_wanted && other_wanted {
+                    et = pick_deck_etype(deck_emask[cur], &mut rng);
+                }
+            }
+            et
+        } else {
+            255u8
+        };
         let mut supporter_used = false;
         let mut retreated = false;
         let mut ability_used_mask: u8 = 0;
@@ -1820,7 +2160,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                             3 => { valid = board[cur][s].hp > 30; extra_sc = w[15]; }
                             4 => {
                                 // Giratina ex: ENDS TURN! Only use if we can't attack profitably this turn (or Turn 1)!
-                                let can_atk_now = turn >= 2 && board[cur][0].occ && can_pay_attack(&board, cur, foe, board[cur][0].card.a1_cost, board[cur][0].card.a1_flags, 0, lib_len[cur], hand_len[cur], stadium, turn);
+                                let can_atk_now = turn >= 2 && board[cur][0].occ && can_pay_attack(&board, cur, foe, board[cur][0].card.a1_cost, board[cur][0].card.a1_ecost, board[cur][0].card.a1_flags, 0, lib_len[cur], hand_len[cur], stadium, turn);
                                 if !can_atk_now || turn == 1 {
                                     valid = true;
                                     extra_sc = if turn == 1 { w[15] } else { (w[15] >> 1) - (w[9] >> 2) };
@@ -1830,9 +2170,17 @@ fn simulate_i32_impl<const RECORD: bool>(
                         }
                     }
                     4 => {
-                        if board[cur][0].occ {
-                            if ab_val == 2 { valid = energy_discarded[cur] > 0 || points[foe] > 0 || turn >= 3; }
-                            else { valid = true; }
+                        if ab_val == 2 {
+                            valid = board[cur][0].occ && (energy_discarded[cur] > 0 || points[foe] > 0 || turn >= 3);
+                            extra_sc = w[14] >> 1;
+                        } else if ab_val == 3 {
+                            // Leafeon ex: attach [G] to any [G] Pokémon
+                            for k in 0..4 { if board[cur][k].occ && board[cur][k].card.has_type(0) { valid = true; break; } }
+                            extra_sc = w[14] >> 1;
+                        } else {
+                            // Gardevoir [P] / Baxcalibur [W] / Pawmot [L]: Active must match type!
+                            let et = board[cur][s].card.ab_trn_etype;
+                            valid = board[cur][0].occ && (et >= 8 || board[cur][0].card.has_type(et));
                             extra_sc = w[14] >> 1;
                         }
                     }
@@ -1840,8 +2188,8 @@ fn simulate_i32_impl<const RECORD: bool>(
                         if board[foe][0].occ { valid = true; extra_sc = (w[21] * 35) / 100; f1 = 21; v1 = 0.35; }
                     }
                     12 => {
-                        if ((ab_val >> 8) & 0xff) == 2 && board[cur][s].energy > 0 && turn >= 2 {
-                            // Skeledirge: discard 1 energy for +50 dmg this turn
+                        if ((ab_val >> 8) & 0xff) == 2 && e_cnt(board[cur][s].e_pack, 1) > 0 && turn >= 2 {
+                            // Skeledirge: discard 1 [R] energy for +50 dmg this turn
                             valid = true; extra_sc = w[10] >> 1; f1 = 10; v1 = 0.5;
                         }
                     }
@@ -1882,16 +2230,22 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     }
                                 }
                             }
-                            2 | 3 => {
-                                // Lunala ex / Vaporeon: move bench energy to Active
+                            2 => {
+                                // Lunala ex: move all [P] energy from Benched [P] to Active
                                 let mut has_be = false;
-                                for bs in 1..4 { if board[cur][bs].occ && board[cur][bs].energy > 0 { has_be = true; break; } }
+                                for bs in 1..4 { if board[cur][bs].occ && board[cur][bs].card.has_type(4) && e_cnt(board[cur][bs].e_pack, 4) > 0 { has_be = true; break; } }
                                 if board[cur][0].occ && has_be { valid = true; extra_sc = w[14]; }
+                            }
+                            3 => {
+                                // Vaporeon: move 1 [W] energy from Benched [W] to Active [W]
+                                let mut has_be = false;
+                                for bs in 1..4 { if board[cur][bs].occ && board[cur][bs].card.has_type(2) && e_cnt(board[cur][bs].e_pack, 2) > 0 { has_be = true; break; } }
+                                if board[cur][0].occ && board[cur][0].card.has_type(2) && has_be { valid = true; extra_sc = w[14]; }
                             }
                             4 => {
                                 // Tyranitar: gather all [D] energy onto self
                                 let mut other_e = false;
-                                for k in 0..4 { if k != s && board[cur][k].occ && board[cur][k].energy > 0 { other_e = true; break; } }
+                                for k in 0..4 { if k != s && board[cur][k].occ && e_cnt(board[cur][k].e_pack, 6) > 0 { other_e = true; break; } }
                                 if other_e { valid = true; extra_sc = w[14]; }
                             }
                             _ => {}
@@ -2019,11 +2373,11 @@ fn simulate_i32_impl<const RECORD: bool>(
                                         let scard = board[cur][s].card;
                                         let ok_t = match c.trn_sub {
                                             2 => scard.has_type((c.trn_cond - 1) as u8),
-                                            3 => board[cur][s].energy > 0,
+                                            3 => e_cnt(board[cur][s].e_pack, 2) > 0, // Irida: [W] Energy attached!
                                             4 => scard.stage == 2,
                                             7 | 8 => s == 0,
                                             10 => board[cur][s].energy > 0,
-                                            11 => scard.has_type(4) && board[cur][s].energy >= 2,
+                                            11 => scard.has_type(4) && e_cnt(board[cur][s].e_pack, 4) >= 2, // Diantha: >=2 [P]!
                                             12 | 13 | 14 => scard.matches_trn_hashes(c.trn_h1, c.trn_h2),
                                             _ => true,
                                         };
@@ -2070,7 +2424,13 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 for s in 0..4 { if board[foe][s].occ && board[foe][s].tool_count() > 0 { ht = true; break; } }
                                 playable = ht;
                             }
-                            12 => { playable = board[foe][0].occ && board[foe][0].energy > 0; }
+                            12 => {
+                                if c.trn_val == 1 && c.ab_trn_etype < 8 {
+                                    playable = board[foe][0].occ && e_cnt(board[foe][0].e_pack, c.ab_trn_etype as u32) > 0; // Squirt Bottle [R]
+                                } else {
+                                    playable = board[foe][0].occ && board[foe][0].energy > 0;
+                                }
+                            }
                             13 => {
                                 let mut hn = false;
                                 for s in 0..4 { if board[cur][s].occ && board[cur][s].card.matches_trn_hashes(c.trn_h1, c.trn_h2) { hn = true; break; } }
@@ -2237,11 +2597,38 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 playable = hn && (c.trn_sub == 12 || turn == 1 || board[cur][0].energy < 2);
                                 sc += w[15];
                             }
-                            14 | 15 => {
+                            14 => {
                                 let mut be = false;
-                                for s in 1..4 { if board[cur][s].occ && board[cur][s].energy > 0 { be = true; break; } }
-                                let act_ok = if c.trn_sub == 15 && c.trn_val == 1 { board[cur][0].occ && board[cur][0].card.matches_trn_hashes(c.trn_h1, c.trn_h2) } else { board[cur][0].occ };
-                                playable = act_ok && be;
+                                for s in 1..4 {
+                                    if !board[cur][s].occ || board[cur][s].energy == 0 { continue; }
+                                    if c.trn_val == 2 {
+                                        if (e_type_mask(board[cur][s].e_pack) & 0x0eu32) != 0 { be = true; break; } // Elemental Switch [R]/[W]/[L]
+                                    } else { be = true; break; }
+                                }
+                                playable = board[cur][0].occ && be;
+                                sc += w[14];
+                            }
+                            15 => {
+                                let mut be = false;
+                                if c.trn_val == 2 {
+                                    // Juggler: >=3 different types of Energy across own Pokémon in play
+                                    let mut bm = 0u32;
+                                    for s in 0..4 { if board[cur][s].occ { bm |= e_type_mask(board[cur][s].e_pack); } }
+                                    if bm.count_ones() >= 3 {
+                                        for s in 1..4 { if board[cur][s].occ && board[cur][s].energy > 0 { be = true; break; } }
+                                    }
+                                    playable = board[cur][0].occ && be;
+                                } else {
+                                    // Lt. Surge ([L]) / Genome Converter Y ([P] from Benched [P])
+                                    let et = c.ab_trn_etype as u32;
+                                    for s in 1..4 {
+                                        if !board[cur][s].occ { continue; }
+                                        if et == 4 && !board[cur][s].card.has_type(4) { continue; }
+                                        if et < 8 { if e_cnt(board[cur][s].e_pack, et) > 0 { be = true; break; } }
+                                        else if board[cur][s].energy > 0 { be = true; break; }
+                                    }
+                                    playable = board[cur][0].occ && board[cur][0].card.matches_trn_hashes(c.trn_h1, c.trn_h2) && be;
+                                }
                                 sc += w[14];
                             }
                             16 => {
@@ -2269,26 +2656,44 @@ fn simulate_i32_impl<const RECORD: bool>(
                 }
             }
 
-            // 5. Energy attach from Energy Zone (respects Banette ST_NO_ENERGY_ATTACH on Active!)
-            if !energy_attached {
+            // 5. Energy attach from Energy Zone (color-aware AI; respects Banette ST_NO_ENERGY_ATTACH on Active!)
+            if !energy_attached && turn_etype < 8 {
                 for s in 0..4 {
                     if !board[cur][s].occ { continue; }
                     if s == 0 && (board[cur][0].status & ST_NO_ENERGY_ATTACH) != 0 { continue; }
                     n_opts += 1;
                     let bc = board[cur][s].card;
                     let max_c = if bc.a2_cost != 255 && bc.a2_cost > bc.a1_cost { bc.a2_cost } else if bc.a1_cost != 255 { bc.a1_cost } else { 1 };
-                    let extra_need = if bc.a1_op1 == 7 && (bc.a1_val1 & 0xff) == 0 { (bc.a1_val1 >> 16) & 0xff } else { 0 };
-                    let need_b = (board[cur][s].energy as i32) < (max_c as i32) + extra_need;
-                    let chip_b = if ab_active(&board, cur, s, stadium, turn) && bc.ab_op == 7 && bc.ab_val < 100 { (w[21] * 45) / 100 } else { 0 };
+                    let mut extra_need = 0i32;
+                    let mut extra_et: u8 = 255;
+                    if bc.a1_op1 == 7 && (bc.a1_val1 & 0xff) == 0 {
+                        extra_need = (bc.a1_val1 >> 16) & 0xff;
+                        extra_et = bc.a1_eff_etype;
+                    } else if bc.a2_cost != 255 && bc.a2_op1 == 7 && (bc.a2_val1 & 0xff) == 0 {
+                        extra_need = (bc.a2_val1 >> 16) & 0xff;
+                        extra_et = bc.a2_eff_etype;
+                    }
+                    let have_t = eff_typed_energy(&board, cur, s, turn_etype as u32, stadium, turn);
+                    let mut req_t = card_max_req_t(&bc, turn_etype as u32);
+                    if extra_et == turn_etype { req_t += extra_need; }
+                    let color_shortfall = have_t < req_t;
+                    let need_b = eff_energy(&board, cur, s, stadium, turn) < (max_c as i32) + extra_need;
+                    let chip_b = if ab_active(&board, cur, s, stadium, turn) && bc.ab_op == 7 && bc.ab_val < 100
+                        && (bc.ab_trn_etype == 255 || bc.ab_trn_etype == turn_etype) {
+                        (w[21] * 45) / 100
+                    } else {
+                        0
+                    };
+                    let demand_sc = if color_shortfall { w[15] + (w[15] >> 1) } else if need_b { w[15] } else { 0 };
                     let sc = w[13]
                         + (if s == 0 { w[14] } else { 0 })
-                        + (if need_b { w[15] } else { 0 })
+                        + demand_sc
                         + chip_b
                         + ((bc.power_q * w[16]) >> 10)
                         + ((bc.bonus_q * 25) / 100);
                     if sc > best_score {
                         best_score = sc; best_kind = 5; best_a = s;
-                        chosen_f0 = 13; chosen_f1 = if s == 0 { 14 } else { 15 }; chosen_v1 = if s == 0 || need_b { 1.0 } else { 0.0 };
+                        chosen_f0 = 13; chosen_f1 = if s == 0 { 14 } else { 15 }; chosen_v1 = if s == 0 || need_b || color_shortfall { 1.0 } else { 0.0 };
                     }
                 }
             }
@@ -2323,14 +2728,14 @@ fn simulate_i32_impl<const RECORD: bool>(
                 for ai in 0..2usize {
                     if ai == 0 && (board[cur][0].status & ST_CANT_USE_A1) != 0 { continue; }
                     if ai == 1 && (board[cur][0].status & ST_CANT_USE_A2) != 0 { continue; }
-                    let (ac, af, ad, ao1, av1, ao2, aaux) = if ai == 0 {
-                        (atk_c.a1_cost, atk_c.a1_flags, atk_c.a1_dmg, atk_c.a1_op1, atk_c.a1_val1, atk_c.a1_op2, atk_c.a1_aux)
+                    let (ac, aec, aet, af, ad, ao1, av1, ao2, aaux) = if ai == 0 {
+                        (atk_c.a1_cost, atk_c.a1_ecost, atk_c.a1_eff_etype, atk_c.a1_flags, atk_c.a1_dmg, atk_c.a1_op1, atk_c.a1_val1, atk_c.a1_op2, atk_c.a1_aux)
                     } else {
-                        (atk_c.a2_cost, atk_c.a2_flags, atk_c.a2_dmg, atk_c.a2_op1, atk_c.a2_val1, atk_c.a2_op2, atk_c.a2_aux)
+                        (atk_c.a2_cost, atk_c.a2_ecost, atk_c.a2_eff_etype, atk_c.a2_flags, atk_c.a2_dmg, atk_c.a2_op1, atk_c.a2_val1, atk_c.a2_op2, atk_c.a2_aux)
                     };
-                    if !can_pay_attack(&board, cur, foe, ac, af, my_barry, lib_len[cur], hand_len[cur], stadium, turn) { continue; }
+                    if !can_pay_attack(&board, cur, foe, ac, aec, af, my_barry, lib_len[cur], hand_len[cur], stadium, turn) { continue; }
                     let (raw_d, is_special) = eval_live_attack_dmg_v3(
-                        &board, cur, foe, ac, ad, ao1, av1, aaux,
+                        &board, cur, foe, ac, aec, aet, ad, ao1, av1, aaux,
                         &hands, &hand_len, &libs, &lib_len,
                         supporter_used, &ko_last_turn, &points, &pts_last_turn, &ko_count,
                         &sweets_used_last, &sweets_total, &disc_poke, &disc_poke_p, &disc_item, &disc_supp, &disc_quick_grow, &disc_volbeat,
@@ -2396,8 +2801,13 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 for k in 0..4 { if board[cur][k].occ && k != best_b { tot_e = tot_e.saturating_add(board[cur][k].energy); } }
                                 let need_e = if c.a1_cost != 255 { c.a1_cost.max(2) } else { 3 };
                                 if !walling_ex && tot_e >= need_e {
-                                    for k in 0..4 { if board[cur][k].occ && k != best_b { board[cur][k].energy = 0; } }
-                                    board[cur][best_b].energy = board[cur][best_b].energy.saturating_add(tot_e);
+                                    let mut dst_tmp = board[cur][best_b];
+                                    for k in 0..4 {
+                                        if board[cur][k].occ && k != best_b {
+                                            slot_move_all_e(&mut board[cur][k], &mut dst_tmp);
+                                        }
+                                    }
+                                    board[cur][best_b] = dst_tmp;
                                     board[cur].swap(0, best_b);
                                     board[cur][0].status = (board[cur][0].status | ST_SWITCHED_IN) & !ST_HAS_ATTACKED;
                                     if RECORD { push_replay_step(turn, cur, 7, c.slot_id as i32, 0, 6 | ((tot_e as i32) << 8), &points, &board, &hand_len, &lib_len); }
@@ -2435,7 +2845,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                             if ab_active(&board, cur, k, stadium, turn) && board[cur][k].card.ab_op == 18 && board[cur][k].card.ab_val == 20 { extra_ab_hp += 20; }
                         }
                     }
-                    if c.ab_op == 18 && c.ab_val == 99 { extra_ab_hp += (board[cur][best_b].energy as i16) * 30; }
+                    if c.ab_op == 18 && c.ab_val == 99 {
+                        let cnt_hp = if c.ab_trn_etype < 8 { e_cnt(board[cur][best_b].e_pack, c.ab_trn_etype as u32) } else { board[cur][best_b].energy as i32 };
+                        extra_ab_hp += (cnt_hp as i16) * 30;
+                    }
                     board[cur][best_b].card = c;
                     board[cur][best_b].max_hp = c.hp + bhp + extra_ab_hp;
                     board[cur][best_b].hp = (board[cur][best_b].max_hp - dmg_taken).max(10);
@@ -2458,7 +2871,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                     if c.ab_op == 5 {
                         evo_trig = c.ab_val;
                         match c.ab_val {
-                            1 => { if board[cur][0].occ && board[cur][0].card.has_type(1) { board[cur][0].energy = board[cur][0].energy.saturating_add(1); } }
+                            1 => { if board[cur][0].occ && board[cur][0].card.has_type(1) { slot_add_e(&mut board[cur][0], c.ab_trn_etype as u32, 1); } }
                             2 => {
                                 draw_one(&mut libs, &mut lib_len, &mut hands, &mut hand_len, cur);
                                 draw_one(&mut libs, &mut lib_len, &mut hands, &mut hand_len, cur);
@@ -2509,7 +2922,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                             }
                             10 => {
                                 if board[foe][0].occ && board[foe][0].energy > 0 {
-                                    board[foe][0].energy -= 1; energy_discarded[foe] = 1;
+                                    slot_rem_any_e(&mut board[foe][0], 1, 0); energy_discarded[foe] = 1;
                                 }
                             }
                             12 => {
@@ -2524,8 +2937,11 @@ fn simulate_i32_impl<const RECORD: bool>(
                             13 => { apply_status(&mut board, foe, 0, ST_POISON | ST_BURN, stadium, turn, false); }
                             14 => {
                                 if board[foe][0].occ && board[foe][0].energy > 0 {
-                                    board[foe][0].energy -= 1;
-                                    board[cur][best_b].energy = board[cur][best_b].energy.saturating_add(1);
+                                    let mut src_f = board[foe][0];
+                                    let mut dst_c = board[cur][best_b];
+                                    slot_move_typed_e(&mut src_f, &mut dst_c, 255, 1);
+                                    board[foe][0] = src_f;
+                                    board[cur][best_b] = dst_c;
                                 }
                             }
                             15 => { board[cur][best_b].status |= ST_INVULN; }
@@ -2699,7 +3115,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     // Irida: heal 40 from ALL own Pokémon with [W] energy!
                                     if !heal_blocked {
                                         for s in 0..4 {
-                                            if board[cur][s].occ && board[cur][s].energy > 0 {
+                                            if board[cur][s].occ && e_cnt(board[cur][s].e_pack, 2) > 0 {
                                                 board[cur][s].hp = (board[cur][s].hp + 40).min(board[cur][s].max_hp);
                                             }
                                         }
@@ -2763,7 +3179,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                                             2 => scard.has_type((c.trn_cond - 1) as u8),
                                             4 => scard.stage == 2,
                                             10 => board[cur][s].energy > 0,
-                                            11 => scard.has_type(4) && board[cur][s].energy >= 2,
+                                            11 => scard.has_type(4) && e_cnt(board[cur][s].e_pack, 4) >= 2,
                                             12 | 13 | 14 => scard.matches_trn_hashes(c.trn_h1, c.trn_h2),
                                             _ => true,
                                         };
@@ -2776,9 +3192,17 @@ fn simulate_i32_impl<const RECORD: bool>(
                                         if !heal_blocked && best_miss > 0 {
                                             let h = (c.trn_val as i16).min(board[cur][best_s].max_hp);
                                             board[cur][best_s].hp = (board[cur][best_s].hp + h).min(board[cur][best_s].max_hp);
-                                            if c.trn_sub == 10 { board[cur][best_s].energy = board[cur][best_s].energy.saturating_sub(1); energy_discarded[cur] = 1; }
-                                            else if c.trn_sub == 11 { board[cur][best_s].energy = board[cur][best_s].energy.saturating_sub(2); energy_discarded[cur] = 1; }
-                                            else if c.trn_sub == 12 { if board[cur][best_s].energy > 0 { energy_discarded[cur] = 1; } board[cur][best_s].energy = 0; }
+                                            if c.trn_sub == 10 {
+                                                let keep = board[cur][best_s].card.a1_ecost | board[cur][best_s].card.a2_ecost;
+                                                slot_rem_any_e(&mut board[cur][best_s], 1, keep);
+                                                energy_discarded[cur] = 1;
+                                            } else if c.trn_sub == 11 {
+                                                slot_rem_typed_e(&mut board[cur][best_s], 4, 2);
+                                                energy_discarded[cur] = 1;
+                                            } else if c.trn_sub == 12 {
+                                                if board[cur][best_s].energy > 0 { energy_discarded[cur] = 1; }
+                                                slot_clear_e(&mut board[cur][best_s]);
+                                            }
                                         }
                                         if c.trn_sub == 5 { board[cur][best_s].status &= !ST_SPECIAL_MASK; }
                                         else if c.trn_sub == 13 { board[cur][best_s].status &= !(ST_SLEEP | ST_DEEP_SLEEP | ST_PARALYZE | ST_CONFUSE); }
@@ -2859,26 +3283,34 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 }
                                 12 => {
                                     if board[foe][0].occ && board[foe][0].energy > 0 {
-                                        let mut disc = 0u8;
+                                        let mut disc = 0i32;
                                         if c.trn_val == 99 {
-                                            for _ in 0..6 { if board[foe][0].energy > 0 && rng.flip_coin(&mut guaranteed_heads) { board[foe][0].energy -= 1; disc += 1; } else { break; } }
+                                            for _ in 0..6 {
+                                                if board[foe][0].energy > 0 && rng.flip_coin(&mut guaranteed_heads) {
+                                                    disc += slot_rem_any_e(&mut board[foe][0], 1, 0);
+                                                } else { break; }
+                                            }
                                         } else if c.trn_val == 2 {
-                                            if rng.flip_coin(&mut guaranteed_heads) && rng.flip_coin(&mut guaranteed_heads) { board[foe][0].energy -= 1; disc = 1; }
+                                            if rng.flip_coin(&mut guaranteed_heads) && rng.flip_coin(&mut guaranteed_heads) {
+                                                disc = slot_rem_any_e(&mut board[foe][0], 1, 0);
+                                            }
+                                        } else if c.ab_trn_etype < 8 {
+                                            disc = slot_rem_typed_e(&mut board[foe][0], c.ab_trn_etype as u32, 1);
                                         } else {
-                                            board[foe][0].energy -= 1; disc = 1;
+                                            disc = slot_rem_any_e(&mut board[foe][0], 1, 0);
                                         }
-                                        if disc > 0 { energy_discarded[foe] = 1; rep_val = disc as i32; }
+                                        if disc > 0 { energy_discarded[foe] = 1; rep_val = disc; }
                                     }
                                 }
                                 13 => {
                                     if board[foe][0].occ && board[foe][0].energy > 0 {
-                                        let d = board[foe][0].energy.min(2); board[foe][0].energy -= d; energy_discarded[foe] = 1;
+                                        slot_rem_any_e(&mut board[foe][0], 2, 0); energy_discarded[foe] = 1;
                                     }
                                 }
                                 14 => {
                                     for s in 0..4 {
                                         if board[foe][s].occ && board[foe][s].card.ab_op != 0 && board[foe][s].energy > 0 {
-                                            board[foe][s].energy -= 1; energy_discarded[foe] = 1; break;
+                                            slot_rem_any_e(&mut board[foe][s], 1, 0); energy_discarded[foe] = 1; break;
                                         }
                                     }
                                 }
@@ -2922,7 +3354,12 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 19 => {
                                     for bs in 1..4 {
                                         if board[foe][bs].occ && board[foe][bs].energy > 0 {
-                                            board[foe][bs].energy -= 1; board[foe][0].energy = board[foe][0].energy.saturating_add(1); break;
+                                            let mut src_s = board[foe][bs];
+                                            let mut dst_s = board[foe][0];
+                                            slot_move_typed_e(&mut src_s, &mut dst_s, 255, 1);
+                                            board[foe][bs] = src_s;
+                                            board[foe][0] = dst_s;
+                                            break;
                                         }
                                     }
                                 }
@@ -3066,46 +3503,98 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     }
                                 }
                                 5 => {
-                                    let mut h = 0u8;
+                                    let mut h = 0i32;
                                     for _ in 0..8 { if rng.flip_coin(&mut guaranteed_heads) { h += 1; } else { break; } }
-                                    if board[cur][0].occ && board[cur][0].card.has_type(2) { board[cur][0].energy = board[cur][0].energy.saturating_add(h); }
-                                    rep_val = h as i32;
+                                    if h > 0 {
+                                        for s in 0..4 {
+                                            if board[cur][s].occ && board[cur][s].card.has_type(2) {
+                                                slot_add_e(&mut board[cur][s], 2, h); break;
+                                            }
+                                        }
+                                    }
+                                    rep_val = h;
                                 }
                                 6 => {
                                     let mut h = rng.flip_coin(&mut guaranteed_heads);
                                     if !h && has_gholdengo { gholdengo_used = true; h = rng.flip_coin(&mut guaranteed_heads); }
                                     if h {
-                                        for s in 1..4 { if board[cur][s].occ && board[cur][s].card.has_type(3) { board[cur][s].energy = board[cur][s].energy.saturating_add(1); break; } }
+                                        for s in 1..4 { if board[cur][s].occ && board[cur][s].card.has_type(3) { slot_add_e(&mut board[cur][s], 3, 1); break; } }
                                     }
                                 }
                                 7 => {
-                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.stage == 2 { board[cur][s].energy = board[cur][s].energy.saturating_add(1); break; } }
+                                    // Wally: attach 1 [C] Energy to Stage 2
+                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.stage == 2 { slot_add_e(&mut board[cur][s], 9, 1); break; } }
                                 }
-                                8 => { if board[cur][0].occ && board[cur][0].card.has_type(1) { board[cur][0].energy = board[cur][0].energy.saturating_add(1); } }
+                                8 => { if board[cur][0].occ && board[cur][0].card.has_type(1) { slot_add_e(&mut board[cur][0], 1, 1); } }
                                 9 => {
-                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.is_ub() { board[cur][s].energy = board[cur][s].energy.saturating_add(2); break; } }
+                                    for s in 0..4 {
+                                        if board[cur][s].occ && board[cur][s].card.is_ub() {
+                                            let et1 = pick_needed_etype(&board[cur][s], deck_emask[cur]) as u32;
+                                            slot_add_e(&mut board[cur][s], et1, 1);
+                                            let et2 = pick_needed_etype(&board[cur][s], deck_emask[cur]) as u32;
+                                            slot_add_e(&mut board[cur][s], et2, 1);
+                                            break;
+                                        }
+                                    }
                                 }
                                 10 => {
-                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.matches_trn_hashes(c.trn_h1, c.trn_h2) { board[cur][s].energy = board[cur][s].energy.saturating_add(2); break; } }
+                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.matches_trn_hashes(c.trn_h1, c.trn_h2) { slot_add_e(&mut board[cur][s], 3, 2); break; } }
                                 }
                                 11 => {
-                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.is_ancient() { board[cur][s].energy = board[cur][s].energy.saturating_add(3); break; } }
+                                    // Prof. Sada: attach 3 different types from discard to Ancient Pokémon
+                                    for s in 0..4 {
+                                        if board[cur][s].occ && board[cur][s].card.is_ancient() {
+                                            let mut added_m = 0u32;
+                                            let mut added = 0i32;
+                                            for t in 0..8u32 {
+                                                if added < 3 && ((deck_emask[cur] as u32) & (1u32 << t)) != 0 {
+                                                    slot_add_e(&mut board[cur][s], t, 1);
+                                                    added_m |= 1u32 << t;
+                                                    added += 1;
+                                                }
+                                            }
+                                            for t in 0..8u32 {
+                                                if added < 3 && (added_m & (1u32 << t)) == 0 {
+                                                    slot_add_e(&mut board[cur][s], t, 1);
+                                                    added += 1;
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
                                 }
                                 12 => {
-                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.matches_trn_hashes(c.trn_h1, c.trn_h2) { board[cur][s].energy = board[cur][s].energy.saturating_add(c.trn_val as u8); } }
+                                    let et = c.ab_trn_etype as u32;
+                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.matches_trn_hashes(c.trn_h1, c.trn_h2) { slot_add_e(&mut board[cur][s], et, c.trn_val); } }
                                 }
                                 13 => {
                                     // Kiawe: +2 [R] AND END TURN!
-                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.matches_trn_hashes(c.trn_h1, c.trn_h2) { board[cur][s].energy = board[cur][s].energy.saturating_add(2); break; } }
+                                    for s in 0..4 { if board[cur][s].occ && board[cur][s].card.matches_trn_hashes(c.trn_h1, c.trn_h2) { slot_add_e(&mut board[cur][s], 1, 2); break; } }
                                     end_turn_now = true;
                                 }
                                 14 => {
-                                    for s in 1..4 { if board[cur][s].occ && board[cur][s].energy > 0 { board[cur][s].energy -= 1; board[cur][0].energy = board[cur][0].energy.saturating_add(1); break; } }
+                                    let mv_et = if c.trn_val == 2 { 250u32 } else { 255u32 };
+                                    for s in 1..4 {
+                                        if board[cur][s].occ && board[cur][s].energy > 0 {
+                                            let mut src_s = board[cur][s];
+                                            let mut dst_s = board[cur][0];
+                                            let mv = slot_move_typed_e(&mut src_s, &mut dst_s, mv_et, 1);
+                                            board[cur][s] = src_s;
+                                            board[cur][0] = dst_s;
+                                            if mv > 0 { break; }
+                                        }
+                                    }
                                 }
                                 15 => {
-                                    let mut tot = 0u8;
-                                    for s in 1..4 { if board[cur][s].occ && board[cur][s].energy > 0 { tot = tot.saturating_add(board[cur][s].energy); board[cur][s].energy = 0; } }
-                                    board[cur][0].energy = board[cur][0].energy.saturating_add(tot);
+                                    let mv_et = if c.trn_val == 2 { 255u32 } else { c.ab_trn_etype as u32 };
+                                    let mut dst_s = board[cur][0];
+                                    for s in 1..4 {
+                                        if !board[cur][s].occ || board[cur][s].energy == 0 { continue; }
+                                        if c.trn_val == 1 && mv_et == 4 && !board[cur][s].card.has_type(4) { continue; }
+                                        slot_move_typed_e(&mut board[cur][s], &mut dst_s, mv_et, 99);
+                                        if c.trn_val == 1 && mv_et == 4 { break; } // Genome Converter Y: 1 Benched [P]
+                                    }
+                                    board[cur][0] = dst_s;
                                 }
                                 16 => { barry_disc = 2; barry_h1 = c.trn_h1; barry_h2 = c.trn_h2; }
                                 _ => {}
@@ -3133,19 +3622,35 @@ fn simulate_i32_impl<const RECORD: bool>(
                     ability_used_mask |= 1u8 << best_a;
                     let ab_op = board[cur][best_a].card.ab_op;
                     let ab_val = board[cur][best_a].card.ab_val;
+                    let ab_et = board[cur][best_a].card.ab_trn_etype as u32;
                     let ab_card_id = board[cur][best_a].card.slot_id as i32;
                     let mut end_turn_now = false;
                     match ab_op {
                         3 => {
                             match ab_val {
-                                1 => { board[cur][best_a].energy = board[cur][best_a].energy.saturating_add(1); }
-                                2 => { board[cur][best_a].energy = board[cur][best_a].energy.saturating_add(1); board[cur][best_a].hp = (board[cur][best_a].hp - 20).max(10); }
-                                3 => { board[cur][best_a].energy = board[cur][best_a].energy.saturating_add(2); board[cur][best_a].hp = (board[cur][best_a].hp - 30).max(10); }
-                                4 => { board[cur][best_a].energy = board[cur][best_a].energy.saturating_add(1); end_turn_now = true; } // Giratina ex ENDS TURN!
+                                1 => { slot_add_e(&mut board[cur][best_a], ab_et, 1); }
+                                2 => { slot_add_e(&mut board[cur][best_a], ab_et, 1); board[cur][best_a].hp = (board[cur][best_a].hp - 20).max(10); }
+                                3 => { slot_add_e(&mut board[cur][best_a], ab_et, 2); board[cur][best_a].hp = (board[cur][best_a].hp - 30).max(10); }
+                                4 => { slot_add_e(&mut board[cur][best_a], ab_et, 1); end_turn_now = true; } // Giratina ex ENDS TURN!
                                 _ => {}
                             }
                         }
-                        4 => { if board[cur][0].occ { board[cur][0].energy = board[cur][0].energy.saturating_add(1); } }
+                        4 => {
+                            if ab_val == 2 {
+                                if board[cur][0].occ {
+                                    let et = pick_needed_etype(&board[cur][0], deck_emask[cur]) as u32;
+                                    slot_add_e(&mut board[cur][0], et, 1);
+                                }
+                            } else if ab_val == 3 {
+                                for k in 0..4 {
+                                    if board[cur][k].occ && board[cur][k].card.has_type(0) {
+                                        slot_add_e(&mut board[cur][k], 0, 1); break;
+                                    }
+                                }
+                            } else if board[cur][0].occ && (ab_et >= 8 || board[cur][0].card.has_type(ab_et as u8)) {
+                                slot_add_e(&mut board[cur][0], ab_et, 1);
+                            }
+                        }
                         8 => {
                             let dmg_s = (ab_val & 0xff) as i16;
                             let active_only = ((ab_val >> 8) & 0xff) != 0;
@@ -3166,9 +3671,9 @@ fn simulate_i32_impl<const RECORD: bool>(
                             }
                         }
                         12 => {
-                            // Skeledirge: discard 1 energy -> +50 dmg this turn
-                            if board[cur][best_a].energy > 0 {
-                                board[cur][best_a].energy -= 1; energy_discarded[cur] = 1;
+                            // Skeledirge: discard 1 [R] energy -> +50 dmg this turn
+                            if slot_rem_typed_e(&mut board[cur][best_a], 1, 1) > 0 {
+                                energy_discarded[cur] = 1;
                                 dmg_boost += 50;
                             }
                         }
@@ -3190,7 +3695,8 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 3 => {
                                     if !heal_blocked && board[cur][0].occ && board[cur][0].energy > 0 {
                                         board[cur][0].hp = (board[cur][0].hp + 60).min(board[cur][0].max_hp);
-                                        board[cur][0].energy -= 1; energy_discarded[cur] = 1;
+                                        let keep = board[cur][0].card.a1_ecost | board[cur][0].card.a2_ecost;
+                                        slot_rem_any_e(&mut board[cur][0], 1, keep); energy_discarded[cur] = 1;
                                     }
                                 }
                                 4 => {
@@ -3222,23 +3728,38 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 }
                                 2 => {
                                     for bs in 1..4 {
-                                        if board[cur][bs].occ && board[cur][bs].energy > 0 {
-                                            board[cur][0].energy = board[cur][0].energy.saturating_add(board[cur][bs].energy);
-                                            board[cur][bs].energy = 0; break;
+                                        if board[cur][bs].occ && board[cur][bs].card.has_type(4) && e_cnt(board[cur][bs].e_pack, 4) > 0 {
+                                            let mut src_s = board[cur][bs];
+                                            let mut dst_s = board[cur][0];
+                                            slot_move_typed_e(&mut src_s, &mut dst_s, 4, 99);
+                                            board[cur][bs] = src_s;
+                                            board[cur][0] = dst_s;
+                                            break;
                                         }
                                     }
                                 }
                                 3 => {
-                                    for bs in 1..4 {
-                                        if board[cur][bs].occ && board[cur][bs].energy > 0 {
-                                            board[cur][bs].energy -= 1; board[cur][0].energy = board[cur][0].energy.saturating_add(1); break;
+                                    if board[cur][0].occ && board[cur][0].card.has_type(2) {
+                                        for bs in 1..4 {
+                                            if board[cur][bs].occ && board[cur][bs].card.has_type(2) && e_cnt(board[cur][bs].e_pack, 2) > 0 {
+                                                let mut src_s = board[cur][bs];
+                                                let mut dst_s = board[cur][0];
+                                                slot_move_typed_e(&mut src_s, &mut dst_s, 2, 1);
+                                                board[cur][bs] = src_s;
+                                                board[cur][0] = dst_s;
+                                                break;
+                                            }
                                         }
                                     }
                                 }
                                 4 => {
-                                    let mut tot = 0u8;
-                                    for k in 0..4 { if k != best_a && board[cur][k].occ && board[cur][k].energy > 0 { tot = tot.saturating_add(board[cur][k].energy); board[cur][k].energy = 0; } }
-                                    board[cur][best_a].energy = board[cur][best_a].energy.saturating_add(tot);
+                                    let mut dst_s = board[cur][best_a];
+                                    for k in 0..4 {
+                                        if k != best_a && board[cur][k].occ && e_cnt(board[cur][k].e_pack, 6) > 0 {
+                                            slot_move_typed_e(&mut board[cur][k], &mut dst_s, 6, 99);
+                                        }
+                                    }
+                                    board[cur][best_a] = dst_s;
                                 }
                                 _ => {}
                             }
@@ -3278,6 +3799,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                                         sh.name_hash = H_SWEET_HONEY;
                                         sh.meta_hi = 2; // item
                                         sh.trn_kind = 2; sh.trn_sub = 9; sh.trn_val = 20;
+                                        sh.ab_trn_etype = 255; sh.a1_eff_etype = 255; sh.a2_eff_etype = 255; sh.deck_emask = deck_emask[cur];
                                         hands[cur][hand_len[cur]] = sh; hand_len[cur] += 1;
                                     }
                                 }
@@ -3315,10 +3837,11 @@ fn simulate_i32_impl<const RECORD: bool>(
                 }
                 5 => {
                     energy_attached = true;
-                    board[cur][best_a].energy = board[cur][best_a].energy.saturating_add(1);
+                    slot_add_e(&mut board[cur][best_a], turn_etype as u32, 1);
                     let tgt_card = board[cur][best_a].card;
-                    // Reuniclus / Serperior B4a-005: +30 HP per energy
-                    if ab_active(&board, cur, best_a, stadium, turn) && tgt_card.ab_op == 18 && tgt_card.ab_val == 99 {
+                    // Reuniclus: +30 HP per [P] energy
+                    if ab_active(&board, cur, best_a, stadium, turn) && tgt_card.ab_op == 18 && tgt_card.ab_val == 99
+                        && (tgt_card.ab_trn_etype == 255 || tgt_card.ab_trn_etype == turn_etype) {
                         board[cur][best_a].max_hp += 30;
                         board[cur][best_a].hp += 30;
                     }
@@ -3326,10 +3849,14 @@ fn simulate_i32_impl<const RECORD: bool>(
                     if best_a == 0 && (board[cur][0].status & ST_ATTACH_SLEEP) != 0 {
                         apply_status(&mut board, cur, 0, ST_SLEEP, stadium, turn, false);
                     }
-                    if RECORD { push_replay_step(turn, cur, 8, tgt_card.slot_id as i32, best_a as i32, board[cur][best_a].energy as i32, &points, &board, &hand_len, &lib_len); }
+                    if RECORD {
+                        let aux2_e = (board[cur][best_a].energy as i32) | ((turn_etype as i32) << 8);
+                        push_replay_step(turn, cur, 8, tgt_card.slot_id as i32, best_a as i32, aux2_e, &points, &board, &hand_len, &lib_len);
+                    }
 
-                    // On-Attach-Energy Ability (ab_op == 7): Darkrai ex (20), C1 Charizard (30), Cresselia ex (heal 20!), Komala (self Asleep!), Porygon2 (self evolve!)
-                    if ab_active(&board, cur, best_a, stadium, turn) && tgt_card.ab_op == 7 {
+                    // On-Attach-Energy Ability (ab_op == 7): Darkrai ex ([D] 20), C1 Charizard ([R] 30), Cresselia ex ([P] heal 20), Komala/Slaking/Porygon2 (any)
+                    if ab_active(&board, cur, best_a, stadium, turn) && tgt_card.ab_op == 7
+                        && (tgt_card.ab_trn_etype == 255 || tgt_card.ab_trn_etype == turn_etype) {
                         let av = tgt_card.ab_val;
                         if av < 100 && board[foe][0].occ {
                             let chip = av as i16;
@@ -3390,8 +3917,11 @@ fn simulate_i32_impl<const RECORD: bool>(
                     let new_id = board[cur][best_a].card.slot_id as i32;
                     let pay = eff_retreat_cost(&board, cur, stadium, turn, retreat_discount).max(0) as u8;
                     let had_trap = (board[cur][0].status & ST_RETREAT_TRAP) != 0;
-                    if pay > 0 { energy_discarded[cur] = 1; }
-                    board[cur][0].energy = board[cur][0].energy.saturating_sub(pay);
+                    if pay > 0 {
+                        let keep = board[cur][0].card.a1_ecost | board[cur][0].card.a2_ecost;
+                        slot_rem_any_e(&mut board[cur][0], pay as i32, keep);
+                        energy_discarded[cur] = 1;
+                    }
                     board[cur][0].status &= !ST_LEAVE_ACTIVE_CLEAR;
                     board[cur][0].weaken = 0;
                     board[cur][0].cost_tax = 0;
@@ -3413,10 +3943,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                 7 => {
                     let atk_idx = best_a;
                     let atk_c = board[cur][0].card;
-                    let (mut ac, mut af, mut ad, mut ao1, mut av1, mut ao2, mut av2, mut aaux) = if atk_idx == 0 {
-                        (atk_c.a1_cost, atk_c.a1_flags, atk_c.a1_dmg, atk_c.a1_op1, atk_c.a1_val1, atk_c.a1_op2, atk_c.a1_val2, atk_c.a1_aux)
+                    let (mut ac, mut aec, mut aet, mut af, mut ad, mut ao1, mut av1, mut ao2, mut av2, mut aaux) = if atk_idx == 0 {
+                        (atk_c.a1_cost, atk_c.a1_ecost, atk_c.a1_eff_etype, atk_c.a1_flags, atk_c.a1_dmg, atk_c.a1_op1, atk_c.a1_val1, atk_c.a1_op2, atk_c.a1_val2, atk_c.a1_aux)
                     } else {
-                        (atk_c.a2_cost, atk_c.a2_flags, atk_c.a2_dmg, atk_c.a2_op1, atk_c.a2_val1, atk_c.a2_op2, atk_c.a2_val2, atk_c.a2_aux)
+                        (atk_c.a2_cost, atk_c.a2_ecost, atk_c.a2_eff_etype, atk_c.a2_flags, atk_c.a2_dmg, atk_c.a2_op1, atk_c.a2_val1, atk_c.a2_op2, atk_c.a2_val2, atk_c.a2_aux)
                     };
 
                     // Op 20 val 6: Genome Hacking / Copy Attack (Mew ex, Mimikyu, Ditto, Mew B2b)
@@ -3441,10 +3971,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                             };
                             let pick_a2 = src_card.a2_cost != 255 && (src_card.a2_dmg >= src_card.a1_dmg || src_card.a1_cost == 255);
                             if pick_a2 {
-                                ac = src_card.a2_cost; af = src_card.a2_flags; ad = src_card.a2_dmg;
+                                ac = src_card.a2_cost; aec = src_card.a2_ecost; aet = src_card.a2_eff_etype; af = src_card.a2_flags; ad = src_card.a2_dmg;
                                 ao1 = src_card.a2_op1; av1 = src_card.a2_val1; ao2 = src_card.a2_op2; av2 = src_card.a2_val2; aaux = src_card.a2_aux;
                             } else if src_card.a1_cost != 255 {
-                                ac = src_card.a1_cost; af = src_card.a1_flags; ad = src_card.a1_dmg;
+                                ac = src_card.a1_cost; aec = src_card.a1_ecost; aet = src_card.a1_eff_etype; af = src_card.a1_flags; ad = src_card.a1_dmg;
                                 ao1 = src_card.a1_op1; av1 = src_card.a1_val1; ao2 = src_card.a1_op2; av2 = src_card.a1_val2; aaux = src_card.a1_aux;
                             } else {
                                 copy_failed = true;
@@ -3563,7 +4093,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                             4 => {
                                 let mut heads = 0i32;
                                 let mut flips = b0;
-                                if (b2 & 8) != 0 { flips = eff_energy(&board, cur, 0, stadium, turn).min(12); }
+                                if (b2 & 8) != 0 {
+                                    let sc_e = if (aet as u32) < 8 { eff_typed_energy(&board, cur, 0, aet as u32, stadium, turn) } else { eff_energy(&board, cur, 0, stadium, turn) };
+                                    flips = sc_e.min(12);
+                                }
                                 else if (b2 & 2) != 0 { flips = 1 + count_bench(&board[cur]); }
                                 else if (b2 & 4) != 0 {
                                     flips = 0;
@@ -3590,8 +4123,12 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 op1_heads = heads;
                                 if (b2 & 32) != 0 {
                                     // Camerupt: discard 1 [R] per heads, +30 per discarded!
-                                    let disc = (heads as u8).min(board[cur][0].energy);
-                                    if disc > 0 { board[cur][0].energy -= disc; energy_discarded[cur] = 1; }
+                                    let disc = if (aet as u32) < 8 {
+                                        slot_rem_typed_e(&mut board[cur][0], aet as u32, heads)
+                                    } else {
+                                        slot_rem_any_e(&mut board[cur][0], heads, 0)
+                                    };
+                                    if disc > 0 { energy_discarded[cur] = 1; }
                                     raw_d = ad + (disc as i16) * (b1 as i16);
                                 } else {
                                     raw_d = (b1 as i16) * (heads as i16);
@@ -3613,7 +4150,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     for _ in 0..10 { if rng.flip_coin(&mut guaranteed_heads) { heads += 1; } else { break; } }
                                     raw_d = ad + (b1 as i16) * (heads as i16);
                                 } else if b2 == 2 {
-                                    let n = eff_energy(&board, cur, 0, stadium, turn).min(10);
+                                    let n = if (aet as u32) < 8 { eff_typed_energy(&board, cur, 0, aet as u32, stadium, turn).min(10) } else { eff_energy(&board, cur, 0, stadium, turn).min(10) };
                                     for _ in 0..n { if rng.flip_coin(&mut guaranteed_heads) { heads += 1; } }
                                     raw_d = ad + (b1 as i16) * (heads as i16);
                                 } else if b2 == 3 {
@@ -3640,13 +4177,13 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 eff_tag = 24; eff_num = heads;
                             }
                             6 => {
-                                let cnt = eval_count_op6(b0, b2, aaux, &board, cur, foe, &hands, &hand_len, &libs, &lib_len, &points, &pts_last_turn, &ko_count, &sweets_total, &disc_poke, &disc_poke_p, &disc_item, &disc_supp, stadium, turn);
+                                let cnt = eval_count_op6(b0, b2, aaux, aet, &board, cur, foe, &hands, &hand_len, &libs, &lib_len, &points, &pts_last_turn, &ko_count, &sweets_total, &disc_poke, &disc_poke_p, &disc_item, &disc_supp, stadium, turn);
                                 if b0 == 26 {
-                                    // Mega Rayquaza ex: discard ALL energy -> 50 * discarded!
-                                    let disc = board[cur][0].energy;
-                                    if disc > 0 { board[cur][0].energy = 0; energy_discarded[cur] = 1; }
+                                    // Mega Rayquaza ex: discard ALL [R] and [L] energy -> 50 * discarded!
+                                    let disc = slot_rem_typed_e(&mut board[cur][0], 1, 99) + slot_rem_typed_e(&mut board[cur][0], 3, 99);
+                                    if disc > 0 { energy_discarded[cur] = 1; }
                                     raw_d = (disc as i16) * (b1 as i16);
-                                    eff_tag = 8; eff_num = disc as i32;
+                                    eff_tag = 8; eff_num = disc;
                                 } else if b0 == 27 {
                                     // Slowking A4a: discard up to 2 Tools from hand -> 50 * discarded
                                     let mut disc = 0i16;
@@ -3703,7 +4240,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     }
                                     raw_d = ad + if ok { b1 as i16 } else { 0 };
                                 } else {
-                                    let ok = eval_cond_op7(b0, b2, aaux, &board, cur, foe, ac, supporter_used, &ko_last_turn, &points, &hand_len, &sweets_used_last, &disc_quick_grow, &disc_volbeat, stadium, turn);
+                                    let ok = eval_cond_op7(b0, b2, aaux, &board, cur, foe, ac, aec, aet, supporter_used, &ko_last_turn, &points, &hand_len, &sweets_used_last, &disc_quick_grow, &disc_volbeat, stadium, turn);
                                     if b0 == 3 { raw_d = if ok { (ad - b1 as i16).max(0) } else { ad }; }
                                     else { raw_d = ad + if ok { b1 as i16 } else { 0 }; }
                                 }
@@ -3748,7 +4285,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     8 => {
                                         // Random opp Pokémon `times` × b1 (Dragonite, Wugtrio ex, Gholdengo ex, Mega Dragonite ex + Drayden!)
                                         direct_active = false;
-                                        let mut times = if b2 == 99 { eff_energy(&board, cur, 0, stadium, turn).min(10) } else { b2.max(1) };
+                                        let mut times = if b2 == 99 {
+                                            if (aet as u32) < 8 { eff_typed_energy(&board, cur, 0, aet as u32, stadium, turn).min(10) }
+                                            else { eff_energy(&board, cur, 0, stadium, turn).min(10) }
+                                        } else { b2.max(1) };
                                         if atk_c.has_draco() { times += drayden_bonus; }
                                         let mut thit = 0i16;
                                         for _ in 0..times {
@@ -3834,9 +4374,8 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     if heads == 0 && ((af & AF_FLIP_2_BOTH_TAILS_FAIL) != 0 || (af & AF_FLIP_3_ALL_TAILS_FAIL) != 0) {
                                         direct_active = false; miss_flag = 1; eff_tag = 30;
                                     } else if heads > 0 && board[foe][0].energy > 0 {
-                                        let d = (heads as u8).min(board[foe][0].energy);
-                                        board[foe][0].energy -= d; energy_discarded[foe] = 1;
-                                        eff_tag = 19; eff_num = d as i32;
+                                        let d = slot_rem_any_e(&mut board[foe][0], heads, 0);
+                                        if d > 0 { energy_discarded[foe] = 1; eff_tag = 19; eff_num = d; }
                                     }
                                 }
                             }
@@ -3970,7 +4509,7 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 if mode == 0 { board[cur][0].hp -= amt; if eff_tag == 0 { eff_tag = 26; eff_num = amt as i32; } }
                                 else if mode == 1 { apply_status(&mut board, cur, 0, ST_POISON, stadium, turn, false); }
                                 else if mode == 2 {
-                                    for bs in 1..4 { if board[foe][bs].occ { board[foe][bs].energy = board[foe][bs].energy.saturating_add(1); break; } }
+                                    for bs in 1..4 { if board[foe][bs].occ { slot_add_e(&mut board[foe][bs], 2, 1); break; } }
                                 }
                             }
                         }
@@ -4072,8 +4611,10 @@ fn simulate_i32_impl<const RECORD: bool>(
                                             }
                                         }
                                         7 | 13 => {
-                                            // Mega Blastoise ex (3 extra -> 2 bench 50) / Blastoise B1a (2 extra -> 1 bench 50)
-                                            if eff_energy(&board, cur, 0, stadium, turn) >= (ac as i32) + p2 {
+                                            // Mega Blastoise ex (3 extra [W] -> 2 bench 50) / Blastoise B1a (2 extra [W] -> 1 bench 50)
+                                            let has_extra_ok = eff_energy(&board, cur, 0, stadium, turn) >= (ac as i32) + p2
+                                                && ((aet as u32) >= 8 || eff_typed_energy(&board, cur, 0, aet as u32, stadium, turn) >= e_cnt(aec, aet as u32) + p2);
+                                            if has_extra_ok {
                                                 let max_t = if p0 == 7 { 2 } else { 1 };
                                                 let mut cnt = 0;
                                                 for s in 1..4 {
@@ -4152,40 +4693,58 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     }
                                 }
                                 10 => {
-                                    // Discard Own Energy
+                                    // Discard Own Energy (exact typed discard when aet != 255!)
                                     match p1 {
                                         0 => {
-                                            let dcnt = if p0 >= 99 { board[cur][0].energy } else { (p0 as u8).min(board[cur][0].energy) };
-                                            if dcnt > 0 { board[cur][0].energy -= dcnt; energy_discarded[cur] = 1; }
-                                            if eff_tag == 0 { eff_tag = 8; eff_num = dcnt as i32; }
+                                            let dcnt: i32 = if aet == 250 {
+                                                // Lugia ex: 1 [R], 1 [W], 1 [L]
+                                                slot_rem_typed_e(&mut board[cur][0], 1, 1)
+                                                    + slot_rem_typed_e(&mut board[cur][0], 2, 1)
+                                                    + slot_rem_typed_e(&mut board[cur][0], 3, 1)
+                                            } else if aet == 251 {
+                                                // Dragonite: 1 [W], 1 [L]
+                                                slot_rem_typed_e(&mut board[cur][0], 2, 1)
+                                                    + slot_rem_typed_e(&mut board[cur][0], 3, 1)
+                                            } else if (aet as u32) < 8 {
+                                                slot_rem_typed_e(&mut board[cur][0], aet as u32, if p0 >= 99 { 99 } else { p0 })
+                                            } else if p0 >= 99 {
+                                                let tot = board[cur][0].energy as i32;
+                                                slot_clear_e(&mut board[cur][0]);
+                                                tot
+                                            } else {
+                                                slot_rem_any_e(&mut board[cur][0], p0, 0)
+                                            };
+                                            if dcnt > 0 { energy_discarded[cur] = 1; }
+                                            if eff_tag == 0 { eff_tag = 8; eff_num = dcnt; }
                                         }
                                         1 => {
                                             if !rng.flip_coin(&mut guaranteed_heads) {
-                                                let dcnt = (p0 as u8).min(board[cur][0].energy);
-                                                if dcnt > 0 { board[cur][0].energy -= dcnt; energy_discarded[cur] = 1; }
-                                                if eff_tag == 0 { eff_tag = 8; eff_num = dcnt as i32; }
+                                                let dcnt = slot_rem_any_e(&mut board[cur][0], p0, 0);
+                                                if dcnt > 0 { energy_discarded[cur] = 1; }
+                                                if eff_tag == 0 { eff_tag = 8; eff_num = dcnt; }
                                             }
                                         }
                                         2 | 3 => {
                                             let times = if p1 == 3 { 2 } else { 1 };
                                             for _ in 0..times {
-                                                if (rng.next_u32() & 1) == 0 && board[cur][0].energy > 0 { board[cur][0].energy -= 1; energy_discarded[cur] = 1; }
-                                                else if board[foe][0].energy > 0 { board[foe][0].energy -= 1; energy_discarded[foe] = 1; }
+                                                if (rng.next_u32() & 1) == 0 && board[cur][0].energy > 0 { slot_rem_any_e(&mut board[cur][0], 1, 0); energy_discarded[cur] = 1; }
+                                                else if board[foe][0].energy > 0 { slot_rem_any_e(&mut board[foe][0], 1, 0); energy_discarded[foe] = 1; }
                                             }
                                             if eff_tag == 0 { eff_tag = 8; eff_num = times; }
                                         }
                                         4 => {
-                                            let mut rem = 2u8;
+                                            let mut rem = 2i32;
                                             for s in 0..4 {
-                                                while rem > 0 && board[cur][s].occ && board[cur][s].energy > 0 {
-                                                    board[cur][s].energy -= 1; energy_discarded[cur] = 1; rem -= 1;
+                                                if rem > 0 && board[cur][s].occ && board[cur][s].energy > 0 {
+                                                    let tk = slot_rem_any_e(&mut board[cur][s], rem, 0);
+                                                    if tk > 0 { energy_discarded[cur] = 1; rem -= tk; }
                                                 }
                                             }
-                                            if eff_tag == 0 { eff_tag = 8; eff_num = (2 - rem) as i32; }
+                                            if eff_tag == 0 { eff_tag = 8; eff_num = 2 - rem; }
                                         }
                                         5 => {
-                                            if board[cur][0].energy > 0 { board[cur][0].energy -= 1; energy_discarded[cur] = 1; }
-                                            if board[foe][0].energy > 0 { board[foe][0].energy -= 1; energy_discarded[foe] = 1; }
+                                            if board[cur][0].energy > 0 { slot_rem_any_e(&mut board[cur][0], 1, 0); energy_discarded[cur] = 1; }
+                                            if board[foe][0].energy > 0 { slot_rem_any_e(&mut board[foe][0], 1, 0); energy_discarded[foe] = 1; }
                                             if eff_tag == 0 { eff_tag = 8; eff_num = 1; }
                                         }
                                         _ => {}
@@ -4194,19 +4753,27 @@ fn simulate_i32_impl<const RECORD: bool>(
                                 11 => {
                                     // Discard Opponent Active Energy (modes 4 & 5 already ran in Phase 1!)
                                     if p0 != 4 && p0 != 5 && board[foe][0].occ && board[foe][0].energy > 0 && !has_status_immunity(&board, foe, 0, stadium, turn) {
-                                        let mut disc = 0u8;
+                                        let mut disc = 0i32;
                                         match p0 {
-                                            1 => { board[foe][0].energy -= 1; disc = 1; }
-                                            2 => { if rng.flip_coin(&mut guaranteed_heads) { board[foe][0].energy -= 1; disc = 1; } }
+                                            1 => {
+                                                disc = if (aet as u32) < 8 {
+                                                    slot_rem_typed_e(&mut board[foe][0], aet as u32, 1) // Dedenne [L] / Surskit [R]
+                                                } else {
+                                                    slot_rem_any_e(&mut board[foe][0], 1, 0)
+                                                };
+                                            }
+                                            2 => { if rng.flip_coin(&mut guaranteed_heads) { disc = slot_rem_any_e(&mut board[foe][0], 1, 0); } }
                                             3 => {
                                                 for _ in 0..6 {
-                                                    if board[foe][0].energy > 0 && rng.flip_coin(&mut guaranteed_heads) { board[foe][0].energy -= 1; disc += 1; } else { break; }
+                                                    if board[foe][0].energy > 0 && rng.flip_coin(&mut guaranteed_heads) {
+                                                        disc += slot_rem_any_e(&mut board[foe][0], 1, 0);
+                                                    } else { break; }
                                                 }
                                             }
-                                            6 => { disc = board[foe][0].energy.min(2); board[foe][0].energy -= disc; }
+                                            6 => { disc = slot_rem_any_e(&mut board[foe][0], 2, 0); }
                                             _ => {}
                                         }
-                                        if disc > 0 { energy_discarded[foe] = 1; if eff_tag == 0 { eff_tag = 19; eff_num = disc as i32; } }
+                                        if disc > 0 { energy_discarded[foe] = 1; if eff_tag == 0 { eff_tag = 19; eff_num = disc; } }
                                     }
                                 }
                                 12 => {
@@ -4250,55 +4817,106 @@ fn simulate_i32_impl<const RECORD: bool>(
                                     }
                                 }
                                 13 => {
-                                    // Energy Ramp / Move
-                                    let cnt = p0 as u8;
+                                    // Energy Ramp / Move (exact typed energy!)
+                                    let cnt = p0;
                                     match p1 {
-                                        0 => { board[cur][0].energy = board[cur][0].energy.saturating_add(cnt); eff_tag = 10; eff_num = cnt as i32; }
+                                        0 => {
+                                            if aet == 251 {
+                                                // Dragonair: +1 [W] and +1 [L]
+                                                slot_add_e(&mut board[cur][0], 2, 1);
+                                                slot_add_e(&mut board[cur][0], 3, 1);
+                                            } else {
+                                                let add_et = if aet == 255 { pick_needed_etype(&board[cur][0], deck_emask[cur]) as u32 } else { aet as u32 };
+                                                slot_add_e(&mut board[cur][0], add_et, cnt);
+                                            }
+                                            eff_tag = 10; eff_num = cnt;
+                                        }
                                         1 => {
                                             let prom = best_bench_promote(&board[cur]);
-                                            if prom < 4 { board[cur][prom].energy = board[cur][prom].energy.saturating_add(cnt); eff_tag = 10; eff_num = cnt as i32; }
+                                            if prom < 4 {
+                                                let add_et = if aet == 252 {
+                                                    rng.next_u32() % 8 // Sableye: random [G..M]
+                                                } else if aet == 255 {
+                                                    pick_needed_etype(&board[cur][prom], deck_emask[cur]) as u32
+                                                } else {
+                                                    aet as u32
+                                                };
+                                                slot_add_e(&mut board[cur][prom], add_et, cnt);
+                                                eff_tag = 10; eff_num = cnt;
+                                            }
                                         }
                                         2 => {
                                             let mut added = 0;
-                                            for s in 1..4 { if board[cur][s].occ && added < 2 { board[cur][s].energy = board[cur][s].energy.saturating_add(1); added += 1; } }
+                                            for s in 1..4 {
+                                                if board[cur][s].occ && added < 2 {
+                                                    let add_et = if aet == 255 { pick_needed_etype(&board[cur][s], deck_emask[cur]) as u32 } else { aet as u32 };
+                                                    slot_add_e(&mut board[cur][s], add_et, 1);
+                                                    added += 1;
+                                                }
+                                            }
                                             if added > 0 { eff_tag = 10; eff_num = added; }
                                         }
                                         3 => {
-                                            // Moltres ex / Mew ex C1-057: flip 3 coins, attach heads to Bench!
-                                            let mut h = 0u8;
+                                            // Moltres ex [R] / Mew ex C1-057 [P]: flip 3 coins, attach heads to Bench!
+                                            let mut h = 0i32;
                                             for _ in 0..3 { if rng.flip_coin(&mut guaranteed_heads) { h += 1; } }
                                             if h == 0 && has_victini { has_victini = false; for _ in 0..3 { if rng.flip_coin(&mut guaranteed_heads) { h += 1; } } }
                                             let prom = best_bench_promote(&board[cur]);
-                                            if h > 0 && prom < 4 { board[cur][prom].energy = board[cur][prom].energy.saturating_add(h); eff_tag = 10; eff_num = h as i32; }
+                                            if h > 0 && prom < 4 {
+                                                let add_et = if aet == 255 { pick_needed_etype(&board[cur][prom], deck_emask[cur]) as u32 } else { aet as u32 };
+                                                slot_add_e(&mut board[cur][prom], add_et, h);
+                                                eff_tag = 10; eff_num = h;
+                                            }
                                         }
                                         4 => {
-                                            let mut h = 0u8;
+                                            let mut h = 0i32;
                                             for _ in 0..3 { if rng.flip_coin(&mut guaranteed_heads) { h += 1; } }
                                             if h == 0 && has_victini { has_victini = false; for _ in 0..3 { if rng.flip_coin(&mut guaranteed_heads) { h += 1; } } }
-                                            if h > 0 { board[cur][0].energy = board[cur][0].energy.saturating_add(h); eff_tag = 10; eff_num = h as i32; }
+                                            if h > 0 {
+                                                let add_et = if aet == 255 { pick_needed_etype(&board[cur][0], deck_emask[cur]) as u32 } else { aet as u32 };
+                                                slot_add_e(&mut board[cur][0], add_et, h);
+                                                eff_tag = 10; eff_num = h;
+                                            }
                                         }
                                         5 => {
-                                            if rng.flip_coin(&mut guaranteed_heads) { board[cur][0].energy = board[cur][0].energy.saturating_add(cnt); eff_tag = 10; eff_num = cnt as i32; }
+                                            if rng.flip_coin(&mut guaranteed_heads) {
+                                                let add_et = if aet == 255 { pick_needed_etype(&board[cur][0], deck_emask[cur]) as u32 } else { aet as u32 };
+                                                slot_add_e(&mut board[cur][0], add_et, cnt);
+                                                eff_tag = 10; eff_num = cnt;
+                                            }
                                         }
                                         6 => {
                                             let prom = best_bench_promote(&board[cur]);
-                                            if prom < 4 && rng.flip_coin(&mut guaranteed_heads) { board[cur][prom].energy = board[cur][prom].energy.saturating_add(cnt); eff_tag = 10; eff_num = cnt as i32; }
+                                            if prom < 4 && rng.flip_coin(&mut guaranteed_heads) {
+                                                let add_et = if aet == 255 { pick_needed_etype(&board[cur][prom], deck_emask[cur]) as u32 } else { aet as u32 };
+                                                slot_add_e(&mut board[cur][prom], add_et, cnt);
+                                                eff_tag = 10; eff_num = cnt;
+                                            }
                                         }
                                         7 => {
-                                            // Mega Gardevoir ex / Ho-Oh ex: attach 3 energy across bench / board!
+                                            // Ho-Oh ex (+1 [R], +1 [W], +1 [L] to Benched Basic) / Mega Gardevoir ex (+3 [P])
                                             let prom = best_bench_promote(&board[cur]);
                                             let tgt = if prom < 4 { prom } else { 0 };
-                                            board[cur][tgt].energy = board[cur][tgt].energy.saturating_add(cnt);
-                                            eff_tag = 10; eff_num = cnt as i32;
+                                            if aet == 250 {
+                                                slot_add_e(&mut board[cur][tgt], 1, 1);
+                                                slot_add_e(&mut board[cur][tgt], 2, 1);
+                                                slot_add_e(&mut board[cur][tgt], 3, 1);
+                                            } else {
+                                                let add_et = if aet == 255 { pick_needed_etype(&board[cur][tgt], deck_emask[cur]) as u32 } else { aet as u32 };
+                                                slot_add_e(&mut board[cur][tgt], add_et, cnt);
+                                            }
+                                            eff_tag = 10; eff_num = cnt;
                                         }
                                         8 => {
                                             // Move energy from self to Bench (Morpeko 2, Regice 2, Lunala/Mismagius/Swanna ALL)
                                             let prom = best_bench_promote(&board[cur]);
                                             if prom < 4 && board[cur][0].energy > 0 {
-                                                let mv = if cnt >= 99 { board[cur][0].energy } else { cnt.min(board[cur][0].energy) };
-                                                board[cur][0].energy -= mv;
-                                                board[cur][prom].energy = board[cur][prom].energy.saturating_add(mv);
-                                                eff_tag = 10; eff_num = mv as i32;
+                                                let mut src_s = board[cur][0];
+                                                let mut dst_s = board[cur][prom];
+                                                let mv = slot_move_typed_e(&mut src_s, &mut dst_s, aet as u32, cnt);
+                                                board[cur][0] = src_s;
+                                                board[cur][prom] = dst_s;
+                                                if mv > 0 { eff_tag = 10; eff_num = mv; }
                                             }
                                         }
                                         _ => {}
@@ -4341,6 +4959,18 @@ fn simulate_i32_impl<const RECORD: bool>(
                                             }
                                             9 => { board[foe][0].status |= ST_NO_ABILITY; eff_tag = 23; }
                                             10 => { board[foe][0].status |= ST_NO_ENERGY_ATTACH; eff_tag = 23; }
+                                            11 => {
+                                                // Porygon-Z / type scrambler: change 1 attached colored energy to another random type!
+                                                let fm = e_type_mask(board[foe][0].e_pack);
+                                                if fm != 0 {
+                                                    let old_t = fm.trailing_zeros();
+                                                    let new_t = (old_t + 1 + (rng.next_u32() % 7)) & 7;
+                                                    if slot_rem_typed_e(&mut board[foe][0], old_t, 1) > 0 {
+                                                        slot_add_e(&mut board[foe][0], new_t, 1);
+                                                    }
+                                                    eff_tag = 23;
+                                                }
+                                            }
                                             _ => {}
                                         }
                                     }
@@ -4668,8 +5298,9 @@ fn simulate_i32_impl<const RECORD: bool>(
         }
         // Stadium EoT: Soothing Shore (7) heal 20 each w/ energy; Hiking Trail (8) draw until 3!
         if stadium == 7 && !heal_blocked {
+            // Soothing Shore: heal 20 from each own Pokémon with [W] Energy attached
             for s in 0..4 {
-                if board[cur][s].occ && board[cur][s].energy > 0 && board[cur][s].hp < board[cur][s].max_hp {
+                if board[cur][s].occ && e_cnt(board[cur][s].e_pack, 2) > 0 && board[cur][s].hp < board[cur][s].max_hp {
                     board[cur][s].hp = (board[cur][s].hp + 20).min(board[cur][s].max_hp);
                 }
             }
@@ -4690,11 +5321,11 @@ fn simulate_i32_impl<const RECORD: bool>(
                 }
             }
         }
-        // Zeraora Turn-1 EoT +1 energy (ab_op=9, val=5)
+        // Zeraora Turn-1 EoT +1 [L] energy (ab_op=9, val=5)
         if turn <= 2 {
             for s in 0..4 {
                 if board[cur][s].occ && ab_active(&board, cur, s, stadium, turn) && board[cur][s].card.ab_op == 9 && board[cur][s].card.ab_val == 5 {
-                    board[cur][s].energy = board[cur][s].energy.saturating_add(1);
+                    slot_add_e(&mut board[cur][s], 3, 1);
                     if RECORD { push_replay_step(turn, cur, 12, board[cur][s].card.slot_id as i32, 1, 10, &points, &board, &hand_len, &lib_len); }
                 }
             }

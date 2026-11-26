@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { instantiateFastSim } from '../public/battle/fastsim-runtime.mjs';
-import { encodeCardForFastSim, setCardMechanicsDb } from '../public/app/core.mjs';
+import { encodeCardForFastSim, encodeDeckEnergyMask, findDeckEnergyMismatches, packAttackEnergyCost, setCardMechanicsDb } from '../public/app/core.mjs';
+import { areDecksIdentical } from '../public/app/battle.mjs';
 
 const cardsAll = JSON.parse(await readFile(new URL('../public/data/cards.json', import.meta.url), 'utf8'));
 const cardById = new Map(cardsAll.map((c) => [c.id, c]));
@@ -16,7 +17,7 @@ function enc(id) {
   const c = cardById.get(id);
   assert.ok(c, `Card ${id} must exist in cards.json`);
   const e = encodeCardForFastSim(c, 0, cardById);
-  assert.ok(Array.isArray(e.v3Tpl) && e.v3Tpl.length === 23, `Card ${id} must have 23-int v3Tpl`);
+  assert.ok(Array.isArray(e.v3Tpl) && e.v3Tpl.length === 26, `Card ${id} must have 26-int v3Tpl`);
   return e;
 }
 
@@ -26,14 +27,30 @@ function asBasicClone(id, overrides = {}) {
   const tpl = [...base.v3Tpl];
   tpl[1] = (tpl[1] & ~0xff) | 0; // stage = 0
   if (overrides.hp != null) tpl[5] = overrides.hp;
-  if (overrides.a1Cost != null) tpl[7] = (tpl[7] & ~0xff) | (overrides.a1Cost & 0xff);
-  if (overrides.a2Cost != null) tpl[12] = (tpl[12] & ~0xff) | (overrides.a2Cost & 0xff);
-  return { ...base, stage: 0, hp: tpl[5], a1Cost: tpl[7] & 0xff, a2Cost: tpl[12] & 0xff, v3Tpl: tpl };
+  if (overrides.a1Cost != null) {
+    tpl[7] = (tpl[7] & ~0xff) | (overrides.a1Cost & 0xff);
+    if (overrides.a1Ecost == null) tpl[23] = 0; // clear colored req when isolating at synthetic low cost
+  }
+  if (overrides.a2Cost != null) {
+    tpl[12] = (tpl[12] & ~0xff) | (overrides.a2Cost & 0xff);
+    if (overrides.a2Ecost == null) tpl[24] = 0;
+  }
+  if (overrides.a1Ecost != null) tpl[23] = overrides.a1Ecost;
+  if (overrides.a2Ecost != null) tpl[24] = overrides.a2Ecost;
+  if (overrides.deckEnergyMask != null) {
+    return { ...base, stage: 0, hp: tpl[5], a1Cost: tpl[7] & 0xff, a2Cost: tpl[12] & 0xff, a1Ecost: tpl[23], a2Ecost: tpl[24], deckEnergyMask: overrides.deckEnergyMask, v3Tpl: tpl };
+  }
+  return { ...base, stage: 0, hp: tpl[5], a1Cost: tpl[7] & 0xff, a2Cost: tpl[12] & 0xff, a1Ecost: tpl[23], a2Ecost: tpl[24], v3Tpl: tpl };
 }
 
-test('Exact-Mechanics v3: all 4,577 cards compiled with 0 unimplemented effects and clean cards.json text', () => {
+function withEnergyMask(cards, energyList) {
+  const mask = encodeDeckEnergyMask(energyList);
+  return cards.map((c) => ({ ...c, deckEnergyMask: mask }));
+}
+
+test('Exact-Mechanics v4: all 4,577 cards compiled with 0 unimplemented effects, typed costs, and clean cards.json text', () => {
   assert.equal(cardsAll.length, 4577);
-  assert.equal(mechanicsDb.version, 3);
+  assert.equal(mechanicsDb.version, 4);
   assert.equal(mechanicsDb.totalCards, 4577);
   assert.equal(mechanicsDb.coverage.unimplemented, 0);
   assert.ok(mechanicsDb.coverage.uniqueAttackEffects >= 588);
@@ -42,9 +59,9 @@ test('Exact-Mechanics v3: all 4,577 cards compiled with 0 unimplemented effects 
 
   for (const c of cardsAll) {
     const idx = mechanicsDb.cards[c.id];
-    assert.ok(Number.isInteger(idx) && idx >= 0 && idx < mechanicsDb.templates.length, `Missing v3 template for ${c.id}`);
+    assert.ok(Number.isInteger(idx) && idx >= 0 && idx < mechanicsDb.templates.length, `Missing v4 template for ${c.id}`);
     const tpl = mechanicsDb.templates[idx];
-    assert.equal(tpl.length, 23, `Invalid template length for ${c.id}`);
+    assert.equal(tpl.length, 26, `Invalid template length for ${c.id}`);
 
     // Verify clean Chinese text (zero garbled MT / missing-number regressions)
     const texts = [
@@ -448,4 +465,200 @@ test('Live WASM Replay: Mega Kangaskhan ex double-hit, Protective Poncho bench s
   assert.ok(aceStep, 'Acerola must be played on damaged Mimikyu');
   assert.ok(aceStep.board[1].hp < 200, 'Acerola must transfer Mimikyu damage onto opponent Active!');
   assert.equal(aceStep.board[0].hp, 120, 'Acerola must heal the transferred damage off Mimikyu (and NOT bounce Mimikyu to hand)');
+});
+
+test('Typed Energy Zone: Dragonite [W][L][C][C] CANNOT attack in Mono-Fire deck, CAN attack in [Water, Lightning] deck, and replay tracks exact energy types', () => {
+  const dragonite = asBasicClone('A1-185'); // retains exact a1Cost=4 and a1Ecost=[W][L]
+  assert.equal(dragonite.a1Cost, 4);
+  assert.equal(dragonite.a1Ecost, packAttackEnergyCost(['water', 'lightning', 'colorless', 'colorless']));
+  const dummy = asBasicClone('A1-211', { hp: 300, a1Cost: 5 });
+
+  // 1. Mono-Fire Energy Zone: Dragonite never gets [W] or [L] -> 0 attacks across games!
+  for (let seed = 20001; seed <= 20005; seed++) {
+    const repFire = fastSim({
+      op: 'replay_game',
+      deck: withEnergyMask(Array(20).fill(dragonite), ['Fire']),
+      enemy: withEnergyMask(Array(20).fill(dummy), ['Colorless']),
+      weights: W, enemy_weights: W,
+      game_idx: 0, total_per_opp: 100, seed_base: seed
+    });
+    const dragonAtks = repFire.steps.filter((s) => s.kind === 10 && s.actor === 0);
+    assert.equal(dragonAtks.length, 0, 'Dragonite MUST NOT attack with only Fire energy!');
+    const attachSteps = repFire.steps.filter((s) => s.kind === 8 && s.actor === 0);
+    assert.ok(attachSteps.length > 0, 'Mono-Fire deck must still attach Fire energies');
+    for (const s of attachSteps) {
+      assert.equal((s.aux2 >>> 8) & 0xff, 1, 'Mono-Fire turn attachment must be Fire (etype=1)');
+      assert.equal(s.board[0].energyByType[2], 0, 'Water energy count must be 0');
+      assert.equal(s.board[0].energyByType[3], 0, 'Lightning energy count must be 0');
+      assert.ok(s.board[0].energyByType[1] >= 1, 'Fire energy count must be >= 1');
+    }
+  }
+
+  // 2. Dual-color [Water, Lightning] Energy Zone: generates both types and Dragonite attacks!
+  let sawBothTypesAndAttack = false;
+  for (let seed = 20010; seed <= 20025; seed++) {
+    const repWL = fastSim({
+      op: 'replay_game',
+      deck: withEnergyMask(Array(20).fill(dragonite), ['Water', 'Lightning']),
+      enemy: withEnergyMask(Array(20).fill(dummy), ['Fire']),
+      weights: W, enemy_weights: W,
+      game_idx: 0, total_per_opp: 100, seed_base: seed
+    });
+    const attachedTypes = new Set(repWL.steps.filter((s) => s.kind === 8 && s.actor === 0).map((s) => (s.aux2 >>> 8) & 0xff));
+    const atkStep = repWL.steps.find((s) => s.kind === 10 && s.actor === 0);
+    if (attachedTypes.has(2) && attachedTypes.has(3) && atkStep) {
+      assert.ok(atkStep.board[0].energyByType[2] >= 1, 'Attacking Dragonite must have >=1 Water energy');
+      assert.ok(atkStep.board[0].energyByType[3] >= 1, 'Attacking Dragonite must have >=1 Lightning energy');
+      assert.ok(atkStep.board[0].energy >= 4, 'Attacking Dragonite must have >=4 total energy');
+      sawBothTypesAndAttack = true;
+      break;
+    }
+  }
+  assert.equal(sawBothTypesAndAttack, true, 'Dragonite in [Water, Lightning] deck must receive both energy types and execute Draco Meteor!');
+});
+
+test('Typed Energy Mechanics: Serperior doubles ONLY [G] energy on [G] Pokémon (never [R] energy)', () => {
+  // Serperior with 2-Colorless attack cost: 1 [G] doubles to 2 (can attack Turn 2), 1 [R] stays 1 (cannot attack Turn 2)
+  const serpCC = asBasicClone('A1a-006', { a1Cost: 2, a1Ecost: 0 });
+  const dummy = asBasicClone('A1-211', { hp: 250, a1Cost: 5 });
+
+  // Mono-Grass: player 0 goes second (game_idx=50 -> first=1, so player 0's first turn is Turn 2!)
+  const repGrass = fastSim({
+    op: 'replay_game',
+    deck: withEnergyMask(Array(20).fill(serpCC), ['Grass']),
+    enemy: withEnergyMask(Array(20).fill(dummy), ['Fire']),
+    weights: W, enemy_weights: W,
+    game_idx: 50, total_per_opp: 100, seed_base: 20101
+  });
+  const grassTurn2Atk = repGrass.steps.find((s) => s.turn === 2 && s.kind === 10 && s.actor === 0);
+  assert.ok(grassTurn2Atk, 'Serperior with 1 [G] energy MUST count as 2 energy and attack on Turn 2!');
+  assert.equal(grassTurn2Atk.board[0].energy, 1);
+  assert.equal(grassTurn2Atk.board[0].energyByType[0], 1, 'Grass energy count on Serperior must be 1');
+
+  // Mono-Fire: 1 [R] energy on Serperior does NOT double -> CANNOT attack on Turn 2!
+  const repFire = fastSim({
+    op: 'replay_game',
+    deck: withEnergyMask(Array(20).fill(serpCC), ['Fire']),
+    enemy: withEnergyMask(Array(20).fill(dummy), ['Fire']),
+    weights: W, enemy_weights: W,
+    game_idx: 50, total_per_opp: 100, seed_base: 20101
+  });
+  const fireTurn2Atk = repFire.steps.find((s) => s.turn === 2 && s.kind === 10 && s.actor === 0);
+  assert.equal(fireTurn2Atk, undefined, 'Serperior MUST NOT double [R] energy on a [G] Pokémon!');
+});
+
+test('Typed Energy Mechanics: Entei ex extra-energy threshold requires 4 [R] (2 [R] + 2 [W] does NOT trigger +60)', () => {
+  const entei = enc('A4a-010'); // Blazing Beat: [R][R] 60+, +60 if 2 extra [R] (total 4 [R])
+  const dummy = asBasicClone('A1-211', { hp: 300, a1Cost: 5 });
+
+  // Mono-Fire: at 4 [R], deals 120!
+  const repMonoFire = fastSim({
+    op: 'replay_game',
+    deck: withEnergyMask(Array(20).fill(entei), ['Fire']),
+    enemy: withEnergyMask(Array(20).fill(dummy), ['Water']),
+    weights: W, enemy_weights: W,
+    game_idx: 50, total_per_opp: 100, seed_base: 20201
+  });
+  const boostedHit = repMonoFire.steps.find((s) => s.kind === 10 && s.actor === 0 && s.board[0].energyByType[1] >= 4 && s.aux1 >= 120);
+  assert.ok(boostedHit, 'Entei ex with 4 [R] energy must trigger +60 -> 120 damage!');
+
+  // Fire + Water mixed: whenever Entei ex has >=4 total energy but <4 [R] energy, damage MUST stay 60 (never 120)!
+  let sawMixed4EnergyHit = false;
+  for (let seed = 20210; seed <= 20245; seed++) {
+    const repMix = fastSim({
+      op: 'replay_game',
+      deck: withEnergyMask(Array(20).fill(entei), ['Fire', 'Water']),
+      enemy: withEnergyMask(Array(20).fill(dummy), ['Water']),
+      weights: W, enemy_weights: W,
+      game_idx: 50, total_per_opp: 100, seed_base: seed
+    });
+    for (const s of repMix.steps) {
+      if (s.kind === 10 && s.actor === 0 && s.board[0].energy >= 4 && s.board[0].energyByType[1] < 4) {
+        assert.equal(s.aux1, 60, `Entei ex with ${s.board[0].energyByType[1]} [R] and ${s.board[0].energy} total energy MUST deal 60 (not 120)!`);
+        sawMixed4EnergyHit = true;
+      }
+    }
+    if (sawMixed4EnergyHit) break;
+  }
+  assert.equal(sawMixed4EnergyHit, true, 'Must verify Entei ex with >=4 total energy but <4 [R] energy deals base 60');
+});
+
+test('Typed Energy Mechanics: Irida heals ONLY Pokémon with [W] energy & Darkrai ex chips ONLY on [D] attachment', () => {
+  // 1. Irida (A2a-072): heals damaged Pokémon in [Water] deck, cannot heal in [Fire] deck!
+  const tank = asBasicClone('A1-211', { hp: 200, a1Cost: 5 });
+  const irida = enc('A2a-072');
+  const chipper = asBasicClone('B1-109', { hp: 200, a1Cost: 0 }); // 10 dmg every turn
+
+  const repWaterIrida = fastSim({
+    op: 'replay_game',
+    deck: withEnergyMask([...Array(10).fill(tank), ...Array(10).fill(irida)], ['Water']),
+    enemy: withEnergyMask(Array(20).fill(chipper), ['Fire']),
+    weights: W, enemy_weights: W,
+    game_idx: 50, total_per_opp: 100, seed_base: 20301
+  });
+  const iridaWaterPlayed = repWaterIrida.steps.some((s) => s.kind === 6 && s.actor === 0 && s.aux1 === 2);
+  assert.equal(iridaWaterPlayed, true, 'Irida must heal damaged Pokémon that have [W] energy attached');
+
+  const repFireIrida = fastSim({
+    op: 'replay_game',
+    deck: withEnergyMask([...Array(10).fill(tank), ...Array(10).fill(irida)], ['Fire']),
+    enemy: withEnergyMask(Array(20).fill(chipper), ['Fire']),
+    weights: W, enemy_weights: W,
+    game_idx: 50, total_per_opp: 100, seed_base: 20301
+  });
+  const iridaFirePlayed = repFireIrida.steps.some((s) => s.kind === 6 && s.actor === 0 && s.aux1 === 2);
+  assert.equal(iridaFirePlayed, false, 'Irida MUST NOT heal Pokémon that only have [R] energy (no [W] energy)!');
+
+  // 2. Darkrai ex (A2-110): Nightmare Aura chips 20 ONLY when attaching [D] energy (emits kind=7 aux2&0xff===9)!
+  const darkrai = enc('A2-110');
+  const repDark = fastSim({
+    op: 'replay_game',
+    deck: withEnergyMask(Array(20).fill(darkrai), ['Darkness']),
+    enemy: withEnergyMask(Array(20).fill(tank), ['Fire']),
+    weights: W, enemy_weights: W,
+    game_idx: 50, total_per_opp: 100, seed_base: 20302
+  });
+  const darkTurn2Chip = repDark.steps.find((s) => s.turn === 2 && s.kind === 7 && s.actor === 0 && (s.aux2 & 0xff) === 9);
+  assert.ok(darkTurn2Chip, 'Darkrai ex Nightmare Aura must fire on Turn 2 when attaching [D] energy!');
+  assert.equal(darkTurn2Chip.board[1].hp, 180, 'Darkrai ex Nightmare Aura must deal 20 chip when attaching [D] energy!');
+
+  const repFireDark = fastSim({
+    op: 'replay_game',
+    deck: withEnergyMask(Array(20).fill(darkrai), ['Fire']),
+    enemy: withEnergyMask(Array(20).fill(tank), ['Fire']),
+    weights: W, enemy_weights: W,
+    game_idx: 50, total_per_opp: 100, seed_base: 20302
+  });
+  const fireTurn2Chip = repFireDark.steps.find((s) => s.kind === 7 && s.actor === 0 && (s.aux2 & 0xff) === 9);
+  assert.equal(fireTurn2Chip, undefined, 'Darkrai ex MUST NOT trigger Nightmare Aura when attaching [R] energy!');
+  const fireTurn2Attach = repFireDark.steps.find((s) => s.turn === 2 && s.kind === 8 && s.actor === 0);
+  assert.ok(fireTurn2Attach, 'Darkrai ex attaches [R] energy on Turn 2 in Mono-Fire deck');
+  assert.equal(fireTurn2Attach.board[1].hp, 200, 'Opponent HP must stay full 200 when attaching [R] energy!');
+});
+
+test('Deck Energy Helpers: findDeckEnergyMismatches & areDecksIdentical respect Energy Zone differences', () => {
+  // Dragonite in Mono-Fire flags both Water & Lightning missing
+  const m1 = findDeckEnergyMismatches({ cards: [{ id: 'A1-185', count: 2 }], energy: ['Fire'] }, cardById);
+  assert.equal(m1.length, 1);
+  assert.deepEqual([...m1[0].missingTypes].sort(), ['Lightning', 'Water']);
+
+  // Dragonite in [Water, Lightning] has 0 mismatches
+  const m2 = findDeckEnergyMismatches({ cards: [{ id: 'A1-185', count: 2 }], energy: ['Water', 'Lightning'] }, cardById);
+  assert.equal(m2.length, 0);
+
+  // Giratina ex in Mono-Darkness self-generates Psychic -> 0 mismatches!
+  const m3 = findDeckEnergyMismatches({ cards: [{ id: 'A2b-035', count: 2 }, { id: 'A2-110', count: 2 }], energy: ['Darkness'] }, cardById);
+  assert.equal(m3.length, 0);
+
+  // Magneton (A1-098) self-generates Lightning -> no Lightning mismatch even in Mono-Fire deck!
+  const m4 = findDeckEnergyMismatches({ cards: [{ id: 'A1-098', count: 2 }], energy: ['Fire'] }, cardById);
+  assert.equal(m4.length, 0);
+
+  // areDecksIdentical distinguishes identical 20 cards with different Energy Zones
+  const dFire = { cards: [{ id: 'A4a-010', count: 2 }], energy: ['Fire'] };
+  const dWater = { cards: [{ id: 'A4a-010', count: 2 }], energy: ['Water'] };
+  const dWL1 = { cards: [{ id: 'A1-185', count: 2 }], energy: ['Water', 'Lightning'] };
+  const dWL2 = { cards: [{ id: 'A1-185', count: 2 }], energy: ['Lightning', 'Water'] };
+  assert.equal(areDecksIdentical(dFire, dWater), false, 'Same cards with different Energy Zone must NOT be identical');
+  assert.equal(areDecksIdentical(dWL1, dWL2), true, 'Same cards with same Energy Zone in different order MUST be identical');
 });

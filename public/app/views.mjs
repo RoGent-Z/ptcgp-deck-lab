@@ -5,6 +5,7 @@ import {
   evaluateDeckOwnership,
   EXPLORE_GAMES_PER_OPPONENT,
   EXPLORE_TOTAL_GAMES,
+  findDeckEnergyMismatches,
   FIRST_SEAT_GAMES,
   GAMES_PER_OPPONENT,
   getPokemonCategories,
@@ -79,6 +80,28 @@ function renderPokemonPicker(deck, mode = 'draft') {
 function renderValidationIssues(valid, issues, extraClass = '') {
   if (valid || !issues.length) return '';
   return `<div class="draft-validation ${extraClass} is-invalid"><ul class="val-issues">${issues.map((s) => `<li>${esc(s)}</li>`).join('')}</ul></div>`;
+}
+
+function renderDeckEnergyMismatchWarn(deck, prefix = '能量區', extraClass = '') {
+  if (!deck || state.cardsMissing) return '';
+  const mismatches = findDeckEnergyMismatches(deck, state.cardsById);
+  if (!mismatches.length) return '';
+  const itemsHtml = mismatches.slice(0, 4).map((m) =>
+    `<b>${esc(m.cardName)}</b>（${esc(m.attackName)} 需 ${(m.missingTypes || []).map((e) => renderEnergyToken(e, 'xs')).join('')}）`
+  ).join('、');
+  const more = mismatches.length > 4 ? ` 等 ${mismatches.length} 項` : '';
+  return `<div class="status-note is-warn ${extraClass}"><span>${esc(prefix)}未包含 ${itemsHtml}${more}，對戰時該招式將無法發動，請前往牌組區確認能量設定。</span></div>`;
+}
+
+function renderBattleDeckEnergyBar(deck, label = '能量區') {
+  if (!deck) return '';
+  const tokens = (deck.energy || []).map((e) => renderEnergyToken(e, 'sm')).join('');
+  return `
+    <div class="battle-energy-bar">
+      <span class="battle-energy-label">${esc(label)}</span>
+      <span class="tokens-inline">${tokens || '<small class="muted">未設定（依牌組自動推斷）</small>'}</span>
+    </div>
+  `;
 }
 
 const ENERGY_ORDER = ['Grass', 'Fire', 'Water', 'Lightning', 'Psychic', 'Fighting', 'Darkness', 'Metal'];
@@ -845,6 +868,7 @@ export function renderDecks() {
       </div>
       <div class="block-gap">${viewBody}</div>
       ${renderValidationIssues(isValid, issues, 'block-gap')}
+      ${renderDeckEnergyMismatchWarn(selected, '此牌組能量區', 'block-gap')}
     `;
   }
 
@@ -1177,6 +1201,7 @@ export function renderBattle() {
                 disabled: !decks.length || uiState.battle.duelRunning,
                 options: deckOptions
               })}
+              ${renderBattleDeckEnergyBar(duelDeckA, '我方能量區')}
             </div>
             <div class="field-label">
               <span>對手牌組（B）</span>
@@ -1188,9 +1213,12 @@ export function renderBattle() {
                 disabled: !decks.length || uiState.battle.duelRunning,
                 options: deckOptions
               })}
+              ${renderBattleDeckEnergyBar(duelDeckB, '對手能量區')}
             </div>
             ${duelDeckA && !duelALegal ? `<div class="status-note is-warn">我方牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
             ${duelDeckB && !duelBLegal ? `<div class="status-note is-warn">對手牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
+            ${renderDeckEnergyMismatchWarn(duelDeckA, '我方牌組能量區')}
+            ${renderDeckEnergyMismatchWarn(duelDeckB, '對手牌組能量區')}
             ${duelUnsupportedA.length ? `<div class="status-note is-warn">我方牌組含暫不支援對戰模擬的卡牌：${duelUnsupportedA.map((c) => esc(c.id)).join('、')}</div>` : ''}
             ${duelUnsupportedB.length ? `<div class="status-note is-warn">對手牌組含暫不支援對戰模擬的卡牌：${duelUnsupportedB.map((c) => esc(c.id)).join('、')}</div>` : ''}
             ${!state.engineReady ? `<div class="status-note">${esc(state.engineError || '對戰模擬功能載入中…')}</div>` : ''}
@@ -1247,6 +1275,7 @@ export function renderBattle() {
                 ? decks.map((d) => ({ value: d.id, label: `${d.name} (${deckTotalCount(d)}/20)` }))
                 : [{ value: '', label: '尚無已儲存牌組（可下方一鍵匯入榜首）' }]
             })}
+            ${renderBattleDeckEnergyBar(selectedDeck, '目前能量區')}
           </div>
           <div class="field-label">
             <span>模擬模式</span>
@@ -1260,6 +1289,7 @@ export function renderBattle() {
             })}
           </div>
           ${selectedDeck && !deckLegal ? `<div class="status-note is-warn">目前選中的牌組未符合 20 張合法規則，請先至「卡牌圖鑑」補齊。</div>` : ''}
+          ${renderDeckEnergyMismatchWarn(selectedDeck, '目前能量區')}
           ${unsupportedDeckCards.length ? `<div class="status-note is-warn">以下卡牌暫不支援對戰模擬：${unsupportedDeckCards.map((c) => esc(c.id)).join('、')}</div>` : ''}
           ${!state.engineReady ? `<div class="status-note">${esc(state.engineError || '對戰模擬功能載入中…')}</div>` : ''}
         </div>
@@ -1349,7 +1379,7 @@ export function buildCardDetailModal(card) {
     <div class="modal-move">
       <div class="modal-move-head">
         <strong>${esc(a.name)}</strong>
-        <span>${(a.cost || []).map((c) => renderEnergyToken(c, 'sm')).join('')} <b>${esc(a.damage || '')}</b></span>
+        <span class="move-cost-dmg">${(a.cost || []).length ? (a.cost || []).map((c) => renderEnergyToken(c, 'sm')).join('') : '<span class="cost-zero-badge">0能</span>'} <b>${esc(a.damage || '')}</b></span>
       </div>
       ${a.effect ? `<p class="desc">${esc(a.effect)}</p>` : ''}
     </div>

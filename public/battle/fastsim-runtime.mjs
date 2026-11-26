@@ -6,26 +6,56 @@ const MAX_ENEMIES = 10;
 const MAX_CANDS = 40;
 const moduleCache = new WeakMap();
 
-function packCardFields(buf, off, c, slotId) {
+function inferDeckEnergyMask(compactCards) {
+  const explicit = Number(compactCards?.[0]?.deckEnergyMask || 0) & 0xff;
+  if (explicit) return explicit;
+  const score = [0, 0, 0, 0, 0, 0, 0, 0];
+  for (const c of Array.isArray(compactCards) ? compactCards : []) {
+    if (!c) continue;
+    const e1 = (Array.isArray(c.v3Tpl) && c.v3Tpl.length >= 26) ? (c.v3Tpl[23] >>> 0) : ((c.a1Ecost || 0) >>> 0);
+    const e2 = (Array.isArray(c.v3Tpl) && c.v3Tpl.length >= 26) ? (c.v3Tpl[24] >>> 0) : ((c.a2Ecost || 0) >>> 0);
+    for (let t = 0; t < 8; t++) {
+      const n = ((e1 >>> (t * 4)) & 0xf) + ((e2 >>> (t * 4)) & 0xf);
+      if (n > 0) score[t] += n * 4;
+    }
+    const tc = c.typeCode;
+    if (c.isPokemon && tc >= 0 && tc < 8) score[tc] += 1;
+  }
+  const ranked = score
+    .map((s, t) => ({ t, s }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 3);
+  let mask = 0;
+  for (const r of ranked) mask |= (1 << r.t);
+  return (mask || 0x02) & 0xff;
+}
+
+function packCardFields(buf, off, c, slotId, deckEnergyMask = 0x02) {
+  const emask = (Number(c.deckEnergyMask || deckEnergyMask || 0x02) & 0xff) || 0x02;
   if (Array.isArray(c.v3Tpl) && c.v3Tpl.length >= 23) {
     for (let i = 0; i < 23; i++) buf[off + i] = c.v3Tpl[i] | 0;
+    let a1Ecost = c.v3Tpl.length >= 26 ? (c.v3Tpl[23] | 0) : 0;
+    let a2Ecost = c.v3Tpl.length >= 26 ? (c.v3Tpl[24] | 0) : 0;
+    const effEtypes = c.v3Tpl.length >= 26 ? (c.v3Tpl[25] >>> 0) : 0xffffff;
     // Apply optimizer override if card was marked incompatible (stage===99 or disabled attack/trainer)
     if (c.stage === 99) {
       buf[off + 1] = (buf[off + 1] & ~0xff) | 99;
       buf[off + 7] = 255; buf[off + 8] = 0; buf[off + 9] = 0; buf[off + 10] = 0; buf[off + 11] = 0;
       buf[off + 12] = 255; buf[off + 13] = 0; buf[off + 14] = 0; buf[off + 15] = 0; buf[off + 16] = 0;
       buf[off + 17] = 0; buf[off + 18] = 0;
+      a1Ecost = 0; a2Ecost = 0;
     } else if (c.isPokemon === 0 && c.trainerKind === 0) {
       buf[off + 19] = 0; buf[off + 20] = 0;
     } else if (c.isPokemon === 1) {
-      if (c.a1Cost === 255) { buf[off + 7] = 255; buf[off + 8] = 0; buf[off + 9] = 0; buf[off + 10] = 0; buf[off + 11] = 0; }
-      if (c.a2Cost === 255) { buf[off + 12] = 255; buf[off + 13] = 0; buf[off + 14] = 0; buf[off + 15] = 0; buf[off + 16] = 0; }
+      if (c.a1Cost === 255) { buf[off + 7] = 255; buf[off + 8] = 0; buf[off + 9] = 0; buf[off + 10] = 0; buf[off + 11] = 0; a1Ecost = 0; }
+      if (c.a2Cost === 255) { buf[off + 12] = 255; buf[off + 13] = 0; buf[off + 14] = 0; buf[off + 15] = 0; buf[off + 16] = 0; a2Ecost = 0; }
     }
     buf[off + 23] = slotId | 0;
     buf[off + 24] = 0;
-    buf[off + 25] = 0;
-    buf[off + 26] = 0;
-    buf[off + 27] = 0;
+    buf[off + 25] = a1Ecost | 0;
+    buf[off + 26] = a2Ecost | 0;
+    buf[off + 27] = (emask | ((effEtypes & 0xffffff) << 8)) | 0;
     return;
   }
   // Fallback packing for synthetic unit-test cards without a v3 template
@@ -42,6 +72,7 @@ function packCardFields(buf, off, c, slotId) {
   const a1Dmg = c.a1Cost !== undefined ? c.a1Dmg : (c.atkDmg ?? 0);
   const a2Cost = c.a2Cost !== undefined ? c.a2Cost : 255;
   const a2Dmg = c.a2Cost !== undefined ? c.a2Dmg : 0;
+  const effEtypes = (c.effEtypes ?? 0xffffff) >>> 0;
   buf[off] = c.isPokemon | 0;
   buf[off + 1] = meta | 0;
   buf[off + 2] = (255 << 24) | 0;
@@ -67,9 +98,9 @@ function packCardFields(buf, off, c, slotId) {
   buf[off + 22] = 0;
   buf[off + 23] = slotId | 0;
   buf[off + 24] = 0;
-  buf[off + 25] = 0;
-  buf[off + 26] = 0;
-  buf[off + 27] = 0;
+  buf[off + 25] = (c.a1Ecost || 0) | 0;
+  buf[off + 26] = (c.a2Ecost || 0) | 0;
+  buf[off + 27] = (emask | ((effEtypes & 0xffffff) << 8)) | 0;
 }
 
 async function compileFastModule(wasmSource) {
@@ -95,9 +126,10 @@ export async function instantiateFastSim(wasmSource) {
     const decks = new Int32Array(mem.buffer, ex.get_decks_ptr(), 12 * 20 * CARD_STRIDE);
     const bonuses = new Int32Array(mem.buffer, ex.get_bonus_ptr(), 12 * 20);
     const baseCard = slot * 20;
+    const mask = inferDeckEnergyMask(compactCards);
     for (let i = 0; i < 20; i++) {
       const c = compactCards[i] || compactCards[0];
-      packCardFields(decks, (baseCard + i) * CARD_STRIDE, c, i);
+      packCardFields(decks, (baseCard + i) * CARD_STRIDE, c, i, mask);
       bonuses[baseCard + i] = Math.round(Number(c.strategyBonus || 0) * 1024);
     }
   };
@@ -254,6 +286,33 @@ export async function instantiateFastSim(wasmSource) {
       const u32 = new Uint32Array(mem.buffer, ex.get_out_u32_ptr(), 8);
       const raw = new Int32Array(mem.buffer, ex.get_replay_ptr(), stepCount * 24);
       const steps = [];
+      const decodeBoardSide = (rawArr, bo) => {
+        const ePack = rawArr[bo + 3] >>> 0;
+        const toolRaw = rawArr[bo + 7] >>> 0;
+        const totalEnergy = (toolRaw >>> 16) & 0xff;
+        const energyByType = [0, 0, 0, 0, 0, 0, 0, 0];
+        let typedSum = 0;
+        for (let t = 0; t < 8; t++) {
+          const cnt = (ePack >>> (t * 4)) & 0xf;
+          energyByType[t] = cnt;
+          typedSum += cnt;
+        }
+        const energy = totalEnergy > 0 || typedSum > 0 ? Math.max(totalEnergy, typedSum) : 0;
+        const colorlessEnergy = Math.max(0, energy - typedSum);
+        return {
+          cardIdx: rawArr[bo],
+          hp: rawArr[bo + 1],
+          maxHp: rawArr[bo + 2],
+          energy,
+          ePack,
+          energyByType,
+          colorlessEnergy,
+          bench: rawArr[bo + 4],
+          hand: rawArr[bo + 5],
+          deck: rawArr[bo + 6],
+          tool: toolRaw & 0xffff
+        };
+      };
       for (let i = 0; i < stepCount; i++) {
         const o = i * 24;
         steps.push({
@@ -265,26 +324,8 @@ export async function instantiateFastSim(wasmSource) {
           aux2: raw[o + 5],
           points: [raw[o + 6], raw[o + 7]],
           board: [
-            {
-              cardIdx: raw[o + 8],
-              hp: raw[o + 9],
-              maxHp: raw[o + 10],
-              energy: raw[o + 11],
-              bench: raw[o + 12],
-              hand: raw[o + 13],
-              deck: raw[o + 14],
-              tool: raw[o + 15]
-            },
-            {
-              cardIdx: raw[o + 16],
-              hp: raw[o + 17],
-              maxHp: raw[o + 18],
-              energy: raw[o + 19],
-              bench: raw[o + 20],
-              hand: raw[o + 21],
-              deck: raw[o + 22],
-              tool: raw[o + 23]
-            }
+            decodeBoardSide(raw, o + 8),
+            decodeBoardSide(raw, o + 16)
           ]
         });
       }
@@ -320,9 +361,10 @@ export async function instantiateFastSim(wasmSource) {
 
       const cBuf = new Int32Array(mem.buffer, ex.get_cand_cards_ptr(), 256 * CARD_STRIDE);
       const cBonus = new Int32Array(mem.buffer, ex.get_cand_bonus_ptr(), 256);
+      const baseMask = inferDeckEnergyMask(req.base_deck);
       for (let i = 0; i < nCands; i++) {
         const c = candCards[i];
-        packCardFields(cBuf, i * CARD_STRIDE, c, 19);
+        packCardFields(cBuf, i * CARD_STRIDE, c, 19, baseMask);
         cBonus[i] = Math.round(Number(c.strategyBonus || 0) * 1024);
       }
 

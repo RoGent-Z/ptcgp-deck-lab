@@ -661,7 +661,10 @@ test("deployed models (1B5M全量模型, 1M5Q轻量模型, GTG精英轻量模型
 
   const { areDecksIdentical, countDeckDifferences, runGtgDuelConvergence } = await import("../public/app/battle.mjs");
   // Verify mirror detection & card diff counter for custom-deck GTG duel
-  const reorderedDeck0 = { cards: [...top10[0].representative.cards].reverse() };
+  const reorderedDeck0 = {
+    cards: [...top10[0].representative.cards].reverse(),
+    energy: [...(top10[0].representative.energy || [])].reverse()
+  };
   assert.equal(areDecksIdentical(top10[0].representative, reorderedDeck0), true);
   assert.equal(countDeckDifferences(top10[0].representative, reorderedDeck0), 0);
   assert.equal(areDecksIdentical(top10[0].representative, top10[1].representative), false);

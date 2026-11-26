@@ -9,6 +9,8 @@ import {
   DEEP_EXPLORE_GAMES,
   DEEP_GAMES_PER_OPPONENT,
   encodeCardForFastSim,
+  encodeDeckEnergyMask,
+  ENERGY_TYPE_KEYS,
   energyNames,
   EXPLORE_CANDIDATE_COUNT,
   EXPLORE_GAMES_PER_OPPONENT,
@@ -420,7 +422,8 @@ function expandDeckForFastSim(deckLike, cardBonusById = {}) {
     }
   }
   while (out.length < 20 && out.length > 0) out.push(out[0]);
-  return out;
+  const mask = encodeDeckEnergyMask(deckLike?.energy, out);
+  return out.map((c) => ({ ...c, deckEnergyMask: mask }));
 }
 
 export function ensureCardCoverage(ids = []) {
@@ -1405,10 +1408,51 @@ function expandCardObjs20(deckLike) {
   return out;
 }
 
+function renderTypedEnergyInline(energyByType, colorlessEnergy, totalEnergy) {
+  const tot = Number(totalEnergy || 0);
+  if (tot <= 0) return '無能量';
+  const parts = [];
+  if (Array.isArray(energyByType)) {
+    for (let t = 0; t < 8; t++) {
+      const cnt = Number(energyByType[t] || 0);
+      if (cnt > 0) {
+        parts.push(`<span class="flow-e-item">${renderEnergyToken(ENERGY_TYPE_KEYS[t], 'xs')}${cnt > 1 ? `<small class="flow-e-cnt">×${cnt}</small>` : ''}</span>`);
+      }
+    }
+  }
+  const cCnt = Number(colorlessEnergy || 0);
+  if (cCnt > 0) {
+    parts.push(`<span class="flow-e-item">${renderEnergyToken('Colorless', 'xs')}${cCnt > 1 ? `<small class="flow-e-cnt">×${cCnt}</small>` : ''}</span>`);
+  }
+  if (!parts.length) return `${tot}能`;
+  return `<span class="flow-energy-list">${parts.join('')}</span>`;
+}
+
+function renderAttackCostInline(costArr) {
+  if (!Array.isArray(costArr) || costArr.length === 0) {
+    return '<span class="flow-atk-cost"><span class="cost-zero-badge">0能</span></span>';
+  }
+  return `<span class="flow-atk-cost">${costArr.map((c) => renderEnergyToken(c, 'xs')).join('')}</span>`;
+}
+
+function renderEtypeTag(etype) {
+  if (etype >= 0 && etype < 8) {
+    const k = ENERGY_TYPE_KEYS[etype];
+    return `${renderEnergyToken(k, 'xs')}${translateEnergyZh(k)}`;
+  }
+  if (etype === 9) return `${renderEnergyToken('Colorless', 'xs')}無色`;
+  if (etype === 250) return `${renderEnergyToken('Fire', 'xs')}${renderEnergyToken('Water', 'xs')}${renderEnergyToken('Lightning', 'xs')}`;
+  if (etype === 251) return `${renderEnergyToken('Water', 'xs')}${renderEnergyToken('Lightning', 'xs')}`;
+  return '';
+}
+
 function formatFastSimStepZh(step, myCards20, oppCards20) {
   const actorCards = step.actor === 0 ? myCards20 : oppCards20;
   const card = step.cardIdx >= 0 && step.cardIdx < actorCards.length ? actorCards[step.cardIdx] : null;
-  const cName = card?.name || '寶可夢';
+  const cName = esc(card?.name || '寶可夢');
+  const tpl = getCardV3Template(card?.id);
+  const abTrnEt = tpl && tpl.length >= 26 ? (tpl[25] & 0xff) : 255;
+  const abEtTag = renderEtypeTag(abTrnEt);
   switch (step.kind) {
     case 1:
       return `開局將「${cName}」放置於戰鬥場`;
@@ -1423,7 +1467,7 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
     case 5: {
       const trig = step.aux2;
       const trigMap = {
-        1: '，觸發進化特性（為戰鬥場額外附著 1 顆能量）',
+        1: `，觸發進化特性（為戰鬥場額外附著 1 顆 ${abEtTag}能量）`,
         2: '，觸發進化特性（從牌庫抽出 2 張卡）',
         3: '，觸發進化特性（從牌庫召喚同類分身至備戰區）',
         4: '，觸發進化特性（對對手戰鬥場造成傷害）',
@@ -1439,7 +1483,6 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
     case 6: {
       const tk = step.aux1;
       const val = step.aux2;
-      const tpl = getCardV3Template(card?.id);
       const sub = tpl ? ((tpl[19] >>> 8) & 0xff) : 0;
       if (tk === 1) {
         if (sub === 2) return `施放物品卡「${cName}」（從牌庫檢索 1 張基礎寶可夢加入手牌）`;
@@ -1460,11 +1503,12 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
         return `施放訓練家卡「${cName}」（從牌庫抽出 ${Math.max(1, Math.min(3, val || 1))} 張卡牌）`;
       }
       if (tk === 2) {
-        if (sub === 3) return `施放恢復卡「${cName}」（為所有附有水能量的寶可夢各恢復 40 點體力）`;
+        if (sub === 3) return `施放恢復卡「${cName}」（為所有附有 ${renderEnergyToken('Water', 'xs')}水能量的寶可夢各恢復 40 點體力）`;
         if (sub === 6) return `施放物品卡「${cName}」（解除戰鬥場全部異常狀態）`;
         if (sub === 7) return `施放物品卡「${cName}」（恢復戰鬥場 10 點體力並解除異常狀態）`;
         if (sub === 8) return `施放物品卡「${cName}」（恢復戰鬥場 20 點體力，正面時放回手牌）`;
         if (sub === 9) return `施放物品卡「${cName}」（擲硬幣恢復戰鬥場 ${Math.max(0, val)} 點體力）`;
+        if (sub === 11) return `施放支援者卡「${cName}」（棄置 2 顆 ${renderEnergyToken('Psychic', 'xs')}超能量並恢復體力）`;
         if (sub === 12) return `施放支援者卡「${cName}」（完全恢復體力並棄置全部能量）`;
         if (sub === 15) return `施放物品卡「${cName}」（為伊布進化型恢復體力或強化招式傷害 +10）`;
         if (sub === 16) return `施放支援者卡「${cName}」（將己方受傷點數最多 40 點轉移至對手戰鬥場）`;
@@ -1483,7 +1527,7 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
         if (sub === 9) return `施放干擾卡「${cName}」（將對手隨機 1 張手牌放回牌庫）`;
         if (sub === 10) return `施放干擾卡「${cName}」（丟棄場上寶可夢道具）`;
         if (sub === 11) return `施放物品卡「${cName}」（移除場上道具或競技場）`;
-        if (sub === 12 || sub === 13 || sub === 14) return `施放干擾卡「${cName}」（破壞對手寶可夢能量）`;
+        if (sub === 12 || sub === 13 || sub === 14) return `施放干擾卡「${cName}」（破壞對手寶可夢 ${abEtTag}能量）`;
         if (sub === 15) return `施放干擾卡「${cName}」（令戰鬥寶可夢混亂）`;
         if (sub === 16) return `施放物品卡「${cName}」（增加對手撤退費用）`;
         if (sub === 17 || sub === 18) return `施放干擾卡「${cName}」（強制將對手基礎寶可夢放上備戰區）`;
@@ -1537,11 +1581,15 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
         if (sub === 2) return `施放「${cName}」（直接從牌庫進化寶可夢）`;
         if (sub === 3) return `施放「${cName}」（本回合撤退費用 -${val || 1}）`;
         if (sub === 4) return `施放支援者卡「${cName}」（免費將戰鬥寶可夢與備戰互換）`;
-        if (sub === 5) return `施放支援者卡「${cName}」（擲硬幣獲得 ${Math.max(0, val)} 顆水能量）`;
-        if (sub === 13) return `施放支援者卡「${cName}」（附著 2 顆火能量並結束回合）`;
-        if (sub === 14 || sub === 15) return `施放「${cName}」（將備戰區能量轉移至戰鬥場）`;
-        if (sub === 16) return `施放支援者卡「${cName}」（本回合指定寶可夢招式能耗 -2）`;
-        return `施放充能卡「${cName}」（額外補充能量）`;
+        if (sub === 5) return `施放支援者卡「${cName}」（擲硬幣獲得 ${Math.max(0, val)} 顆 ${renderEnergyToken('Water', 'xs')}水能量）`;
+        if (sub === 6) return `施放物品卡「${cName}」（擲硬幣為備戰區附著 ${renderEnergyToken('Lightning', 'xs')}雷能量）`;
+        if (sub === 7) return `施放支援者卡「${cName}」（為 2 階進化附著 1 顆 ${renderEnergyToken('Colorless', 'xs')}無色能量）`;
+        if (sub === 8) return `施放物品卡「${cName}」（為戰鬥場附著 1 顆 ${renderEnergyToken('Fire', 'xs')}火能量）`;
+        if (sub === 10) return `施放支援者卡「${cName}」（從棄牌區附著 2 顆 ${renderEnergyToken('Lightning', 'xs')}雷能量）`;
+        if (sub === 13) return `施放支援者卡「${cName}」（附著 2 顆 ${renderEnergyToken('Fire', 'xs')}火能量並結束回合）`;
+        if (sub === 14 || sub === 15) return `施放「${cName}」（將備戰區 ${abEtTag}能量轉移至戰鬥場）`;
+        if (sub === 16) return `施放支援者卡「${cName}」（本回合指定寶可夢無色招式能耗 -2）`;
+        return `施放充能卡「${cName}」（額外補充 ${abEtTag}能量）`;
       }
       if (tk === 7) {
         const stadDesc = {
@@ -1551,7 +1599,7 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
           4: '雙方無色寶可夢撤退費用 -2',
           5: '雙方鬥屬性對寶可夢ex 傷害 +20',
           6: '非超級進化弱點傷害改為 2 倍',
-          7: '雙方回合結束為附有能量的寶可夢恢復 20 點體力',
+          7: '雙方回合結束為附有水能量的寶可夢恢復 20 點體力',
           8: '雙方回合結束手牌補至 3 張',
           9: '雙方每回合額外檢索 1 張寶可夢',
           10: '雙方每回合額外檢索 1 張基礎草寶可夢',
@@ -1565,24 +1613,24 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
       return `施放訓練家卡「${cName}」`;
     }
     case 7: {
-      const abName = card?.abilities?.[0]?.name ? `「${card.abilities[0].name}」` : '';
+      const abName = card?.abilities?.[0]?.name ? `「${esc(card.abilities[0].name)}」` : '';
       const abOp = step.aux2 & 0xff;
       const abVal = (step.aux2 >> 8) & 0xff;
       let det = '';
       if (abOp === 2) det = '（檢索 1 張寶可夢加入手牌）';
       else if (abOp === 3) {
-        if (abVal === 4) det = '（為自身額外充能 1 顆並結束回合）';
-        else if (abVal === 3) det = '（自身充能 2 顆並承受 30 點傷害）';
-        else if (abVal === 2) det = '（自身充能 1 顆並承受 20 點傷害）';
-        else det = '（為自身額外充能 1 顆）';
-      } else if (abOp === 4) det = '（為戰鬥場額外充能 1 顆）';
+        if (abVal === 4) det = `（為自身額外附著 1 顆 ${abEtTag}能量並結束回合）`;
+        else if (abVal === 3) det = `（自身附著 2 顆 ${abEtTag}能量並承受 30 點傷害）`;
+        else if (abVal === 2) det = `（自身附著 1 顆 ${abEtTag}能量並承受 20 點傷害）`;
+        else det = `（為自身額外附著 1 顆 ${abEtTag}能量）`;
+      } else if (abOp === 4) det = `（為己方寶可夢額外附著 1 顆 ${abEtTag}能量）`;
       else if (abOp === 6) det = `（換上戰鬥場並吸收場上 ${abVal} 顆能量）`;
       else if (abOp === 7) det = '（強制對手更換戰鬥寶可夢）';
       else if (abOp === 8) det = `（狙擊對手寶可夢造成 ${abVal} 點傷害）`;
-      else if (abOp === 9) det = `（附能觸發，對對手戰鬥場造成 ${abVal} 點傷害）`;
-      else if (abOp === 12) det = '（棄置 1 顆能量，本回合招式傷害 +50）';
+      else if (abOp === 9) det = `（附著 ${abEtTag}能量觸發，對對手戰鬥場造成 ${abVal} 點傷害）`;
+      else if (abOp === 12) det = `（棄置 1 顆 ${renderEnergyToken('Fire', 'xs')}火能量，本回合招式傷害 +50）`;
       else if (abOp === 14 || abOp === 15) det = `（恢復 ${abVal || 20} 點體力）`;
-      else if (abOp === 16) det = (abVal >= 2 && abVal <= 4) ? '（轉移場上能量）' : '（免費與備戰寶可夢互換）';
+      else if (abOp === 16) det = (abVal >= 2 && abVal <= 4) ? `（轉移場上 ${abEtTag}能量）` : '（免費與備戰寶可夢互換）';
       else if (abOp === 19) {
         if (abVal >= 1 && abVal <= 5) det = '（強制替換對手戰鬥寶可夢）';
         else if (abVal >= 6 && abVal <= 10 || abVal === 19) det = '（補充手牌／檢索卡牌）';
@@ -1596,11 +1644,15 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
       } else if (abOp === 22) det = `（電磁牆觸發，對附能目標造成 ${abVal} 點傷害）`;
       return `發動${slotLabelZh(step.aux1)}「${cName}」的特性${abName}${det}`;
     }
-    case 8:
-      return `從能量區為${slotLabelZh(step.aux1)}「${cName}」附著 1 顆能量（目前 ${step.aux2} 顆）`;
+    case 8: {
+      const totalE = step.aux2 & 0xff;
+      const etype = (step.aux2 >>> 8) & 0xff;
+      const eTag = renderEtypeTag(etype);
+      return `從能量區為${slotLabelZh(step.aux1)}「${cName}」附著 1 顆 ${eTag}能量（目前共 ${totalE} 顆）`;
+    }
     case 9: {
       const newCard = step.aux2 >= 0 && step.aux2 < actorCards.length ? actorCards[step.aux2] : null;
-      const newName = newCard?.name || `${slotLabelZh(step.aux1)}寶可夢`;
+      const newName = esc(newCard?.name || `${slotLabelZh(step.aux1)}寶可夢`);
       return `戰鬥場「${cName}」撤退，換上${slotLabelZh(step.aux1)}「${newName}」`;
     }
     case 10: {
@@ -1611,13 +1663,14 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
       const effTag = (step.aux2 >> 9) & 0x3f;
       const effNum = (step.aux2 >> 15) & 0x3ff;
       const atkObj = card?.attacks?.[atkIdx] || card?.attacks?.[0];
-      const atkName = atkObj?.name ? `「${atkObj.name}」` : '招式';
+      const atkName = atkObj?.name ? `「${esc(atkObj.name)}」` : '招式';
+      const costHtml = atkObj ? ` ${renderAttackCostInline(atkObj.cost)}` : '';
 
       if (missed) {
-        if (effTag === 27) return `「${cName}」因混亂擲硬幣為反面，招式${atkName}發動失敗`;
-        if (effTag === 28) return `「${cName}」受干擾擲硬幣為反面，招式${atkName}發動失敗`;
-        if (effTag === 29) return `「${cName}」發動招式${atkName}，但傷害被對手護盾／特性無效化`;
-        return `「${cName}」發動招式${atkName}擲硬幣為反面，招式失敗`;
+        if (effTag === 27) return `「${cName}」因混亂擲硬幣為反面，招式${atkName}${costHtml}發動失敗`;
+        if (effTag === 28) return `「${cName}」受干擾擲硬幣為反面，招式${atkName}${costHtml}發動失敗`;
+        if (effTag === 29) return `「${cName}」發動招式${atkName}${costHtml}，但傷害被對手護盾／特性無效化`;
+        return `「${cName}」發動招式${atkName}${costHtml}擲硬幣為反面，招式失敗`;
       }
 
       const notes = [];
@@ -1651,7 +1704,7 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
       if (ko) notes.push('擊倒對手戰鬥場寶可夢！');
 
       const dmgPart = step.aux1 > 0 ? `造成 ${step.aux1} 點傷害` : '觸發追加效果';
-      return `「${cName}」發動招式${atkName}，${dmgPart}${notes.length ? `（${notes.join('；')}）` : ''}`;
+      return `「${cName}」發動招式${atkName}${costHtml}，${dmgPart}${notes.length ? `（${notes.join('；')}）` : ''}`;
     }
     case 11:
       return '結束回合';
@@ -1669,7 +1722,7 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
       if (reason === 7) return `回合間檢查：特性「冰雪場地」對${side}戰鬥場「${cName}」造成 10 點傷害${ko ? '並昏厥！' : ''}`;
       if (reason === 8) return `回合結束：${side}戰鬥場「${cName}」恢復 ${step.aux1} 點體力`;
       if (reason === 9) return `回合結束：「${cName}」觸發特性抽 1 張卡`;
-      if (reason === 10) return `首回合結束：「${cName}」觸發特性額外附著 1 顆能量`;
+      if (reason === 10) return `首回合結束：「${cName}」觸發特性額外附著 1 顆 ${renderEnergyToken('Lightning', 'xs')}雷能量`;
       return `回合間檢查：${side}戰鬥場「${cName}」受到 ${step.aux1} 點傷害${ko ? '並昏厥！' : ''}`;
     }
     default:
@@ -1700,7 +1753,8 @@ function formatFastBoardSide(side, deckCards20) {
   if (stMask & 0x10) stList.push('麻痺');
   if (stMask & 0x20) stList.push('混亂');
   const stTag = stList.length ? `·${stList.join('/')}` : '';
-  return `<b>${esc(name)}</b>（體力 ${side.hp}/${side.maxHp} · ${side.energy}能${toolTag}${stTag} · 備戰 ${side.bench} 隻 · 手牌 ${side.hand} 張 · 牌庫 ${side.deck} 張）`;
+  const energyHtml = renderTypedEnergyInline(side.energyByType, side.colorlessEnergy, side.energy);
+  return `<b>${esc(name)}</b>（體力 ${side.hp}/${side.maxHp} · ${energyHtml}${esc(toolTag)}${esc(stTag)} · 備戰 ${side.bench} 隻 · 手牌 ${side.hand} 張 · 牌庫 ${side.deck} 張）`;
 }
 
 export function buildFullGameFlowModal({
@@ -1812,7 +1866,7 @@ export function buildFullGameFlowModal({
         <div class="flow-step-main">
           <span class="flow-step-idx">第 ${s._seq} 步</span>
           ${actorBadge}
-          <span class="flow-action-text">${esc(actionZh)}</span>
+          <span class="flow-action-text">${actionZh}</span>
           <span class="flow-pts-pill">比數 ${(s.points || [0, 0]).join(' : ')}</span>
         </div>
         ${boardHtml}
@@ -1857,7 +1911,11 @@ export function buildFullGameFlowModal({
 
       <div class="flow-stage-card">
         <h3>對局資訊</h3>
-        <p class="sub">我方：<b>${esc(deck.name)}</b>（${esc(translateEnergyListZh(deck.energy))}）　對陣　對手：<b>${esc(opp.name)}</b>（${esc(translateEnergyListZh(opp.representative.energy))}）</p>
+        <p class="sub flow-match-info">
+          <span>我方：<b>${esc(deck.name)}</b> <span class="tokens-inline">${(deck.energy || []).map((e) => renderEnergyToken(e, 'xs')).join('')}</span>（${esc(translateEnergyListZh(deck.energy))}）</span>
+          <span class="muted">對陣</span>
+          <span>對手：<b>${esc(opp.name)}</b> <span class="tokens-inline">${(opp.representative.energy || []).map((e) => renderEnergyToken(e, 'xs')).join('')}</span>（${esc(translateEnergyListZh(opp.representative.energy))}）</span>
+        </p>
       </div>
 
       <div class="flow-stage-card">
@@ -1887,7 +1945,7 @@ function sampleArrayToStr(arr500) {
   return out;
 }
 
-// 比對兩副牌組是否完全相同（忽略排序，精準比對卡號與張數）
+// 比對兩副牌組是否完全相同（忽略排序，精準比對卡號、張數與能量區設定）
 export function areDecksIdentical(deckA, deckB) {
   const mapA = new Map();
   const mapB = new Map();
@@ -1902,6 +1960,13 @@ export function areDecksIdentical(deckA, deckB) {
   if (mapA.size === 0 || mapA.size !== mapB.size) return false;
   for (const [id, cnt] of mapA) {
     if (mapB.get(id) !== cnt) return false;
+  }
+  const normEnergy = (d) => [...new Set((d?.energy || []).map((e) => String(e || '').trim().toLowerCase()).filter(Boolean))].sort();
+  const eA = normEnergy(deckA);
+  const eB = normEnergy(deckB);
+  if (eA.length !== eB.length) return false;
+  for (let i = 0; i < eA.length; i++) {
+    if (eA[i] !== eB[i]) return false;
   }
   return true;
 }

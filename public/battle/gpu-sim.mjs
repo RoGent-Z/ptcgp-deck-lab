@@ -11,7 +11,7 @@ const CARD_STRIDE = 28;
 const MAX_ENEMIES = 10;
 const MAX_CANDS = 40;
 const WG_SIZE = 64;
-const SIM_STATE_BYTES = 288 * 4; // 1152 bytes per concurrent game
+const SIM_STATE_BYTES = 300 * 4; // 1200 bytes per concurrent game (with Slot.e_pack + deck_emask)
 
 const WGSL_INIT = /* wgsl */ `
 const FEATURES: u32 = 22u;
@@ -108,6 +108,9 @@ struct Card {
   r17: i32, r18: i32, r19: i32, r20: i32, r21: i32, r22: i32,
   power_q: i32,
   bonus_q: i32,
+  r25: u32,
+  r26: u32,
+  r27: u32,
 };
 
 struct Slot {
@@ -117,6 +120,7 @@ struct Slot {
   hp: i32,
   max_hp: i32,
   energy: i32,
+  e_pack: u32,
   tool: i32,
   tool2: i32,
   status: u32,
@@ -162,6 +166,7 @@ struct GameState {
   disc_volbeat: array<i32, 2>,
   delayed_slot: array<u32, 2>,
   delayed_dmg: array<i32, 2>,
+  deck_emask: array<u32, 2>,
   rng: u32,
   stadium: i32,
   cur: u32,
@@ -190,6 +195,8 @@ struct GameState {
   drayden_bonus: i32,
   ab_mask: u32,
   pad0: u32,
+  pad1: u32,
+  pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -249,6 +256,12 @@ fn c_ab_aux(c: Card) -> i32 { return i32((u32(c.r17) >> 16u) & 65535u); }
 fn c_trn_kind(c: Card) -> i32 { return c.r19 & 255; }
 fn c_trn_sub(c: Card) -> i32 { return i32((u32(c.r19) >> 8u) & 255u); }
 fn c_trn_cond(c: Card) -> i32 { return i32((u32(c.r19) >> 16u) & 255u); }
+fn c_a1_ecost(c: Card) -> u32 { return c.r25; }
+fn c_a2_ecost(c: Card) -> u32 { return c.r26; }
+fn c_deck_emask(c: Card) -> u32 { let m = c.r27 & 255u; return select(m, 2u, m == 0u); }
+fn c_ab_trn_etype(c: Card) -> u32 { return (c.r27 >> 8u) & 255u; }
+fn c_a1_eff_etype(c: Card) -> u32 { return (c.r27 >> 16u) & 255u; }
+fn c_a2_eff_etype(c: Card) -> u32 { return (c.r27 >> 24u) & 255u; }
 fn c_matches_hashes(c: Card, h1: i32, h2: i32) -> bool {
   let nh = c_name_hash(c);
   if (nh == 0) { return false; }
@@ -263,10 +276,10 @@ fn s_has_tool(sl: Slot, t: i32) -> bool { return sl.tool == t || sl.tool2 == t; 
 fn s_tool_cnt(sl: Slot) -> i32 { return select(0, 1, sl.tool != 0) + select(0, 1, sl.tool2 != 0); }
 fn s_stage(sl: Slot) -> i32 { return select(sl.stage_ov, c_stage(wg_cards[sl.ci]), sl.stage_ov < 0); }
 fn make_slot(ci: u32, hp: i32, turn_p: i32) -> Slot {
-  return Slot(1, ci, -1, hp, hp, 0, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, turn_p);
+  return Slot(1, ci, -1, hp, hp, 0, 0u, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, turn_p);
 }
 fn empty_slot() -> Slot {
-  return Slot(0, 0u, -1, 0, 0, 0, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  return Slot(0, 0u, -1, 0, 0, 0, 0u, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 fn est_atk_power_v3(dmg: i32, op1: i32, val1: i32) -> i32 {
@@ -331,6 +344,9 @@ fn load_card_vram(deck_slot: u32, idx: u32) -> Card {
   let p2 = select(0, est_atk_power_v3(c.r13, c_a2_op1(c), c.r15), c_a2_cost(c) != 255);
   c.power_q = (max(p1, p2) * 1024) / 100;
   c.bonus_q = decks_buf[o + 24u];
+  c.r25 = u32(decks_buf[o + 25u]);
+  c.r26 = u32(decks_buf[o + 26u]);
+  c.r27 = u32(decks_buf[o + 27u]);
   return c;
 }
 
@@ -342,6 +358,7 @@ fn make_sweet_honey_card() -> Card {
   c.r12 = 255; c.r13 = 0; c.r14 = 0; c.r15 = 0; c.r16 = 0;
   c.r17 = 0; c.r18 = 0; c.r19 = 2 | (9 << 8u); c.r20 = 20; c.r21 = 0; c.r22 = 0;
   c.power_q = 0; c.bonus_q = 0;
+  c.r25 = 0u; c.r26 = 0u; c.r27 = 0xffffff02u;
   return c;
 }
 
@@ -402,6 +419,9 @@ fn load_cand_vram(ci: u32) -> Card {
   let p2 = select(0, est_atk_power_v3(c.r13, c_a2_op1(c), c.r15), c_a2_cost(c) != 255);
   c.power_q = (max(p1, p2) * 1024) / 100;
   c.bonus_q = cand_cards_buf[o + 24u];
+  c.r25 = u32(cand_cards_buf[o + 25u]);
+  c.r26 = u32(cand_cards_buf[o + 26u]);
+  c.r27 = u32(cand_cards_buf[o + 27u]);
   return c;
 }
 
@@ -499,15 +519,193 @@ fn count_bench(p: u32) -> i32 {
   return n;
 }
 
-fn eff_energy(p: u32, s: u32, turn: i32) -> i32 {
-  let e = g.board[p][s].energy;
-  if (c_has_type(wg_cards[g.board[p][s].ci], 0)) {
-    for (var k = 0u; k < 4u; k = k + 1u) {
-      if (ab_active(p, k, turn)) {
-        let kc = wg_cards[g.board[p][k].ci];
-        if (c_ab_op(kc) == 15 && kc.r18 == 8) { return e * 2; }
+fn e_cnt(e_pack: u32, t: u32) -> i32 {
+  if (t < 8u) { return i32((e_pack >> (t * 4u)) & 15u); }
+  return 0;
+}
+fn e_sum_typed(e_pack: u32) -> i32 {
+  var s = 0;
+  for (var t = 0u; t < 8u; t = t + 1u) { s = s + i32((e_pack >> (t * 4u)) & 15u); }
+  return s;
+}
+fn e_type_mask(e_pack: u32) -> u32 {
+  var m = 0u;
+  for (var t = 0u; t < 8u; t = t + 1u) { if (((e_pack >> (t * 4u)) & 15u) != 0u) { m = m | (1u << t); } }
+  return m;
+}
+fn e_distinct_types(e_pack: u32) -> i32 {
+  return i32(countOneBits(e_type_mask(e_pack)));
+}
+fn slot_add_e(p: u32, s: u32, etype: u32, n: i32) {
+  if (n <= 0) { return; }
+  g.board[p][s].energy = min(255, g.board[p][s].energy + min(255, n));
+  if (etype < 8u) {
+    let sh = etype * 4u;
+    let cur_v = i32((g.board[p][s].e_pack >> sh) & 15u);
+    let nxt = u32(min(15, cur_v + n));
+    g.board[p][s].e_pack = (g.board[p][s].e_pack & (~(15u << sh))) | (nxt << sh);
+  }
+}
+fn slot_clear_e(p: u32, s: u32) {
+  g.board[p][s].energy = 0;
+  g.board[p][s].e_pack = 0u;
+}
+fn slot_rem_typed_e(p: u32, s: u32, etype: u32, n: i32) -> i32 {
+  if (etype >= 8u || n <= 0 || g.board[p][s].energy <= 0) { return 0; }
+  let sh = etype * 4u;
+  let have = i32((g.board[p][s].e_pack >> sh) & 15u);
+  let take = min(min(have, n), g.board[p][s].energy);
+  if (take <= 0) { return 0; }
+  let nxt = u32(have - take);
+  g.board[p][s].e_pack = (g.board[p][s].e_pack & (~(15u << sh))) | (nxt << sh);
+  g.board[p][s].energy = max(0, g.board[p][s].energy - take);
+  return take;
+}
+fn slot_rem_any_e(p: u32, s: u32, n: i32, keep_ecost: u32) -> i32 {
+  if (n <= 0 || g.board[p][s].energy <= 0) { return 0; }
+  var rem = min(n, g.board[p][s].energy);
+  var removed = 0;
+  let c_surp = max(0, g.board[p][s].energy - e_sum_typed(g.board[p][s].e_pack));
+  if (c_surp > 0) {
+    let tk = min(rem, c_surp);
+    g.board[p][s].energy = max(0, g.board[p][s].energy - tk);
+    rem = rem - tk;
+    removed = removed + tk;
+  }
+  if (rem > 0) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (rem <= 0) { break; }
+      let have = e_cnt(g.board[p][s].e_pack, t);
+      let keep = e_cnt(keep_ecost, t);
+      if (have > keep) {
+        let tk = slot_rem_typed_e(p, s, t, min(have - keep, rem));
+        rem = rem - tk;
+        removed = removed + tk;
       }
     }
+  }
+  if (rem > 0) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (rem <= 0) { break; }
+      let tk = slot_rem_typed_e(p, s, t, rem);
+      rem = rem - tk;
+      removed = removed + tk;
+    }
+  }
+  return removed;
+}
+fn slot_move_all_e(sp: u32, ss: u32, dp: u32, ds: u32) -> i32 {
+  let tot = g.board[sp][ss].energy;
+  if (tot <= 0) { return 0; }
+  var typed = 0;
+  let pack = g.board[sp][ss].e_pack;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    let cnt = e_cnt(pack, t);
+    if (cnt > 0) {
+      slot_add_e(dp, ds, t, cnt);
+      typed = typed + cnt;
+    }
+  }
+  let c_cnt = max(0, tot - typed);
+  if (c_cnt > 0) { slot_add_e(dp, ds, 9u, c_cnt); }
+  slot_clear_e(sp, ss);
+  return tot;
+}
+fn card_max_req_t(c: Card, t: u32) -> i32 {
+  let r1 = select(0, e_cnt(c_a1_ecost(c), t), c_a1_cost(c) != 255);
+  let r2 = select(0, e_cnt(c_a2_ecost(c), t), c_a2_cost(c) != 255);
+  return max(r1, r2);
+}
+fn slot_move_typed_e(sp: u32, ss: u32, dp: u32, ds: u32, etype: u32, max_n: i32) -> i32 {
+  if (max_n <= 0 || g.board[sp][ss].energy <= 0) { return 0; }
+  if (etype < 8u) {
+    let mv = slot_rem_typed_e(sp, ss, etype, max_n);
+    if (mv > 0) { slot_add_e(dp, ds, etype, mv); }
+    return mv;
+  }
+  if (etype == 250u) {
+    var moved = 0;
+    let dst_c = wg_cards[g.board[dp][ds].ci];
+    for (var ps_i = 0u; ps_i < 2u; ps_i = ps_i + 1u) {
+      for (var t = 1u; t <= 3u; t = t + 1u) {
+        if (moved >= max_n) { break; }
+        let want = card_max_req_t(dst_c, t) > e_cnt(g.board[dp][ds].e_pack, t);
+        if (ps_i == 0u && !want) { continue; }
+        let tk = slot_rem_typed_e(sp, ss, t, max_n - moved);
+        if (tk > 0) { slot_add_e(dp, ds, t, tk); moved = moved + tk; }
+      }
+    }
+    return moved;
+  }
+  if (max_n >= 99) { return slot_move_all_e(sp, ss, dp, ds); }
+  var moved = 0;
+  let dst_c = wg_cards[g.board[dp][ds].ci];
+  for (var ps_i = 0u; ps_i < 2u; ps_i = ps_i + 1u) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (moved >= max_n) { break; }
+      let want = card_max_req_t(dst_c, t) > e_cnt(g.board[dp][ds].e_pack, t);
+      if (ps_i == 0u && !want) { continue; }
+      let tk = slot_rem_typed_e(sp, ss, t, max_n - moved);
+      if (tk > 0) { slot_add_e(dp, ds, t, tk); moved = moved + tk; }
+    }
+  }
+  if (moved < max_n) {
+    let c_surp = max(0, g.board[sp][ss].energy - e_sum_typed(g.board[sp][ss].e_pack));
+    let tk = min(c_surp, max_n - moved);
+    if (tk > 0) {
+      g.board[sp][ss].energy = max(0, g.board[sp][ss].energy - tk);
+      slot_add_e(dp, ds, 9u, tk);
+      moved = moved + tk;
+    }
+  }
+  return moved;
+}
+fn pick_deck_etype(emask: u32) -> u32 {
+  let m = select(emask, 2u, emask == 0u);
+  let cnt = countOneBits(m);
+  if (cnt <= 1u) { return countTrailingZeros(m); }
+  let pick = rng_next() % cnt;
+  var seen = 0u;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if ((m & (1u << t)) != 0u) {
+      if (seen == pick) { return t; }
+      seen = seen + 1u;
+    }
+  }
+  return countTrailingZeros(m);
+}
+fn pick_needed_etype(p: u32, s: u32, emask: u32) -> u32 {
+  let m = select(emask, 2u, emask == 0u);
+  let sc = wg_cards[g.board[p][s].ci];
+  let ep = g.board[p][s].e_pack;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if ((m & (1u << t)) != 0u && card_max_req_t(sc, t) > e_cnt(ep, t)) { return t; }
+  }
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if (card_max_req_t(sc, t) > e_cnt(ep, t)) { return t; }
+  }
+  return countTrailingZeros(m);
+}
+fn has_serperior(p: u32, turn: i32) -> bool {
+  for (var k = 0u; k < 4u; k = k + 1u) {
+    if (ab_active(p, k, turn)) {
+      let kc = wg_cards[g.board[p][k].ci];
+      if (c_ab_op(kc) == 15 && kc.r18 == 8) { return true; }
+    }
+  }
+  return false;
+}
+fn eff_typed_energy(p: u32, s: u32, etype: u32, turn: i32) -> i32 {
+  let cnt = e_cnt(g.board[p][s].e_pack, etype);
+  if (etype == 0u && c_has_type(wg_cards[g.board[p][s].ci], 0) && has_serperior(p, turn)) {
+    return cnt * 2;
+  }
+  return cnt;
+}
+fn eff_energy(p: u32, s: u32, turn: i32) -> i32 {
+  let e = g.board[p][s].energy;
+  if (c_has_type(wg_cards[g.board[p][s].ci], 0) && has_serperior(p, turn)) {
+    return e + e_cnt(g.board[p][s].e_pack, 0u);
   }
   return e;
 }
@@ -653,7 +851,10 @@ fn has_status_immunity(p: u32, s: u32, turn: i32) -> bool {
     for (var k = 0u; k < 4u; k = k + 1u) {
       if (ab_active(p, k, turn)) {
         let kc = wg_cards[g.board[p][k].ci];
-        if (c_ab_op(kc) == 17 && kc.r18 == 2) { return true; }
+        if (c_ab_op(kc) == 17 && kc.r18 == 2) {
+          let et = c_ab_trn_etype(kc);
+          if (et >= 8u || e_cnt(sl.e_pack, et) > 0) { return true; }
+        }
       }
     }
   }
@@ -830,6 +1031,7 @@ fn main(
   g.disc_volbeat = array<i32, 2>(0, 0);
   g.delayed_slot = array<u32, 2>(4u, 4u);
   g.delayed_dmg = array<i32, 2>(0, 0);
+  g.deck_emask = array<u32, 2>(c_deck_emask(wg_cards[0u]), c_deck_emask(wg_cards[20u]));
   g.stadium = 0;
   g.cur = first;
   g.turn = 1u;
@@ -991,6 +1193,9 @@ struct Card {
   r17: i32, r18: i32, r19: i32, r20: i32, r21: i32, r22: i32,
   power_q: i32,
   bonus_q: i32,
+  r25: u32,
+  r26: u32,
+  r27: u32,
 };
 
 struct Slot {
@@ -1000,6 +1205,7 @@ struct Slot {
   hp: i32,
   max_hp: i32,
   energy: i32,
+  e_pack: u32,
   tool: i32,
   tool2: i32,
   status: u32,
@@ -1045,6 +1251,7 @@ struct GameState {
   disc_volbeat: array<i32, 2>,
   delayed_slot: array<u32, 2>,
   delayed_dmg: array<i32, 2>,
+  deck_emask: array<u32, 2>,
   rng: u32,
   stadium: i32,
   cur: u32,
@@ -1073,6 +1280,8 @@ struct GameState {
   drayden_bonus: i32,
   ab_mask: u32,
   pad0: u32,
+  pad1: u32,
+  pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -1132,6 +1341,12 @@ fn c_ab_aux(c: Card) -> i32 { return i32((u32(c.r17) >> 16u) & 65535u); }
 fn c_trn_kind(c: Card) -> i32 { return c.r19 & 255; }
 fn c_trn_sub(c: Card) -> i32 { return i32((u32(c.r19) >> 8u) & 255u); }
 fn c_trn_cond(c: Card) -> i32 { return i32((u32(c.r19) >> 16u) & 255u); }
+fn c_a1_ecost(c: Card) -> u32 { return c.r25; }
+fn c_a2_ecost(c: Card) -> u32 { return c.r26; }
+fn c_deck_emask(c: Card) -> u32 { let m = c.r27 & 255u; return select(m, 2u, m == 0u); }
+fn c_ab_trn_etype(c: Card) -> u32 { return (c.r27 >> 8u) & 255u; }
+fn c_a1_eff_etype(c: Card) -> u32 { return (c.r27 >> 16u) & 255u; }
+fn c_a2_eff_etype(c: Card) -> u32 { return (c.r27 >> 24u) & 255u; }
 fn c_matches_hashes(c: Card, h1: i32, h2: i32) -> bool {
   let nh = c_name_hash(c);
   if (nh == 0) { return false; }
@@ -1146,10 +1361,10 @@ fn s_has_tool(sl: Slot, t: i32) -> bool { return sl.tool == t || sl.tool2 == t; 
 fn s_tool_cnt(sl: Slot) -> i32 { return select(0, 1, sl.tool != 0) + select(0, 1, sl.tool2 != 0); }
 fn s_stage(sl: Slot) -> i32 { return select(sl.stage_ov, c_stage(wg_cards[sl.ci]), sl.stage_ov < 0); }
 fn make_slot(ci: u32, hp: i32, turn_p: i32) -> Slot {
-  return Slot(1, ci, -1, hp, hp, 0, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, turn_p);
+  return Slot(1, ci, -1, hp, hp, 0, 0u, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, turn_p);
 }
 fn empty_slot() -> Slot {
-  return Slot(0, 0u, -1, 0, 0, 0, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  return Slot(0, 0u, -1, 0, 0, 0, 0u, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 fn est_atk_power_v3(dmg: i32, op1: i32, val1: i32) -> i32 {
@@ -1214,6 +1429,9 @@ fn load_card_vram(deck_slot: u32, idx: u32) -> Card {
   let p2 = select(0, est_atk_power_v3(c.r13, c_a2_op1(c), c.r15), c_a2_cost(c) != 255);
   c.power_q = (max(p1, p2) * 1024) / 100;
   c.bonus_q = decks_buf[o + 24u];
+  c.r25 = u32(decks_buf[o + 25u]);
+  c.r26 = u32(decks_buf[o + 26u]);
+  c.r27 = u32(decks_buf[o + 27u]);
   return c;
 }
 
@@ -1225,6 +1443,7 @@ fn make_sweet_honey_card() -> Card {
   c.r12 = 255; c.r13 = 0; c.r14 = 0; c.r15 = 0; c.r16 = 0;
   c.r17 = 0; c.r18 = 0; c.r19 = 2 | (9 << 8u); c.r20 = 20; c.r21 = 0; c.r22 = 0;
   c.power_q = 0; c.bonus_q = 0;
+  c.r25 = 0u; c.r26 = 0u; c.r27 = 0xffffff02u;
   return c;
 }
 
@@ -1285,6 +1504,9 @@ fn load_cand_vram(ci: u32) -> Card {
   let p2 = select(0, est_atk_power_v3(c.r13, c_a2_op1(c), c.r15), c_a2_cost(c) != 255);
   c.power_q = (max(p1, p2) * 1024) / 100;
   c.bonus_q = cand_cards_buf[o + 24u];
+  c.r25 = u32(cand_cards_buf[o + 25u]);
+  c.r26 = u32(cand_cards_buf[o + 26u]);
+  c.r27 = u32(cand_cards_buf[o + 27u]);
   return c;
 }
 
@@ -1382,15 +1604,193 @@ fn count_bench(p: u32) -> i32 {
   return n;
 }
 
-fn eff_energy(p: u32, s: u32, turn: i32) -> i32 {
-  let e = g.board[p][s].energy;
-  if (c_has_type(wg_cards[g.board[p][s].ci], 0)) {
-    for (var k = 0u; k < 4u; k = k + 1u) {
-      if (ab_active(p, k, turn)) {
-        let kc = wg_cards[g.board[p][k].ci];
-        if (c_ab_op(kc) == 15 && kc.r18 == 8) { return e * 2; }
+fn e_cnt(e_pack: u32, t: u32) -> i32 {
+  if (t < 8u) { return i32((e_pack >> (t * 4u)) & 15u); }
+  return 0;
+}
+fn e_sum_typed(e_pack: u32) -> i32 {
+  var s = 0;
+  for (var t = 0u; t < 8u; t = t + 1u) { s = s + i32((e_pack >> (t * 4u)) & 15u); }
+  return s;
+}
+fn e_type_mask(e_pack: u32) -> u32 {
+  var m = 0u;
+  for (var t = 0u; t < 8u; t = t + 1u) { if (((e_pack >> (t * 4u)) & 15u) != 0u) { m = m | (1u << t); } }
+  return m;
+}
+fn e_distinct_types(e_pack: u32) -> i32 {
+  return i32(countOneBits(e_type_mask(e_pack)));
+}
+fn slot_add_e(p: u32, s: u32, etype: u32, n: i32) {
+  if (n <= 0) { return; }
+  g.board[p][s].energy = min(255, g.board[p][s].energy + min(255, n));
+  if (etype < 8u) {
+    let sh = etype * 4u;
+    let cur_v = i32((g.board[p][s].e_pack >> sh) & 15u);
+    let nxt = u32(min(15, cur_v + n));
+    g.board[p][s].e_pack = (g.board[p][s].e_pack & (~(15u << sh))) | (nxt << sh);
+  }
+}
+fn slot_clear_e(p: u32, s: u32) {
+  g.board[p][s].energy = 0;
+  g.board[p][s].e_pack = 0u;
+}
+fn slot_rem_typed_e(p: u32, s: u32, etype: u32, n: i32) -> i32 {
+  if (etype >= 8u || n <= 0 || g.board[p][s].energy <= 0) { return 0; }
+  let sh = etype * 4u;
+  let have = i32((g.board[p][s].e_pack >> sh) & 15u);
+  let take = min(min(have, n), g.board[p][s].energy);
+  if (take <= 0) { return 0; }
+  let nxt = u32(have - take);
+  g.board[p][s].e_pack = (g.board[p][s].e_pack & (~(15u << sh))) | (nxt << sh);
+  g.board[p][s].energy = max(0, g.board[p][s].energy - take);
+  return take;
+}
+fn slot_rem_any_e(p: u32, s: u32, n: i32, keep_ecost: u32) -> i32 {
+  if (n <= 0 || g.board[p][s].energy <= 0) { return 0; }
+  var rem = min(n, g.board[p][s].energy);
+  var removed = 0;
+  let c_surp = max(0, g.board[p][s].energy - e_sum_typed(g.board[p][s].e_pack));
+  if (c_surp > 0) {
+    let tk = min(rem, c_surp);
+    g.board[p][s].energy = max(0, g.board[p][s].energy - tk);
+    rem = rem - tk;
+    removed = removed + tk;
+  }
+  if (rem > 0) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (rem <= 0) { break; }
+      let have = e_cnt(g.board[p][s].e_pack, t);
+      let keep = e_cnt(keep_ecost, t);
+      if (have > keep) {
+        let tk = slot_rem_typed_e(p, s, t, min(have - keep, rem));
+        rem = rem - tk;
+        removed = removed + tk;
       }
     }
+  }
+  if (rem > 0) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (rem <= 0) { break; }
+      let tk = slot_rem_typed_e(p, s, t, rem);
+      rem = rem - tk;
+      removed = removed + tk;
+    }
+  }
+  return removed;
+}
+fn slot_move_all_e(sp: u32, ss: u32, dp: u32, ds: u32) -> i32 {
+  let tot = g.board[sp][ss].energy;
+  if (tot <= 0) { return 0; }
+  var typed = 0;
+  let pack = g.board[sp][ss].e_pack;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    let cnt = e_cnt(pack, t);
+    if (cnt > 0) {
+      slot_add_e(dp, ds, t, cnt);
+      typed = typed + cnt;
+    }
+  }
+  let c_cnt = max(0, tot - typed);
+  if (c_cnt > 0) { slot_add_e(dp, ds, 9u, c_cnt); }
+  slot_clear_e(sp, ss);
+  return tot;
+}
+fn card_max_req_t(c: Card, t: u32) -> i32 {
+  let r1 = select(0, e_cnt(c_a1_ecost(c), t), c_a1_cost(c) != 255);
+  let r2 = select(0, e_cnt(c_a2_ecost(c), t), c_a2_cost(c) != 255);
+  return max(r1, r2);
+}
+fn slot_move_typed_e(sp: u32, ss: u32, dp: u32, ds: u32, etype: u32, max_n: i32) -> i32 {
+  if (max_n <= 0 || g.board[sp][ss].energy <= 0) { return 0; }
+  if (etype < 8u) {
+    let mv = slot_rem_typed_e(sp, ss, etype, max_n);
+    if (mv > 0) { slot_add_e(dp, ds, etype, mv); }
+    return mv;
+  }
+  if (etype == 250u) {
+    var moved = 0;
+    let dst_c = wg_cards[g.board[dp][ds].ci];
+    for (var ps_i = 0u; ps_i < 2u; ps_i = ps_i + 1u) {
+      for (var t = 1u; t <= 3u; t = t + 1u) {
+        if (moved >= max_n) { break; }
+        let want = card_max_req_t(dst_c, t) > e_cnt(g.board[dp][ds].e_pack, t);
+        if (ps_i == 0u && !want) { continue; }
+        let tk = slot_rem_typed_e(sp, ss, t, max_n - moved);
+        if (tk > 0) { slot_add_e(dp, ds, t, tk); moved = moved + tk; }
+      }
+    }
+    return moved;
+  }
+  if (max_n >= 99) { return slot_move_all_e(sp, ss, dp, ds); }
+  var moved = 0;
+  let dst_c = wg_cards[g.board[dp][ds].ci];
+  for (var ps_i = 0u; ps_i < 2u; ps_i = ps_i + 1u) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (moved >= max_n) { break; }
+      let want = card_max_req_t(dst_c, t) > e_cnt(g.board[dp][ds].e_pack, t);
+      if (ps_i == 0u && !want) { continue; }
+      let tk = slot_rem_typed_e(sp, ss, t, max_n - moved);
+      if (tk > 0) { slot_add_e(dp, ds, t, tk); moved = moved + tk; }
+    }
+  }
+  if (moved < max_n) {
+    let c_surp = max(0, g.board[sp][ss].energy - e_sum_typed(g.board[sp][ss].e_pack));
+    let tk = min(c_surp, max_n - moved);
+    if (tk > 0) {
+      g.board[sp][ss].energy = max(0, g.board[sp][ss].energy - tk);
+      slot_add_e(dp, ds, 9u, tk);
+      moved = moved + tk;
+    }
+  }
+  return moved;
+}
+fn pick_deck_etype(emask: u32) -> u32 {
+  let m = select(emask, 2u, emask == 0u);
+  let cnt = countOneBits(m);
+  if (cnt <= 1u) { return countTrailingZeros(m); }
+  let pick = rng_next() % cnt;
+  var seen = 0u;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if ((m & (1u << t)) != 0u) {
+      if (seen == pick) { return t; }
+      seen = seen + 1u;
+    }
+  }
+  return countTrailingZeros(m);
+}
+fn pick_needed_etype(p: u32, s: u32, emask: u32) -> u32 {
+  let m = select(emask, 2u, emask == 0u);
+  let sc = wg_cards[g.board[p][s].ci];
+  let ep = g.board[p][s].e_pack;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if ((m & (1u << t)) != 0u && card_max_req_t(sc, t) > e_cnt(ep, t)) { return t; }
+  }
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if (card_max_req_t(sc, t) > e_cnt(ep, t)) { return t; }
+  }
+  return countTrailingZeros(m);
+}
+fn has_serperior(p: u32, turn: i32) -> bool {
+  for (var k = 0u; k < 4u; k = k + 1u) {
+    if (ab_active(p, k, turn)) {
+      let kc = wg_cards[g.board[p][k].ci];
+      if (c_ab_op(kc) == 15 && kc.r18 == 8) { return true; }
+    }
+  }
+  return false;
+}
+fn eff_typed_energy(p: u32, s: u32, etype: u32, turn: i32) -> i32 {
+  let cnt = e_cnt(g.board[p][s].e_pack, etype);
+  if (etype == 0u && c_has_type(wg_cards[g.board[p][s].ci], 0) && has_serperior(p, turn)) {
+    return cnt * 2;
+  }
+  return cnt;
+}
+fn eff_energy(p: u32, s: u32, turn: i32) -> i32 {
+  let e = g.board[p][s].energy;
+  if (c_has_type(wg_cards[g.board[p][s].ci], 0) && has_serperior(p, turn)) {
+    return e + e_cnt(g.board[p][s].e_pack, 0u);
   }
   return e;
 }
@@ -1536,7 +1936,10 @@ fn has_status_immunity(p: u32, s: u32, turn: i32) -> bool {
     for (var k = 0u; k < 4u; k = k + 1u) {
       if (ab_active(p, k, turn)) {
         let kc = wg_cards[g.board[p][k].ci];
-        if (c_ab_op(kc) == 17 && kc.r18 == 2) { return true; }
+        if (c_ab_op(kc) == 17 && kc.r18 == 2) {
+          let et = c_ab_trn_etype(kc);
+          if (et >= 8u || e_cnt(sl.e_pack, et) > 0) { return true; }
+        }
       }
     }
   }
@@ -1733,7 +2136,7 @@ fn calc_passive_dmg_mods(
 
 
 fn can_pay_attack(
-  cur: u32, foe: u32, base_cost: i32, atk_flags: i32, barry_disc: i32, turn: i32
+  cur: u32, foe: u32, base_cost: i32, base_ecost: u32, atk_flags: i32, barry_disc: i32, turn: i32
 ) -> bool {
   if (base_cost == 255) { return false; }
   let act = g.board[cur][0];
@@ -1765,37 +2168,68 @@ fn can_pay_attack(
     }
     if (!(u && a)) { return false; }
   }
-  var need = base_cost;
-  if ((atk_flags & AF_COST_1_IF_DAMAGED) != 0 && act.hp < act.max_hp) { need = 1; }
-  if ((atk_flags & AF_COST_1_IF_DECK_EMPTY) != 0 && g.lib_len[cur] == 0u) { need = 1; }
+  var need_total = base_cost;
+  var req_ecost = base_ecost;
+  if ((atk_flags & AF_COST_1_IF_DAMAGED) != 0 && act.hp < act.max_hp) {
+    need_total = 1;
+    req_ecost = 1u << 12u; // 1 [L]
+  }
+  if ((atk_flags & AF_COST_1_IF_DECK_EMPTY) != 0 && g.lib_len[cur] == 0u) {
+    need_total = 1;
+    req_ecost = 1u << 8u; // 1 [W]
+  }
+  var colored_sum = e_sum_typed(req_ecost);
+  var c_need = max(0, need_total - colored_sum);
   for (var k = 0u; k < 4u; k = k + 1u) {
     if (ab_active(cur, k, turn)) {
       let kc = wg_cards[g.board[cur][k].ci];
       if (c_ab_op(kc) == 15 && (kc.r18 & 255) == 4) {
         let sub = (kc.r18 >> 8u) & 255;
-        if (sub == 1 && c_is_future(c)) { need = need - 1; }
-        else if (sub == 0 && k == 0u) { need = need - 1; }
+        if (sub == 1 && c_is_future(c)) {
+          c_need = max(0, c_need - 1);
+        } else if (sub == 0 && k == 0u) {
+          let red_t = c_ab_trn_etype(kc);
+          if (red_t < 8u) {
+            let cur_r = e_cnt(req_ecost, red_t);
+            if (cur_r > 0) {
+              let sh = red_t * 4u;
+              req_ecost = (req_ecost & (~(15u << sh))) | (u32(cur_r - 1) << sh);
+              colored_sum = colored_sum - 1;
+            }
+          } else {
+            c_need = max(0, c_need - 1);
+          }
+        }
       }
     }
   }
-  need = need - barry_disc + act.cost_tax;
+  c_need = max(0, c_need - barry_disc) + act.cost_tax;
   if (g.board[foe][0].occ == 1 && ab_active(foe, 0u, turn)) {
     let fc = wg_cards[g.board[foe][0].ci];
-    if (c_ab_op(fc) == 15 && fc.r18 == 5) { need = need + 1; }
+    if (c_ab_op(fc) == 15 && fc.r18 == 5) { c_need = c_need + 1; }
   }
-  need = max(0, need);
-  return eff_energy(cur, 0u, turn) >= need;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    let req_t = e_cnt(req_ecost, t);
+    if (req_t > 0 && eff_typed_energy(cur, 0u, t, turn) < req_t) { return false; }
+  }
+  return eff_energy(cur, 0u, turn) >= colored_sum + c_need;
 }
 
 fn eval_cond_op7(
   cond_id: i32, extra: i32, aux: i32,
-  cur: u32, foe: u32, atk_cost: i32, sup_used: bool, turn: i32
+  cur: u32, foe: u32, atk_cost: i32, atk_ecost: u32, atk_eff_etype: u32, sup_used: bool, turn: i32
 ) -> bool {
   let act = g.board[cur][0];
   let foe_s = g.board[foe][0];
   let fc = wg_cards[foe_s.ci];
   switch (cond_id) {
-    case 0: { return eff_energy(cur, 0u, turn) >= atk_cost + extra; }
+    case 0: {
+      if (eff_energy(cur, 0u, turn) < atk_cost + extra) { return false; }
+      if (atk_eff_etype < 8u) {
+        return eff_typed_energy(cur, 0u, atk_eff_etype, turn) >= e_cnt(atk_ecost, atk_eff_etype) + extra;
+      }
+      return true;
+    }
     case 1: { return foe_s.occ == 1 && foe_s.hp < foe_s.max_hp; }
     case 2, 3: { return act.hp < act.max_hp; }
     case 4: { return act.hp >= act.max_hp; }
@@ -1826,12 +2260,17 @@ fn eval_cond_op7(
     case 26: { return act.energy + select(0, foe_s.energy, foe_s.occ == 1) >= extra; }
     case 27: {
       var tot = 0;
-      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1) { tot = tot + g.board[cur][s].energy; } }
+      for (var s = 0u; s < 4u; s = s + 1u) {
+        if (g.board[cur][s].occ == 1) {
+          if (atk_eff_etype < 8u) { tot = tot + eff_typed_energy(cur, s, atk_eff_etype, turn); }
+          else { tot = tot + eff_energy(cur, s, turn); }
+        }
+      }
       return tot >= extra;
     }
     case 28: { return foe_s.occ == 1 && act.energy > foe_s.energy; }
     case 29: { return foe_s.occ == 1 && act.energy == foe_s.energy; }
-    case 30: { return foe_s.occ == 1 && act.energy > 0 && foe_s.energy > 0 && wg_cards[act.ci].r3 == fc.r3; }
+    case 30: { return foe_s.occ == 1 && (e_type_mask(act.e_pack) & e_type_mask(foe_s.e_pack)) != 0u; }
     case 31: {
       let hc = g.hand_len[cur]; let hf = g.hand_len[foe];
       if (extra == 0) { return hc == 1u || hc == 3u || hc == 5u; }
@@ -1871,13 +2310,18 @@ fn eval_cond_op7(
     }
     case 37: { return (act.status & ST_DAMAGED_LAST) != 0u; }
     case 39: { return select(g.disc_quick_grow[cur] != 0, g.disc_volbeat[cur] != 0, extra == 1); }
-    case 40: { return select(act.energy >= extra, act.energy > 0, extra >= 10); }
+    case 40: {
+      if (extra >= 10) { return e_cnt(act.e_pack, u32(extra - 10)) > 0; }
+      var m = 0u;
+      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1) { m = m | e_type_mask(g.board[cur][s].e_pack); } }
+      return i32(countOneBits(m)) >= extra;
+    }
     default: { return false; }
   }
 }
 
 fn eval_count_op6(
-  sub: i32, extra: i32, aux: i32, cur: u32, foe: u32, turn: i32
+  sub: i32, extra: i32, aux: i32, atk_eff_etype: u32, cur: u32, foe: u32, turn: i32
 ) -> i32 {
   switch (sub) {
     case 0: { return count_bench(cur); }
@@ -1893,10 +2337,18 @@ fn eval_count_op6(
       for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && s_stage(g.board[cur][s]) > 0) { n = n + 1; } }
       return n;
     }
-    case 5: { return eff_energy(cur, 0u, turn); }
+    case 5: {
+      if (atk_eff_etype < 8u) { return eff_typed_energy(cur, 0u, atk_eff_etype, turn); }
+      return eff_energy(cur, 0u, turn);
+    }
     case 6: {
       var n = 0;
-      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1) { n = n + g.board[cur][s].energy; } }
+      for (var s = 0u; s < 4u; s = s + 1u) {
+        if (g.board[cur][s].occ == 1) {
+          if (extra < 8) { n = n + eff_typed_energy(cur, s, u32(extra), turn); }
+          else { n = n + eff_energy(cur, s, turn); }
+        }
+      }
       return n;
     }
     case 7: { return select(0, g.board[foe][0].energy, g.board[foe][0].occ == 1); }
@@ -1956,8 +2408,8 @@ fn eval_count_op6(
       }
       return n;
     }
-    case 25: { return min(3, g.board[cur][0].energy); }
-    case 26: { return g.board[cur][0].energy; }
+    case 25: { return e_distinct_types(g.board[cur][0].e_pack); }
+    case 26: { return e_cnt(g.board[cur][0].e_pack, 1u) + e_cnt(g.board[cur][0].e_pack, 3u); }
     case 27: {
       var n = 0;
       for (var hi = 0u; hi < g.hand_len[cur]; hi = hi + 1u) { if (c_is_tool(wg_cards[g.hands[cur][hi]])) { n = n + 1; } }
@@ -1993,12 +2445,13 @@ fn eval_count_op6(
 }
 
 fn eval_live_dmg_v3(
-  cur: u32, foe: u32, cost: i32, base_dmg: i32,
+  cur: u32, foe: u32, cost: i32, ecost: u32, eff_etype: u32, base_dmg: i32,
   op1: i32, val1: i32, aux: i32, sup_used: bool, turn: i32
 ) -> vec2<i32> {
   let b0 = val1 & 255;
   let b1 = i32((u32(val1) >> 8u) & 255u);
   let b2 = i32((u32(val1) >> 16u) & 255u);
+  let scale_e = select(eff_energy(cur, 0u, turn), eff_typed_energy(cur, 0u, eff_etype, turn), eff_etype < 8u);
   switch (op1) {
     case 3: {
       if (b0 == 3) { return vec2<i32>(base_dmg + b1 / 2, 0); }
@@ -2006,8 +2459,8 @@ fn eval_live_dmg_v3(
       return vec2<i32>(base_dmg / 2, 0);
     }
     case 4: {
-      if ((b2 & 32) != 0) { return vec2<i32>(base_dmg + (b1 * 3) / 2, 0); }
-      if ((b2 & 8) != 0) { return vec2<i32>((eff_energy(cur, 0u, turn) * b1) / 2, 0); }
+      if ((b2 & 32) != 0) { return vec2<i32>(base_dmg + (b1 * min(scale_e, 3)) / 2, 0); }
+      if ((b2 & 8) != 0) { return vec2<i32>((scale_e * b1) / 2, 0); }
       if ((b2 & 2) != 0) { return vec2<i32>(((1 + count_bench(cur)) * b1) / 2, 0); }
       if ((b2 & 4) != 0) {
         var n = 0;
@@ -2032,24 +2485,24 @@ fn eval_live_dmg_v3(
       if (b0 == 97) { return vec2<i32>(base_dmg + 45, 0); }
       if (b0 == 98) { return vec2<i32>(base_dmg + b1 / 4, 0); }
       if (b0 == 99) { return vec2<i32>(base_dmg + b1, 0); }
-      if (b2 == 2) { return vec2<i32>(base_dmg + (eff_energy(cur, 0u, turn) * b1) / 2, 0); }
+      if (b2 == 2) { return vec2<i32>(base_dmg + (scale_e * b1) / 2, 0); }
       if (b2 == 3) { return vec2<i32>(base_dmg, 0); }
       return vec2<i32>(base_dmg + (b1 * b0) / 2, 0);
     }
     case 6: {
-      let cnt = eval_count_op6(b0, b2, aux, cur, foe, turn);
+      let cnt = eval_count_op6(b0, b2, aux, eff_etype, cur, foe, turn);
       if (b0 == 33) { return vec2<i32>(max(0, base_dmg + cnt), 0); }
       return vec2<i32>(base_dmg + cnt * b1, 0);
     }
     case 7: {
-      let ok = eval_cond_op7(b0, b2, aux, cur, foe, cost, sup_used, turn);
+      let ok = eval_cond_op7(b0, b2, aux, cur, foe, cost, ecost, eff_etype, sup_used, turn);
       if (b0 == 3) { return vec2<i32>(select(base_dmg, max(0, base_dmg - b1), ok), 0); }
       return vec2<i32>(base_dmg + select(0, b1, ok), 0);
     }
     case 8: {
       if (b0 == 2 || b0 == 3 || b0 == 4 || b0 == 6 || b0 == 8 || b0 == 10 || b0 == 11 || b0 == 12 || b0 == 14) {
         var est = b1;
-        if (b0 == 8) { est = b1 * select(max(1, b2), eff_energy(cur, 0u, turn), b2 == 99); }
+        if (b0 == 8) { est = b1 * select(max(1, b2), scale_e, b2 == 99); }
         else if (b0 == 11) {
           var me = 0;
           for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[foe][s].occ == 1 && g.board[foe][s].energy > me) { me = g.board[foe][s].energy; } }
@@ -2162,6 +2615,29 @@ fn main(
     }
 
     var energy_attached = (turn == 1u);
+    var turn_etype = 255u;
+    if (turn >= 2u) {
+      var et = pick_deck_etype(g.deck_emask[cur]);
+      if (g.stadium == 1 && countOneBits(g.deck_emask[cur]) >= 2u) {
+        var et_wanted = false;
+        var other_wanted = false;
+        for (var s = 0u; s < 4u; s = s + 1u) {
+          if (g.board[cur][s].occ == 0) { continue; }
+          let sc = wg_cards[g.board[cur][s].ci];
+          let ep = g.board[cur][s].e_pack;
+          if (card_max_req_t(sc, et) > e_cnt(ep, et)) { et_wanted = true; }
+          for (var t = 0u; t < 8u; t = t + 1u) {
+            if (t != et && (g.deck_emask[cur] & (1u << t)) != 0u && card_max_req_t(sc, t) > e_cnt(ep, t)) {
+              other_wanted = true;
+            }
+          }
+        }
+        if (!et_wanted && other_wanted) {
+          et = pick_deck_etype(g.deck_emask[cur]);
+        }
+      }
+      turn_etype = et;
+    }
     var supporter_used = false;
     var retreated = false;
     var ability_used_mask: u32 = 0u;
@@ -2257,18 +2733,25 @@ fn main(
             else if (ab_val == 3) { valid = g.board[cur][s].hp > 30; extra_sc = get_w(cur, 15u); }
             else if (ab_val == 4) {
               let ac0 = wg_cards[g.board[cur][0].ci];
-              let can_a = turn >= 2u && g.board[cur][0].occ == 1 && can_pay_attack(cur, foe, c_a1_cost(ac0), c_a1_flags(ac0), 0, turn_i);
+              let can_a = turn >= 2u && g.board[cur][0].occ == 1 && can_pay_attack(cur, foe, c_a1_cost(ac0), c_a1_ecost(ac0), c_a1_flags(ac0), 0, turn_i);
               if (!can_a || turn == 1u) { valid = true; extra_sc = select((get_w(cur, 15u) >> 1u) - (get_w(cur, 9u) >> 2u), get_w(cur, 15u), turn == 1u); }
             }
           }
           case 4: {
-            if (g.board[cur][0].occ == 1) {
-              valid = select(true, g.energy_discarded[cur] > 0 || g.points[foe] > 0 || turn >= 3u, ab_val == 2);
+            if (ab_val == 2) {
+              valid = g.board[cur][0].occ == 1 && (g.energy_discarded[cur] > 0 || g.points[foe] > 0 || turn >= 3u);
+              extra_sc = get_w(cur, 14u) >> 1u;
+            } else if (ab_val == 3) {
+              for (var k = 0u; k < 4u; k = k + 1u) { if (g.board[cur][k].occ == 1 && c_has_type(wg_cards[g.board[cur][k].ci], 0)) { valid = true; break; } }
+              extra_sc = get_w(cur, 14u) >> 1u;
+            } else {
+              let et = c_ab_trn_etype(scard);
+              valid = g.board[cur][0].occ == 1 && (et >= 8u || c_has_type(wg_cards[g.board[cur][0].ci], i32(et)));
               extra_sc = get_w(cur, 14u) >> 1u;
             }
           }
           case 8: { if (g.board[foe][0].occ == 1) { valid = true; extra_sc = (get_w(cur, 21u) * 35) / 100; } }
-          case 12: { if (((ab_val >> 8u) & 255) == 2 && g.board[cur][s].energy > 0 && turn >= 2u) { valid = true; extra_sc = get_w(cur, 10u) >> 1u; } }
+          case 12: { if (((ab_val >> 8u) & 255) == 2 && e_cnt(g.board[cur][s].e_pack, 1u) > 0 && turn >= 2u) { valid = true; extra_sc = get_w(cur, 10u) >> 1u; } }
           case 14: {
             let mode = (ab_val >> 8u) & 255;
             if (mode == 6) { valid = g.board[cur][0].occ == 1 && (g.board[cur][0].status & ST_SPECIAL_MASK) != 0u; extra_sc = get_w(cur, 20u) >> 1u; }
@@ -2286,13 +2769,17 @@ fn main(
                   valid = true; extra_sc = get_w(cur, 18u) >> 1u;
                 }
               }
-            } else if (ab_val == 2 || ab_val == 3) {
+            } else if (ab_val == 2) {
               var hbe = false;
-              for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[cur][bs].occ == 1 && g.board[cur][bs].energy > 0) { hbe = true; break; } }
+              for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[cur][bs].occ == 1 && c_has_type(wg_cards[g.board[cur][bs].ci], 4) && e_cnt(g.board[cur][bs].e_pack, 4u) > 0) { hbe = true; break; } }
               if (g.board[cur][0].occ == 1 && hbe) { valid = true; extra_sc = get_w(cur, 14u); }
+            } else if (ab_val == 3) {
+              var hbe = false;
+              for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[cur][bs].occ == 1 && c_has_type(wg_cards[g.board[cur][bs].ci], 2) && e_cnt(g.board[cur][bs].e_pack, 2u) > 0) { hbe = true; break; } }
+              if (g.board[cur][0].occ == 1 && c_has_type(wg_cards[g.board[cur][0].ci], 2) && hbe) { valid = true; extra_sc = get_w(cur, 14u); }
             } else if (ab_val == 4) {
               var oe = false;
-              for (var k = 0u; k < 4u; k = k + 1u) { if (k != s && g.board[cur][k].occ == 1 && g.board[cur][k].energy > 0) { oe = true; break; } }
+              for (var k = 0u; k < 4u; k = k + 1u) { if (k != s && g.board[cur][k].occ == 1 && e_cnt(g.board[cur][k].e_pack, 6u) > 0) { oe = true; break; } }
               if (oe) { valid = true; extra_sc = get_w(cur, 14u); }
             }
           }
@@ -2389,10 +2876,11 @@ fn main(
                 let scard = wg_cards[g.board[cur][s].ci];
                 var okt = true;
                 if (sub == 2) { okt = c_has_type(scard, tcond - 1); }
-                else if (sub == 3 || sub == 10) { okt = g.board[cur][s].energy > 0; }
+                else if (sub == 3) { okt = e_cnt(g.board[cur][s].e_pack, 2u) > 0; }
                 else if (sub == 4) { okt = s_stage(g.board[cur][s]) == 2; }
                 else if (sub == 7 || sub == 8) { okt = s == 0u; }
-                else if (sub == 11) { okt = c_has_type(scard, 4) && g.board[cur][s].energy >= 2; }
+                else if (sub == 10) { okt = g.board[cur][s].energy > 0; }
+                else if (sub == 11) { okt = c_has_type(scard, 4) && e_cnt(g.board[cur][s].e_pack, 4u) >= 2; }
                 else if (sub == 12 || sub == 13 || sub == 14) { okt = c_matches_hashes(scard, c.r21, c.r22); }
                 if (okt) { tm = max(tm, g.board[cur][s].max_hp - g.board[cur][s].hp); }
               }
@@ -2423,7 +2911,11 @@ fn main(
             } else if (sub == 11) {
               var ht = g.stadium != 0; for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[foe][s].occ == 1 && s_tool_cnt(g.board[foe][s]) > 0) { ht = true; break; } }
               playable = ht;
-            } else if (sub == 12) { playable = g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0; }
+            } else if (sub == 12) {
+              let et = c_ab_trn_etype(c);
+              if (tv == 1 && et < 8u) { playable = g.board[foe][0].occ == 1 && e_cnt(g.board[foe][0].e_pack, et) > 0; }
+              else { playable = g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0; }
+            }
             else if (sub == 13) {
               var hn = false; for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { hn = true; break; } }
               playable = hn && g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0;
@@ -2541,10 +3033,34 @@ fn main(
             } else if (sub == 12 || sub == 13) {
               var hn = false; for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { hn = true; break; } }
               playable = hn && (sub == 12 || turn == 1u || g.board[cur][0].energy < 2); sc = sc + get_w(cur, 15u);
-            } else if (sub == 14 || sub == 15) {
-              var be = false; for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0) { be = true; break; } }
-              let aok = select(g.board[cur][0].occ == 1, g.board[cur][0].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][0].ci], c.r21, c.r22), sub == 15 && tv == 1);
-              playable = aok && be; sc = sc + get_w(cur, 14u);
+            } else if (sub == 14) {
+              var be = false;
+              for (var s = 1u; s < 4u; s = s + 1u) {
+                if (g.board[cur][s].occ == 0 || g.board[cur][s].energy <= 0) { continue; }
+                if (tv == 2) { if ((e_type_mask(g.board[cur][s].e_pack) & 14u) != 0u) { be = true; break; } }
+                else { be = true; break; }
+              }
+              playable = g.board[cur][0].occ == 1 && be; sc = sc + get_w(cur, 14u);
+            } else if (sub == 15) {
+              var be = false;
+              if (tv == 2) {
+                var bm = 0u;
+                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1) { bm = bm | e_type_mask(g.board[cur][s].e_pack); } }
+                if (countOneBits(bm) >= 3u) {
+                  for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0) { be = true; break; } }
+                }
+                playable = g.board[cur][0].occ == 1 && be;
+              } else {
+                let et = c_ab_trn_etype(c);
+                for (var s = 1u; s < 4u; s = s + 1u) {
+                  if (g.board[cur][s].occ == 0) { continue; }
+                  if (et == 4u && !c_has_type(wg_cards[g.board[cur][s].ci], 4)) { continue; }
+                  if (et < 8u) { if (e_cnt(g.board[cur][s].e_pack, et) > 0) { be = true; break; } }
+                  else if (g.board[cur][s].energy > 0) { be = true; break; }
+                }
+                playable = g.board[cur][0].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][0].ci], c.r21, c.r22) && be;
+              }
+              sc = sc + get_w(cur, 14u);
             } else if (sub == 16) {
               playable = turn >= 2u && g.board[cur][0].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][0].ci], c.r21, c.r22); sc = sc + get_w(cur, 14u);
             } else { playable = false; }
@@ -2555,18 +3071,32 @@ fn main(
         if (playable && sc > best_score) { best_score = sc; best_kind = 3u; best_a = hi; }
       }
 
-      // 5. Energy attach
-      if (!energy_attached) {
+      // 5. Energy attach (color-aware AI)
+      if (!energy_attached && turn_etype < 8u) {
         for (var s = 0u; s < 4u; s = s + 1u) {
           if (g.board[cur][s].occ == 0) { continue; }
           if (s == 0u && (g.board[cur][0].status & ST_NO_ENERGY_ATTACH) != 0u) { continue; }
           let bc = wg_cards[g.board[cur][s].ci];
           let a1c = c_a1_cost(bc); let a2c = c_a2_cost(bc);
           let max_c = select(select(1, a1c, a1c != 255), a2c, a2c != 255 && a2c > a1c);
-          let ex_n = select(0, i32((u32(bc.r10) >> 16u) & 255u), c_a1_op1(bc) == 7 && (bc.r10 & 255) == 0);
-          let need_b = g.board[cur][s].energy < max_c + ex_n;
-          let chip_b = select(0, (get_w(cur, 21u) * 45) / 100, ab_active(cur, s, turn_i) && c_ab_op(bc) == 7 && bc.r18 < 100);
-          let sc = get_w(cur, 13u) + select(0, get_w(cur, 14u), s == 0u) + select(0, get_w(cur, 15u), need_b) + chip_b + ((bc.power_q * get_w(cur, 16u)) >> 10u) + ((bc.bonus_q * 25) / 100);
+          var ex_n = 0;
+          var ex_et = 255u;
+          if (c_a1_op1(bc) == 7 && (bc.r10 & 255) == 0) {
+            ex_n = i32((u32(bc.r10) >> 16u) & 255u);
+            ex_et = c_a1_eff_etype(bc);
+          } else if (a2c != 255 && c_a2_op1(bc) == 7 && (bc.r15 & 255) == 0) {
+            ex_n = i32((u32(bc.r15) >> 16u) & 255u);
+            ex_et = c_a2_eff_etype(bc);
+          }
+          let have_t = eff_typed_energy(cur, s, turn_etype, turn_i);
+          var req_t = card_max_req_t(bc, turn_etype);
+          if (ex_et == turn_etype) { req_t = req_t + ex_n; }
+          let color_shortfall = have_t < req_t;
+          let need_b = eff_energy(cur, s, turn_i) < max_c + ex_n;
+          let ab_et = c_ab_trn_etype(bc);
+          let chip_b = select(0, (get_w(cur, 21u) * 45) / 100, ab_active(cur, s, turn_i) && c_ab_op(bc) == 7 && bc.r18 < 100 && (ab_et == 255u || ab_et == turn_etype));
+          let demand_sc = select(select(0, get_w(cur, 15u), need_b), get_w(cur, 15u) + (get_w(cur, 15u) >> 1u), color_shortfall);
+          let sc = get_w(cur, 13u) + select(0, get_w(cur, 14u), s == 0u) + demand_sc + chip_b + ((bc.power_q * get_w(cur, 16u)) >> 10u) + ((bc.bonus_q * 25) / 100);
           if (sc > best_score) { best_score = sc; best_kind = 5u; best_a = s; }
         }
       }
@@ -2598,6 +3128,8 @@ fn main(
           if (ai == 0u && (g.board[cur][0].status & ST_CANT_USE_A1) != 0u) { continue; }
           if (ai == 1u && (g.board[cur][0].status & ST_CANT_USE_A2) != 0u) { continue; }
           let ac = select(c_a2_cost(atk_c), c_a1_cost(atk_c), ai == 0u);
+          let aec = select(c_a2_ecost(atk_c), c_a1_ecost(atk_c), ai == 0u);
+          let aet = select(c_a2_eff_etype(atk_c), c_a1_eff_etype(atk_c), ai == 0u);
           let af = select(c_a2_flags(atk_c), c_a1_flags(atk_c), ai == 0u);
           let ad = select(atk_c.r13, atk_c.r8, ai == 0u);
           let ao1 = select(c_a2_op1(atk_c), c_a1_op1(atk_c), ai == 0u);
@@ -2605,8 +3137,8 @@ fn main(
           let ao2 = select(c_a2_op2(atk_c), c_a1_op2(atk_c), ai == 0u);
           let av2 = select(atk_c.r16, atk_c.r11, ai == 0u);
           let aaux = select(c_a2_aux(atk_c), c_a1_aux(atk_c), ai == 0u);
-          if (!can_pay_attack(cur, foe, ac, af, my_barry, turn_i)) { continue; }
-          let ld = eval_live_dmg_v3(cur, foe, ac, ad, ao1, av1, aaux, supporter_used, turn_i);
+          if (!can_pay_attack(cur, foe, ac, aec, af, my_barry, turn_i)) { continue; }
+          let ld = eval_live_dmg_v3(cur, foe, ac, aec, aet, ad, ao1, av1, aaux, supporter_used, turn_i);
           let raw_d = ld.x;
           let is_sp = ld.y != 0;
           if (raw_d <= 0 && !is_sp && ao1 == 0 && ao2 == 0) { continue; }
@@ -2649,8 +3181,7 @@ fn main(
             for (var k = 0u; k < 4u; k = k + 1u) { if (g.board[cur][k].occ == 1 && k != best_b) { te = te + g.board[cur][k].energy; } }
             let need_e = select(3, max(2, c_a1_cost(c)), c_a1_cost(c) != 255);
             if (!walling && te >= need_e) {
-              for (var k = 0u; k < 4u; k = k + 1u) { if (g.board[cur][k].occ == 1 && k != best_b) { g.board[cur][k].energy = 0; } }
-              g.board[cur][best_b].energy = g.board[cur][best_b].energy + te;
+              for (var k = 0u; k < 4u; k = k + 1u) { if (g.board[cur][k].occ == 1 && k != best_b) { slot_move_all_e(cur, k, cur, best_b); } }
               let tmp = g.board[cur][0]; g.board[cur][0] = g.board[cur][best_b]; g.board[cur][best_b] = tmp;
               g.board[cur][0].status = (g.board[cur][0].status | ST_SWITCHED_IN) & (~ST_HAS_ATTACKED);
             }
@@ -2675,7 +3206,11 @@ fn main(
         if (c_has_type(c, 0)) {
           for (var k = 0u; k < 4u; k = k + 1u) { if (ab_active(cur, k, turn_i) && c_ab_op(wg_cards[g.board[cur][k].ci]) == 18 && wg_cards[g.board[cur][k].ci].r18 == 20) { ehp = ehp + 20; } }
         }
-        if (c_ab_op(c) == 18 && c.r18 == 99) { ehp = ehp + g.board[cur][best_b].energy * 30; }
+        if (c_ab_op(c) == 18 && c.r18 == 99) {
+          let et = c_ab_trn_etype(c);
+          let cnt_hp = select(g.board[cur][best_b].energy, e_cnt(g.board[cur][best_b].e_pack, et), et < 8u);
+          ehp = ehp + cnt_hp * 30;
+        }
         g.board[cur][best_b].ci = ci;
         g.board[cur][best_b].stage_ov = -1;
         g.board[cur][best_b].max_hp = c.r5 + bhp + ehp;
@@ -2690,7 +3225,7 @@ fn main(
         if (c_ab_op(c) == 5) {
           sync_ab(turn_i);
           switch (c.r18) {
-            case 1: { if (g.board[cur][0].occ == 1 && c_has_type(wg_cards[g.board[cur][0].ci], 1)) { g.board[cur][0].energy = g.board[cur][0].energy + 1; } }
+            case 1: { if (g.board[cur][0].occ == 1 && c_has_type(wg_cards[g.board[cur][0].ci], 1)) { slot_add_e(cur, 0u, c_ab_trn_etype(c), 1); } }
             case 2: { draw_one(cur); draw_one(cur); }
             case 3: {
               for (var bs = 1u; bs < 4u; bs = bs + 1u) {
@@ -2733,14 +3268,14 @@ fn main(
                 } else { taken = taken + 1u; }
               }
             }
-            case 10: { if (g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0) { g.board[foe][0].energy = g.board[foe][0].energy - 1; g.energy_discarded[foe] = 1; } }
+            case 10: { if (g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0) { slot_rem_any_e(foe, 0u, 1, 0u); g.energy_discarded[foe] = 1; } }
             case 12: {
               if (!heal_blocked) {
                 for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_has_type(wg_cards[g.board[cur][s].ci], 2) && g.board[cur][s].hp < g.board[cur][s].max_hp) { g.board[cur][s].hp = min(g.board[cur][s].max_hp, g.board[cur][s].hp + 60); break; } }
               }
             }
             case 13: { apply_status(foe, 0u, ST_POISON | ST_BURN, turn_i, false); }
-            case 14: { if (g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0) { g.board[foe][0].energy = g.board[foe][0].energy - 1; g.board[cur][best_b].energy = g.board[cur][best_b].energy + 1; } }
+            case 14: { if (g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0) { slot_move_typed_e(foe, 0u, cur, best_b, 255u, 1); } }
             case 15: { g.board[cur][best_b].status = g.board[cur][best_b].status | ST_INVULN; }
             default: {}
           }
@@ -2866,7 +3401,7 @@ fn main(
           case 2: {
             if (sub == 3) {
               if (!heal_blocked) {
-                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0) { g.board[cur][s].hp = min(g.board[cur][s].max_hp, g.board[cur][s].hp + 40); } }
+                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && e_cnt(g.board[cur][s].e_pack, 2u) > 0) { g.board[cur][s].hp = min(g.board[cur][s].max_hp, g.board[cur][s].hp + 40); } }
               }
             } else if (sub == 6) { if (g.board[cur][0].occ == 1) { g.board[cur][0].status = g.board[cur][0].status & (~ST_SPECIAL_MASK); } }
             else if (sub == 7) {
@@ -2908,7 +3443,7 @@ fn main(
                 if (sub == 2) { ok = c_has_type(scard, tcond - 1); }
                 else if (sub == 4) { ok = s_stage(g.board[cur][s]) == 2; }
                 else if (sub == 10) { ok = g.board[cur][s].energy > 0; }
-                else if (sub == 11) { ok = c_has_type(scard, 4) && g.board[cur][s].energy >= 2; }
+                else if (sub == 11) { ok = c_has_type(scard, 4) && e_cnt(g.board[cur][s].e_pack, 4u) >= 2; }
                 else if (sub == 12 || sub == 13 || sub == 14) { ok = c_matches_hashes(scard, c.r21, c.r22); }
                 if (ok) {
                   let miss = g.board[cur][s].max_hp - g.board[cur][s].hp;
@@ -2919,9 +3454,17 @@ fn main(
                 if (!heal_blocked && best_m > 0) {
                   let h = min(tv, g.board[cur][best_s].max_hp);
                   g.board[cur][best_s].hp = min(g.board[cur][best_s].max_hp, g.board[cur][best_s].hp + h);
-                  if (sub == 10) { g.board[cur][best_s].energy = max(0, g.board[cur][best_s].energy - 1); g.energy_discarded[cur] = 1; }
-                  else if (sub == 11) { g.board[cur][best_s].energy = max(0, g.board[cur][best_s].energy - 2); g.energy_discarded[cur] = 1; }
-                  else if (sub == 12) { if (g.board[cur][best_s].energy > 0) { g.energy_discarded[cur] = 1; } g.board[cur][best_s].energy = 0; }
+                  if (sub == 10) {
+                    let bsc = wg_cards[g.board[cur][best_s].ci];
+                    slot_rem_any_e(cur, best_s, 1, c_a1_ecost(bsc) | c_a2_ecost(bsc));
+                    g.energy_discarded[cur] = 1;
+                  } else if (sub == 11) {
+                    slot_rem_typed_e(cur, best_s, 4u, 2);
+                    g.energy_discarded[cur] = 1;
+                  } else if (sub == 12) {
+                    if (g.board[cur][best_s].energy > 0) { g.energy_discarded[cur] = 1; }
+                    slot_clear_e(cur, best_s);
+                  }
                 }
                 if (sub == 5) { g.board[cur][best_s].status = g.board[cur][best_s].status & (~ST_SPECIAL_MASK); }
                 else if (sub == 13) { g.board[cur][best_s].status = g.board[cur][best_s].status & (~(ST_SLEEP | ST_DEEP_SLEEP | ST_PARALYZE | ST_CONFUSE)); }
@@ -2996,17 +3539,19 @@ fn main(
               case 12: {
                 if (g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0) {
                   var disc = 0;
+                  let et = c_ab_trn_etype(c);
                   if (tv == 99) {
-                    for (var l = 0u; l < 6u; l = l + 1u) { if (g.board[foe][0].energy > 0 && flip_coin_g(&guar_heads)) { g.board[foe][0].energy = g.board[foe][0].energy - 1; disc = disc + 1; } else { break; } }
+                    for (var l = 0u; l < 6u; l = l + 1u) { if (g.board[foe][0].energy > 0 && flip_coin_g(&guar_heads)) { disc = disc + slot_rem_any_e(foe, 0u, 1, 0u); } else { break; } }
                   } else if (tv == 2) {
-                    if (flip_coin_g(&guar_heads) && flip_coin_g(&guar_heads)) { g.board[foe][0].energy = g.board[foe][0].energy - 1; disc = 1; }
-                  } else { g.board[foe][0].energy = g.board[foe][0].energy - 1; disc = 1; }
+                    if (flip_coin_g(&guar_heads) && flip_coin_g(&guar_heads)) { disc = slot_rem_any_e(foe, 0u, 1, 0u); }
+                  } else if (et < 8u) { disc = slot_rem_typed_e(foe, 0u, et, 1); }
+                  else { disc = slot_rem_any_e(foe, 0u, 1, 0u); }
                   if (disc > 0) { g.energy_discarded[foe] = 1; }
                 }
               }
-              case 13: { if (g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0) { g.board[foe][0].energy = max(0, g.board[foe][0].energy - 2); g.energy_discarded[foe] = 1; } }
+              case 13: { if (g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0) { slot_rem_any_e(foe, 0u, 2, 0u); g.energy_discarded[foe] = 1; } }
               case 14: {
-                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[foe][s].occ == 1 && c_ab_op(wg_cards[g.board[foe][s].ci]) != 0 && g.board[foe][s].energy > 0) { g.board[foe][s].energy = g.board[foe][s].energy - 1; g.energy_discarded[foe] = 1; break; } }
+                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[foe][s].occ == 1 && c_ab_op(wg_cards[g.board[foe][s].ci]) != 0 && g.board[foe][s].energy > 0) { slot_rem_any_e(foe, s, 1, 0u); g.energy_discarded[foe] = 1; break; } }
               }
               case 15: {
                 apply_status(foe, 0u, ST_CONFUSE, turn_i, false);
@@ -3044,7 +3589,7 @@ fn main(
                 }
               }
               case 19: {
-                for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[foe][bs].occ == 1 && g.board[foe][bs].energy > 0) { g.board[foe][bs].energy = g.board[foe][bs].energy - 1; g.board[foe][0].energy = g.board[foe][0].energy + 1; break; } }
+                for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[foe][bs].occ == 1 && g.board[foe][bs].energy > 0) { slot_move_typed_e(foe, bs, foe, 0u, 255u, 1); break; } }
               }
               case 20: {
                 let bci = g.board[cur][0].ci;
@@ -3164,27 +3709,75 @@ fn main(
               }
               case 5: {
                 var h = 0; for (var l = 0u; l < 8u; l = l + 1u) { if (flip_coin_g(&guar_heads)) { h = h + 1; } else { break; } }
-                if (g.board[cur][0].occ == 1 && c_has_type(wg_cards[g.board[cur][0].ci], 2)) { g.board[cur][0].energy = g.board[cur][0].energy + h; }
+                if (h > 0) {
+                  for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_has_type(wg_cards[g.board[cur][s].ci], 2)) { slot_add_e(cur, s, 2u, h); break; } }
+                }
               }
               case 6: {
                 var h = flip_coin_g(&guar_heads);
                 if (!h && has_ghold) { gholdengo_used = true; h = flip_coin_g(&guar_heads); }
-                if (h) { for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_has_type(wg_cards[g.board[cur][s].ci], 3)) { g.board[cur][s].energy = g.board[cur][s].energy + 1; break; } } }
+                if (h) { for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_has_type(wg_cards[g.board[cur][s].ci], 3)) { slot_add_e(cur, s, 3u, 1); break; } } }
               }
-              case 7: { for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && s_stage(g.board[cur][s]) == 2) { g.board[cur][s].energy = g.board[cur][s].energy + 1; break; } } }
-              case 8: { if (g.board[cur][0].occ == 1 && c_has_type(wg_cards[g.board[cur][0].ci], 1)) { g.board[cur][0].energy = g.board[cur][0].energy + 1; } }
-              case 9: { for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_is_ub(wg_cards[g.board[cur][s].ci])) { g.board[cur][s].energy = g.board[cur][s].energy + 2; break; } } }
-              case 10: { for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { g.board[cur][s].energy = g.board[cur][s].energy + 2; break; } } }
-              case 11: { for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_is_ancient(wg_cards[g.board[cur][s].ci])) { g.board[cur][s].energy = g.board[cur][s].energy + 3; break; } } }
-              case 12: { for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { g.board[cur][s].energy = g.board[cur][s].energy + tv; } } }
+              case 7: { for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && s_stage(g.board[cur][s]) == 2) { slot_add_e(cur, s, 9u, 1); break; } } }
+              case 8: { if (g.board[cur][0].occ == 1 && c_has_type(wg_cards[g.board[cur][0].ci], 1)) { slot_add_e(cur, 0u, 1u, 1); } }
+              case 9: {
+                for (var s = 0u; s < 4u; s = s + 1u) {
+                  if (g.board[cur][s].occ == 1 && c_is_ub(wg_cards[g.board[cur][s].ci])) {
+                    let et1 = pick_needed_etype(cur, s, g.deck_emask[cur]);
+                    slot_add_e(cur, s, et1, 1);
+                    let et2 = pick_needed_etype(cur, s, g.deck_emask[cur]);
+                    slot_add_e(cur, s, et2, 1);
+                    break;
+                  }
+                }
+              }
+              case 10: { for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { slot_add_e(cur, s, 3u, 2); break; } } }
+              case 11: {
+                for (var s = 0u; s < 4u; s = s + 1u) {
+                  if (g.board[cur][s].occ == 1 && c_is_ancient(wg_cards[g.board[cur][s].ci])) {
+                    var added_m = 0u;
+                    var added = 0;
+                    for (var t = 0u; t < 8u; t = t + 1u) {
+                      if (added < 3 && (g.deck_emask[cur] & (1u << t)) != 0u) {
+                        slot_add_e(cur, s, t, 1);
+                        added_m = added_m | (1u << t);
+                        added = added + 1;
+                      }
+                    }
+                    for (var t = 0u; t < 8u; t = t + 1u) {
+                      if (added < 3 && (added_m & (1u << t)) == 0u) {
+                        slot_add_e(cur, s, t, 1);
+                        added = added + 1;
+                      }
+                    }
+                    break;
+                  }
+                }
+              }
+              case 12: {
+                let et = c_ab_trn_etype(c);
+                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { slot_add_e(cur, s, et, tv); } }
+              }
               case 13: {
-                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { g.board[cur][s].energy = g.board[cur][s].energy + 2; break; } }
+                for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && c_matches_hashes(wg_cards[g.board[cur][s].ci], c.r21, c.r22)) { slot_add_e(cur, s, 1u, 2); break; } }
                 end_turn_now = true;
               }
-              case 14: { for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0) { g.board[cur][s].energy = g.board[cur][s].energy - 1; g.board[cur][0].energy = g.board[cur][0].energy + 1; break; } } }
+              case 14: {
+                let mv_et = select(255u, 250u, tv == 2);
+                for (var s = 1u; s < 4u; s = s + 1u) {
+                  if (g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0) {
+                    if (slot_move_typed_e(cur, s, cur, 0u, mv_et, 1) > 0) { break; }
+                  }
+                }
+              }
               case 15: {
-                var tot = 0; for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0) { tot = tot + g.board[cur][s].energy; g.board[cur][s].energy = 0; } }
-                g.board[cur][0].energy = g.board[cur][0].energy + tot;
+                let mv_et = select(c_ab_trn_etype(c), 255u, tv == 2);
+                for (var s = 1u; s < 4u; s = s + 1u) {
+                  if (g.board[cur][s].occ == 0 || g.board[cur][s].energy <= 0) { continue; }
+                  if (tv == 1 && mv_et == 4u && !c_has_type(wg_cards[g.board[cur][s].ci], 4)) { continue; }
+                  slot_move_typed_e(cur, s, cur, 0u, mv_et, 99);
+                  if (tv == 1 && mv_et == 4u) { break; }
+                }
               }
               case 16: { barry_disc = 2; barry_h1 = c.r21; barry_h2 = c.r22; }
               default: {}
@@ -3207,15 +3800,27 @@ fn main(
         let ac = wg_cards[g.board[cur][best_a].ci];
         let ab_op = c_ab_op(ac);
         let ab_val = ac.r18;
+        let ab_et = c_ab_trn_etype(ac);
         var end_turn_now = false;
         switch (ab_op) {
           case 3: {
-            if (ab_val == 1) { g.board[cur][best_a].energy = g.board[cur][best_a].energy + 1; }
-            else if (ab_val == 2) { g.board[cur][best_a].energy = g.board[cur][best_a].energy + 1; g.board[cur][best_a].hp = max(10, g.board[cur][best_a].hp - 20); }
-            else if (ab_val == 3) { g.board[cur][best_a].energy = g.board[cur][best_a].energy + 2; g.board[cur][best_a].hp = max(10, g.board[cur][best_a].hp - 30); }
-            else if (ab_val == 4) { g.board[cur][best_a].energy = g.board[cur][best_a].energy + 1; end_turn_now = true; }
+            if (ab_val == 1) { slot_add_e(cur, best_a, ab_et, 1); }
+            else if (ab_val == 2) { slot_add_e(cur, best_a, ab_et, 1); g.board[cur][best_a].hp = max(10, g.board[cur][best_a].hp - 20); }
+            else if (ab_val == 3) { slot_add_e(cur, best_a, ab_et, 2); g.board[cur][best_a].hp = max(10, g.board[cur][best_a].hp - 30); }
+            else if (ab_val == 4) { slot_add_e(cur, best_a, ab_et, 1); end_turn_now = true; }
           }
-          case 4: { if (g.board[cur][0].occ == 1) { g.board[cur][0].energy = g.board[cur][0].energy + 1; } }
+          case 4: {
+            if (ab_val == 2) {
+              if (g.board[cur][0].occ == 1) {
+                let et = pick_needed_etype(cur, 0u, g.deck_emask[cur]);
+                slot_add_e(cur, 0u, et, 1);
+              }
+            } else if (ab_val == 3) {
+              for (var k = 0u; k < 4u; k = k + 1u) { if (g.board[cur][k].occ == 1 && c_has_type(wg_cards[g.board[cur][k].ci], 0)) { slot_add_e(cur, k, 0u, 1); break; } }
+            } else if (g.board[cur][0].occ == 1 && (ab_et >= 8u || c_has_type(wg_cards[g.board[cur][0].ci], i32(ab_et)))) {
+              slot_add_e(cur, 0u, ab_et, 1);
+            }
+          }
           case 8: {
             let ds = ab_val & 255;
             let ao = ((ab_val >> 8u) & 255) != 0;
@@ -3231,7 +3836,7 @@ fn main(
               else { handle_bench_ko(foe, cur, ts, false, turn_i); }
             }
           }
-          case 12: { if (g.board[cur][best_a].energy > 0) { g.board[cur][best_a].energy = g.board[cur][best_a].energy - 1; g.energy_discarded[cur] = 1; dmg_boost = dmg_boost + 50; } }
+          case 12: { if (slot_rem_typed_e(cur, best_a, 1u, 1) > 0) { g.energy_discarded[cur] = 1; dmg_boost = dmg_boost + 50; } }
           case 14: {
             let amt = ab_val & 255; let mode = (ab_val >> 8u) & 255;
             if (mode <= 1) { if (!heal_blocked && g.board[cur][0].occ == 1) { g.board[cur][0].hp = min(g.board[cur][0].max_hp, g.board[cur][0].hp + amt); } }
@@ -3241,7 +3846,12 @@ fn main(
                 for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && (tf == 255 || c_has_type(wg_cards[g.board[cur][s].ci], tf))) { g.board[cur][s].hp = min(g.board[cur][s].max_hp, g.board[cur][s].hp + amt); } }
               }
             } else if (mode == 3) {
-              if (!heal_blocked && g.board[cur][0].occ == 1 && g.board[cur][0].energy > 0) { g.board[cur][0].hp = min(g.board[cur][0].max_hp, g.board[cur][0].hp + 60); g.board[cur][0].energy = g.board[cur][0].energy - 1; g.energy_discarded[cur] = 1; }
+              if (!heal_blocked && g.board[cur][0].occ == 1 && g.board[cur][0].energy > 0) {
+                g.board[cur][0].hp = min(g.board[cur][0].max_hp, g.board[cur][0].hp + 60);
+                let act_c = wg_cards[g.board[cur][0].ci];
+                slot_rem_any_e(cur, 0u, 1, c_a1_ecost(act_c) | c_a2_ecost(act_c));
+                g.energy_discarded[cur] = 1;
+              }
             } else if (mode == 4 && g.board[cur][0].occ == 1 && best_a > 0u) {
               let mv = max(0, min(min(g.board[cur][0].max_hp - g.board[cur][0].hp, 30), g.board[cur][best_a].hp - 10));
               g.board[cur][0].hp = g.board[cur][0].hp + mv; g.board[cur][best_a].hp = g.board[cur][best_a].hp - mv;
@@ -3255,12 +3865,13 @@ fn main(
               let prom = best_bench_promote(cur);
               if (prom < 4u) { g.board[cur][0].status = g.board[cur][0].status & (~ST_LEAVE_ACTIVE_CLEAR); g.board[cur][0].stack_boost = 0; let t = g.board[cur][0]; g.board[cur][0] = g.board[cur][prom]; g.board[cur][prom] = t; g.board[cur][0].status = (g.board[cur][0].status | ST_SWITCHED_IN) & (~ST_HAS_ATTACKED); }
             } else if (ab_val == 2) {
-              for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[cur][bs].occ == 1 && g.board[cur][bs].energy > 0) { g.board[cur][0].energy = g.board[cur][0].energy + g.board[cur][bs].energy; g.board[cur][bs].energy = 0; break; } }
+              for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[cur][bs].occ == 1 && c_has_type(wg_cards[g.board[cur][bs].ci], 4) && e_cnt(g.board[cur][bs].e_pack, 4u) > 0) { slot_move_typed_e(cur, bs, cur, 0u, 4u, 99); break; } }
             } else if (ab_val == 3) {
-              for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[cur][bs].occ == 1 && g.board[cur][bs].energy > 0) { g.board[cur][bs].energy = g.board[cur][bs].energy - 1; g.board[cur][0].energy = g.board[cur][0].energy + 1; break; } }
+              if (g.board[cur][0].occ == 1 && c_has_type(wg_cards[g.board[cur][0].ci], 2)) {
+                for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[cur][bs].occ == 1 && c_has_type(wg_cards[g.board[cur][bs].ci], 2) && e_cnt(g.board[cur][bs].e_pack, 2u) > 0) { slot_move_typed_e(cur, bs, cur, 0u, 2u, 1); break; } }
+              }
             } else if (ab_val == 4) {
-              var tot = 0; for (var k = 0u; k < 4u; k = k + 1u) { if (k != best_a && g.board[cur][k].occ == 1 && g.board[cur][k].energy > 0) { tot = tot + g.board[cur][k].energy; g.board[cur][k].energy = 0; } }
-              g.board[cur][best_a].energy = g.board[cur][best_a].energy + tot;
+              for (var k = 0u; k < 4u; k = k + 1u) { if (k != best_a && g.board[cur][k].occ == 1 && e_cnt(g.board[cur][k].e_pack, 6u) > 0) { slot_move_typed_e(cur, k, cur, best_a, 6u, 99); } }
             }
           }
           case 19: {
@@ -3309,14 +3920,15 @@ fn main(
         if (end_turn_now) { break; }
       } else if (best_kind == 5u) {
         energy_attached = true;
-        g.board[cur][best_a].energy = g.board[cur][best_a].energy + 1;
+        slot_add_e(cur, best_a, turn_etype, 1);
         let tc = wg_cards[g.board[cur][best_a].ci];
-        if (ab_active(cur, best_a, turn_i) && c_ab_op(tc) == 18 && tc.r18 == 99) {
+        let tc_et = c_ab_trn_etype(tc);
+        if (ab_active(cur, best_a, turn_i) && c_ab_op(tc) == 18 && tc.r18 == 99 && (tc_et == 255u || tc_et == turn_etype)) {
           g.board[cur][best_a].max_hp = g.board[cur][best_a].max_hp + 30;
           g.board[cur][best_a].hp = g.board[cur][best_a].hp + 30;
         }
         if (best_a == 0u && (g.board[cur][0].status & ST_ATTACH_SLEEP) != 0u) { apply_status(cur, 0u, ST_SLEEP, turn_i, false); }
-        if (ab_active(cur, best_a, turn_i) && c_ab_op(tc) == 7) {
+        if (ab_active(cur, best_a, turn_i) && c_ab_op(tc) == 7 && (tc_et == 255u || tc_et == turn_etype)) {
           let av = tc.r18;
           if (av < 100 && g.board[foe][0].occ == 1) {
             g.board[foe][0].hp = g.board[foe][0].hp - av;
@@ -3354,8 +3966,11 @@ fn main(
         retreated = true;
         let pay = max(0, eff_retreat_cost(cur, turn_i, retreat_disc));
         let had_trap = (g.board[cur][0].status & ST_RETREAT_TRAP) != 0u;
-        if (pay > 0) { g.energy_discarded[cur] = 1; }
-        g.board[cur][0].energy = max(0, g.board[cur][0].energy - pay);
+        if (pay > 0) {
+          let act_c = wg_cards[g.board[cur][0].ci];
+          slot_rem_any_e(cur, 0u, pay, c_a1_ecost(act_c) | c_a2_ecost(act_c));
+          g.energy_discarded[cur] = 1;
+        }
         g.board[cur][0].status = g.board[cur][0].status & (~ST_LEAVE_ACTIVE_CLEAR);
         g.board[cur][0].weaken = 0; g.board[cur][0].cost_tax = 0; g.board[cur][0].retreat_tax = 0;
         g.board[cur][0].next_atk_mod = 0; g.board[cur][0].stack_boost = 0;
@@ -3494,6 +4109,9 @@ struct Card {
   r17: i32, r18: i32, r19: i32, r20: i32, r21: i32, r22: i32,
   power_q: i32,
   bonus_q: i32,
+  r25: u32,
+  r26: u32,
+  r27: u32,
 };
 
 struct Slot {
@@ -3503,6 +4121,7 @@ struct Slot {
   hp: i32,
   max_hp: i32,
   energy: i32,
+  e_pack: u32,
   tool: i32,
   tool2: i32,
   status: u32,
@@ -3548,6 +4167,7 @@ struct GameState {
   disc_volbeat: array<i32, 2>,
   delayed_slot: array<u32, 2>,
   delayed_dmg: array<i32, 2>,
+  deck_emask: array<u32, 2>,
   rng: u32,
   stadium: i32,
   cur: u32,
@@ -3576,6 +4196,8 @@ struct GameState {
   drayden_bonus: i32,
   ab_mask: u32,
   pad0: u32,
+  pad1: u32,
+  pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -3635,6 +4257,12 @@ fn c_ab_aux(c: Card) -> i32 { return i32((u32(c.r17) >> 16u) & 65535u); }
 fn c_trn_kind(c: Card) -> i32 { return c.r19 & 255; }
 fn c_trn_sub(c: Card) -> i32 { return i32((u32(c.r19) >> 8u) & 255u); }
 fn c_trn_cond(c: Card) -> i32 { return i32((u32(c.r19) >> 16u) & 255u); }
+fn c_a1_ecost(c: Card) -> u32 { return c.r25; }
+fn c_a2_ecost(c: Card) -> u32 { return c.r26; }
+fn c_deck_emask(c: Card) -> u32 { let m = c.r27 & 255u; return select(m, 2u, m == 0u); }
+fn c_ab_trn_etype(c: Card) -> u32 { return (c.r27 >> 8u) & 255u; }
+fn c_a1_eff_etype(c: Card) -> u32 { return (c.r27 >> 16u) & 255u; }
+fn c_a2_eff_etype(c: Card) -> u32 { return (c.r27 >> 24u) & 255u; }
 fn c_matches_hashes(c: Card, h1: i32, h2: i32) -> bool {
   let nh = c_name_hash(c);
   if (nh == 0) { return false; }
@@ -3649,10 +4277,10 @@ fn s_has_tool(sl: Slot, t: i32) -> bool { return sl.tool == t || sl.tool2 == t; 
 fn s_tool_cnt(sl: Slot) -> i32 { return select(0, 1, sl.tool != 0) + select(0, 1, sl.tool2 != 0); }
 fn s_stage(sl: Slot) -> i32 { return select(sl.stage_ov, c_stage(wg_cards[sl.ci]), sl.stage_ov < 0); }
 fn make_slot(ci: u32, hp: i32, turn_p: i32) -> Slot {
-  return Slot(1, ci, -1, hp, hp, 0, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, turn_p);
+  return Slot(1, ci, -1, hp, hp, 0, 0u, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, turn_p);
 }
 fn empty_slot() -> Slot {
-  return Slot(0, 0u, -1, 0, 0, 0, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+  return Slot(0, 0u, -1, 0, 0, 0, 0u, 0, 0, 0u, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 }
 
 fn est_atk_power_v3(dmg: i32, op1: i32, val1: i32) -> i32 {
@@ -3717,6 +4345,9 @@ fn load_card_vram(deck_slot: u32, idx: u32) -> Card {
   let p2 = select(0, est_atk_power_v3(c.r13, c_a2_op1(c), c.r15), c_a2_cost(c) != 255);
   c.power_q = (max(p1, p2) * 1024) / 100;
   c.bonus_q = decks_buf[o + 24u];
+  c.r25 = u32(decks_buf[o + 25u]);
+  c.r26 = u32(decks_buf[o + 26u]);
+  c.r27 = u32(decks_buf[o + 27u]);
   return c;
 }
 
@@ -3728,6 +4359,7 @@ fn make_sweet_honey_card() -> Card {
   c.r12 = 255; c.r13 = 0; c.r14 = 0; c.r15 = 0; c.r16 = 0;
   c.r17 = 0; c.r18 = 0; c.r19 = 2 | (9 << 8u); c.r20 = 20; c.r21 = 0; c.r22 = 0;
   c.power_q = 0; c.bonus_q = 0;
+  c.r25 = 0u; c.r26 = 0u; c.r27 = 0xffffff02u;
   return c;
 }
 
@@ -3788,6 +4420,9 @@ fn load_cand_vram(ci: u32) -> Card {
   let p2 = select(0, est_atk_power_v3(c.r13, c_a2_op1(c), c.r15), c_a2_cost(c) != 255);
   c.power_q = (max(p1, p2) * 1024) / 100;
   c.bonus_q = cand_cards_buf[o + 24u];
+  c.r25 = u32(cand_cards_buf[o + 25u]);
+  c.r26 = u32(cand_cards_buf[o + 26u]);
+  c.r27 = u32(cand_cards_buf[o + 27u]);
   return c;
 }
 
@@ -3885,15 +4520,193 @@ fn count_bench(p: u32) -> i32 {
   return n;
 }
 
-fn eff_energy(p: u32, s: u32, turn: i32) -> i32 {
-  let e = g.board[p][s].energy;
-  if (c_has_type(wg_cards[g.board[p][s].ci], 0)) {
-    for (var k = 0u; k < 4u; k = k + 1u) {
-      if (ab_active(p, k, turn)) {
-        let kc = wg_cards[g.board[p][k].ci];
-        if (c_ab_op(kc) == 15 && kc.r18 == 8) { return e * 2; }
+fn e_cnt(e_pack: u32, t: u32) -> i32 {
+  if (t < 8u) { return i32((e_pack >> (t * 4u)) & 15u); }
+  return 0;
+}
+fn e_sum_typed(e_pack: u32) -> i32 {
+  var s = 0;
+  for (var t = 0u; t < 8u; t = t + 1u) { s = s + i32((e_pack >> (t * 4u)) & 15u); }
+  return s;
+}
+fn e_type_mask(e_pack: u32) -> u32 {
+  var m = 0u;
+  for (var t = 0u; t < 8u; t = t + 1u) { if (((e_pack >> (t * 4u)) & 15u) != 0u) { m = m | (1u << t); } }
+  return m;
+}
+fn e_distinct_types(e_pack: u32) -> i32 {
+  return i32(countOneBits(e_type_mask(e_pack)));
+}
+fn slot_add_e(p: u32, s: u32, etype: u32, n: i32) {
+  if (n <= 0) { return; }
+  g.board[p][s].energy = min(255, g.board[p][s].energy + min(255, n));
+  if (etype < 8u) {
+    let sh = etype * 4u;
+    let cur_v = i32((g.board[p][s].e_pack >> sh) & 15u);
+    let nxt = u32(min(15, cur_v + n));
+    g.board[p][s].e_pack = (g.board[p][s].e_pack & (~(15u << sh))) | (nxt << sh);
+  }
+}
+fn slot_clear_e(p: u32, s: u32) {
+  g.board[p][s].energy = 0;
+  g.board[p][s].e_pack = 0u;
+}
+fn slot_rem_typed_e(p: u32, s: u32, etype: u32, n: i32) -> i32 {
+  if (etype >= 8u || n <= 0 || g.board[p][s].energy <= 0) { return 0; }
+  let sh = etype * 4u;
+  let have = i32((g.board[p][s].e_pack >> sh) & 15u);
+  let take = min(min(have, n), g.board[p][s].energy);
+  if (take <= 0) { return 0; }
+  let nxt = u32(have - take);
+  g.board[p][s].e_pack = (g.board[p][s].e_pack & (~(15u << sh))) | (nxt << sh);
+  g.board[p][s].energy = max(0, g.board[p][s].energy - take);
+  return take;
+}
+fn slot_rem_any_e(p: u32, s: u32, n: i32, keep_ecost: u32) -> i32 {
+  if (n <= 0 || g.board[p][s].energy <= 0) { return 0; }
+  var rem = min(n, g.board[p][s].energy);
+  var removed = 0;
+  let c_surp = max(0, g.board[p][s].energy - e_sum_typed(g.board[p][s].e_pack));
+  if (c_surp > 0) {
+    let tk = min(rem, c_surp);
+    g.board[p][s].energy = max(0, g.board[p][s].energy - tk);
+    rem = rem - tk;
+    removed = removed + tk;
+  }
+  if (rem > 0) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (rem <= 0) { break; }
+      let have = e_cnt(g.board[p][s].e_pack, t);
+      let keep = e_cnt(keep_ecost, t);
+      if (have > keep) {
+        let tk = slot_rem_typed_e(p, s, t, min(have - keep, rem));
+        rem = rem - tk;
+        removed = removed + tk;
       }
     }
+  }
+  if (rem > 0) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (rem <= 0) { break; }
+      let tk = slot_rem_typed_e(p, s, t, rem);
+      rem = rem - tk;
+      removed = removed + tk;
+    }
+  }
+  return removed;
+}
+fn slot_move_all_e(sp: u32, ss: u32, dp: u32, ds: u32) -> i32 {
+  let tot = g.board[sp][ss].energy;
+  if (tot <= 0) { return 0; }
+  var typed = 0;
+  let pack = g.board[sp][ss].e_pack;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    let cnt = e_cnt(pack, t);
+    if (cnt > 0) {
+      slot_add_e(dp, ds, t, cnt);
+      typed = typed + cnt;
+    }
+  }
+  let c_cnt = max(0, tot - typed);
+  if (c_cnt > 0) { slot_add_e(dp, ds, 9u, c_cnt); }
+  slot_clear_e(sp, ss);
+  return tot;
+}
+fn card_max_req_t(c: Card, t: u32) -> i32 {
+  let r1 = select(0, e_cnt(c_a1_ecost(c), t), c_a1_cost(c) != 255);
+  let r2 = select(0, e_cnt(c_a2_ecost(c), t), c_a2_cost(c) != 255);
+  return max(r1, r2);
+}
+fn slot_move_typed_e(sp: u32, ss: u32, dp: u32, ds: u32, etype: u32, max_n: i32) -> i32 {
+  if (max_n <= 0 || g.board[sp][ss].energy <= 0) { return 0; }
+  if (etype < 8u) {
+    let mv = slot_rem_typed_e(sp, ss, etype, max_n);
+    if (mv > 0) { slot_add_e(dp, ds, etype, mv); }
+    return mv;
+  }
+  if (etype == 250u) {
+    var moved = 0;
+    let dst_c = wg_cards[g.board[dp][ds].ci];
+    for (var ps_i = 0u; ps_i < 2u; ps_i = ps_i + 1u) {
+      for (var t = 1u; t <= 3u; t = t + 1u) {
+        if (moved >= max_n) { break; }
+        let want = card_max_req_t(dst_c, t) > e_cnt(g.board[dp][ds].e_pack, t);
+        if (ps_i == 0u && !want) { continue; }
+        let tk = slot_rem_typed_e(sp, ss, t, max_n - moved);
+        if (tk > 0) { slot_add_e(dp, ds, t, tk); moved = moved + tk; }
+      }
+    }
+    return moved;
+  }
+  if (max_n >= 99) { return slot_move_all_e(sp, ss, dp, ds); }
+  var moved = 0;
+  let dst_c = wg_cards[g.board[dp][ds].ci];
+  for (var ps_i = 0u; ps_i < 2u; ps_i = ps_i + 1u) {
+    for (var t = 0u; t < 8u; t = t + 1u) {
+      if (moved >= max_n) { break; }
+      let want = card_max_req_t(dst_c, t) > e_cnt(g.board[dp][ds].e_pack, t);
+      if (ps_i == 0u && !want) { continue; }
+      let tk = slot_rem_typed_e(sp, ss, t, max_n - moved);
+      if (tk > 0) { slot_add_e(dp, ds, t, tk); moved = moved + tk; }
+    }
+  }
+  if (moved < max_n) {
+    let c_surp = max(0, g.board[sp][ss].energy - e_sum_typed(g.board[sp][ss].e_pack));
+    let tk = min(c_surp, max_n - moved);
+    if (tk > 0) {
+      g.board[sp][ss].energy = max(0, g.board[sp][ss].energy - tk);
+      slot_add_e(dp, ds, 9u, tk);
+      moved = moved + tk;
+    }
+  }
+  return moved;
+}
+fn pick_deck_etype(emask: u32) -> u32 {
+  let m = select(emask, 2u, emask == 0u);
+  let cnt = countOneBits(m);
+  if (cnt <= 1u) { return countTrailingZeros(m); }
+  let pick = rng_next() % cnt;
+  var seen = 0u;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if ((m & (1u << t)) != 0u) {
+      if (seen == pick) { return t; }
+      seen = seen + 1u;
+    }
+  }
+  return countTrailingZeros(m);
+}
+fn pick_needed_etype(p: u32, s: u32, emask: u32) -> u32 {
+  let m = select(emask, 2u, emask == 0u);
+  let sc = wg_cards[g.board[p][s].ci];
+  let ep = g.board[p][s].e_pack;
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if ((m & (1u << t)) != 0u && card_max_req_t(sc, t) > e_cnt(ep, t)) { return t; }
+  }
+  for (var t = 0u; t < 8u; t = t + 1u) {
+    if (card_max_req_t(sc, t) > e_cnt(ep, t)) { return t; }
+  }
+  return countTrailingZeros(m);
+}
+fn has_serperior(p: u32, turn: i32) -> bool {
+  for (var k = 0u; k < 4u; k = k + 1u) {
+    if (ab_active(p, k, turn)) {
+      let kc = wg_cards[g.board[p][k].ci];
+      if (c_ab_op(kc) == 15 && kc.r18 == 8) { return true; }
+    }
+  }
+  return false;
+}
+fn eff_typed_energy(p: u32, s: u32, etype: u32, turn: i32) -> i32 {
+  let cnt = e_cnt(g.board[p][s].e_pack, etype);
+  if (etype == 0u && c_has_type(wg_cards[g.board[p][s].ci], 0) && has_serperior(p, turn)) {
+    return cnt * 2;
+  }
+  return cnt;
+}
+fn eff_energy(p: u32, s: u32, turn: i32) -> i32 {
+  let e = g.board[p][s].energy;
+  if (c_has_type(wg_cards[g.board[p][s].ci], 0) && has_serperior(p, turn)) {
+    return e + e_cnt(g.board[p][s].e_pack, 0u);
   }
   return e;
 }
@@ -4039,7 +4852,10 @@ fn has_status_immunity(p: u32, s: u32, turn: i32) -> bool {
     for (var k = 0u; k < 4u; k = k + 1u) {
       if (ab_active(p, k, turn)) {
         let kc = wg_cards[g.board[p][k].ci];
-        if (c_ab_op(kc) == 17 && kc.r18 == 2) { return true; }
+        if (c_ab_op(kc) == 17 && kc.r18 == 2) {
+          let et = c_ab_trn_etype(kc);
+          if (et >= 8u || e_cnt(sl.e_pack, et) > 0) { return true; }
+        }
       }
     }
   }
@@ -4180,19 +4996,20 @@ fn handle_active_ko(victim: u32, winner: u32, by_atk: bool, extra_pt: i32, turn:
         }
       } else if (mode == 5) {
         let prom = best_bench_promote(victim);
-        if (prom < 4u) { g.board[victim][prom].energy = g.board[victim][prom].energy + v_slot.energy; }
+        let f_cnt = e_cnt(v_slot.e_pack, 5u);
+        if (prom < 4u && f_cnt > 0) { slot_add_e(victim, prom, 5u, f_cnt); }
       } else if (mode == 7) {
         if (flip_coin_plain()) { cursola_ko = 1; }
       }
     }
   }
 
-  if (by_atk && s_has_tool(v_slot, 25) && c_has_type(v_card, 3) && v_slot.energy > 0) {
-    var left = min(2, v_slot.energy);
+  if (by_atk && s_has_tool(v_slot, 25) && c_has_type(v_card, 3)) {
+    var left = min(2, e_cnt(v_slot.e_pack, 3u));
     for (var s = 1u; s < 4u; s = s + 1u) {
       if (left <= 0) { break; }
       if (g.board[victim][s].occ == 1) {
-        g.board[victim][s].energy = g.board[victim][s].energy + 1;
+        slot_add_e(victim, s, 3u, 1);
         left = left - 1;
       }
     }
@@ -4335,13 +5152,19 @@ fn calc_passive_dmg_mods(
 
 fn eval_cond_op7(
   cond_id: i32, extra: i32, aux: i32,
-  cur: u32, foe: u32, atk_cost: i32, sup_used: bool, turn: i32
+  cur: u32, foe: u32, atk_cost: i32, atk_ecost: u32, atk_eff_etype: u32, sup_used: bool, turn: i32
 ) -> bool {
   let act = g.board[cur][0];
   let foe_s = g.board[foe][0];
   let fc = wg_cards[foe_s.ci];
   switch (cond_id) {
-    case 0: { return eff_energy(cur, 0u, turn) >= atk_cost + extra; }
+    case 0: {
+      if (eff_energy(cur, 0u, turn) < atk_cost + extra) { return false; }
+      if (atk_eff_etype < 8u) {
+        return eff_typed_energy(cur, 0u, atk_eff_etype, turn) >= e_cnt(atk_ecost, atk_eff_etype) + extra;
+      }
+      return true;
+    }
     case 1: { return foe_s.occ == 1 && foe_s.hp < foe_s.max_hp; }
     case 2, 3: { return act.hp < act.max_hp; }
     case 4: { return act.hp >= act.max_hp; }
@@ -4372,12 +5195,17 @@ fn eval_cond_op7(
     case 26: { return act.energy + select(0, foe_s.energy, foe_s.occ == 1) >= extra; }
     case 27: {
       var tot = 0;
-      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1) { tot = tot + g.board[cur][s].energy; } }
+      for (var s = 0u; s < 4u; s = s + 1u) {
+        if (g.board[cur][s].occ == 1) {
+          if (atk_eff_etype < 8u) { tot = tot + eff_typed_energy(cur, s, atk_eff_etype, turn); }
+          else { tot = tot + eff_energy(cur, s, turn); }
+        }
+      }
       return tot >= extra;
     }
     case 28: { return foe_s.occ == 1 && act.energy > foe_s.energy; }
     case 29: { return foe_s.occ == 1 && act.energy == foe_s.energy; }
-    case 30: { return foe_s.occ == 1 && act.energy > 0 && foe_s.energy > 0 && wg_cards[act.ci].r3 == fc.r3; }
+    case 30: { return foe_s.occ == 1 && (e_type_mask(act.e_pack) & e_type_mask(foe_s.e_pack)) != 0u; }
     case 31: {
       let hc = g.hand_len[cur]; let hf = g.hand_len[foe];
       if (extra == 0) { return hc == 1u || hc == 3u || hc == 5u; }
@@ -4417,13 +5245,18 @@ fn eval_cond_op7(
     }
     case 37: { return (act.status & ST_DAMAGED_LAST) != 0u; }
     case 39: { return select(g.disc_quick_grow[cur] != 0, g.disc_volbeat[cur] != 0, extra == 1); }
-    case 40: { return select(act.energy >= extra, act.energy > 0, extra >= 10); }
+    case 40: {
+      if (extra >= 10) { return e_cnt(act.e_pack, u32(extra - 10)) > 0; }
+      var m = 0u;
+      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1) { m = m | e_type_mask(g.board[cur][s].e_pack); } }
+      return i32(countOneBits(m)) >= extra;
+    }
     default: { return false; }
   }
 }
 
 fn eval_count_op6(
-  sub: i32, extra: i32, aux: i32, cur: u32, foe: u32, turn: i32
+  sub: i32, extra: i32, aux: i32, atk_eff_etype: u32, cur: u32, foe: u32, turn: i32
 ) -> i32 {
   switch (sub) {
     case 0: { return count_bench(cur); }
@@ -4439,10 +5272,18 @@ fn eval_count_op6(
       for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && s_stage(g.board[cur][s]) > 0) { n = n + 1; } }
       return n;
     }
-    case 5: { return eff_energy(cur, 0u, turn); }
+    case 5: {
+      if (atk_eff_etype < 8u) { return eff_typed_energy(cur, 0u, atk_eff_etype, turn); }
+      return eff_energy(cur, 0u, turn);
+    }
     case 6: {
       var n = 0;
-      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1) { n = n + g.board[cur][s].energy; } }
+      for (var s = 0u; s < 4u; s = s + 1u) {
+        if (g.board[cur][s].occ == 1) {
+          if (extra < 8) { n = n + eff_typed_energy(cur, s, u32(extra), turn); }
+          else { n = n + eff_energy(cur, s, turn); }
+        }
+      }
       return n;
     }
     case 7: { return select(0, g.board[foe][0].energy, g.board[foe][0].occ == 1); }
@@ -4502,8 +5343,8 @@ fn eval_count_op6(
       }
       return n;
     }
-    case 25: { return min(3, g.board[cur][0].energy); }
-    case 26: { return g.board[cur][0].energy; }
+    case 25: { return e_distinct_types(g.board[cur][0].e_pack); }
+    case 26: { return e_cnt(g.board[cur][0].e_pack, 1u) + e_cnt(g.board[cur][0].e_pack, 3u); }
     case 27: {
       var n = 0;
       for (var hi = 0u; hi < g.hand_len[cur]; hi = hi + 1u) { if (c_is_tool(wg_cards[g.hands[cur][hi]])) { n = n + 1; } }
@@ -4580,6 +5421,8 @@ fn main(
         let atk_idx = u32(g.pending_atk);
         let atk_c = wg_cards[g.board[cur][0].ci];
         var ac = select(c_a2_cost(atk_c), c_a1_cost(atk_c), atk_idx == 0u);
+        var aec = select(c_a2_ecost(atk_c), c_a1_ecost(atk_c), atk_idx == 0u);
+        var aet = select(c_a2_eff_etype(atk_c), c_a1_eff_etype(atk_c), atk_idx == 0u);
         var af = select(c_a2_flags(atk_c), c_a1_flags(atk_c), atk_idx == 0u);
         var ad = select(atk_c.r13, atk_c.r8, atk_idx == 0u);
         var ao1 = select(c_a2_op1(atk_c), c_a1_op1(atk_c), atk_idx == 0u);
@@ -4608,10 +5451,10 @@ fn main(
               let sc = wg_cards[src_ci];
               let pick2 = c_a2_cost(sc) != 255 && (sc.r13 >= sc.r8 || c_a1_cost(sc) == 255);
               if (pick2) {
-                ac = c_a2_cost(sc); af = c_a2_flags(sc); ad = sc.r13;
+                ac = c_a2_cost(sc); aec = c_a2_ecost(sc); aet = c_a2_eff_etype(sc); af = c_a2_flags(sc); ad = sc.r13;
                 ao1 = c_a2_op1(sc); av1 = sc.r15; ao2 = c_a2_op2(sc); av2 = sc.r16; aaux = c_a2_aux(sc);
               } else if (c_a1_cost(sc) != 255) {
-                ac = c_a1_cost(sc); af = c_a1_flags(sc); ad = sc.r8;
+                ac = c_a1_cost(sc); aec = c_a1_ecost(sc); aet = c_a1_eff_etype(sc); af = c_a1_flags(sc); ad = sc.r8;
                 ao1 = c_a1_op1(sc); av1 = sc.r10; ao2 = c_a1_op2(sc); av2 = sc.r11; aaux = c_a1_aux(sc);
               } else { copy_failed = true; }
               if (ao1 == 20 && (av1 & 255) == 6) { copy_failed = true; }
@@ -4700,7 +5543,10 @@ fn main(
             case 4: {
               var heads = 0;
               var flips = b0;
-              if ((b2 & 8) != 0) { flips = min(12, eff_energy(cur, 0u, turn_i)); }
+              if ((b2 & 8) != 0) {
+                let sc_e = select(eff_energy(cur, 0u, turn_i), eff_typed_energy(cur, 0u, aet, turn_i), aet < 8u);
+                flips = min(12, sc_e);
+              }
               else if ((b2 & 2) != 0) { flips = 1 + count_bench(cur); }
               else if ((b2 & 4) != 0) {
                 flips = 0;
@@ -4719,8 +5565,10 @@ fn main(
               }
               op1_heads = heads;
               if ((b2 & 32) != 0) {
-                let disc = min(heads, g.board[cur][0].energy);
-                if (disc > 0) { g.board[cur][0].energy = g.board[cur][0].energy - disc; g.energy_discarded[cur] = 1; }
+                var disc = 0;
+                if (aet < 8u) { disc = slot_rem_typed_e(cur, 0u, aet, heads); }
+                else { disc = slot_rem_any_e(cur, 0u, heads, 0u); }
+                if (disc > 0) { g.energy_discarded[cur] = 1; }
                 raw_d = ad + disc * b1;
               } else { raw_d = b1 * heads; }
             }
@@ -4737,7 +5585,7 @@ fn main(
                 for (var l = 0u; l < 10u; l = l + 1u) { if (flip_coin_g(&guar_heads)) { heads = heads + 1; } else { break; } }
                 raw_d = ad + b1 * heads;
               } else if (b2 == 2) {
-                let n = min(10, eff_energy(cur, 0u, turn_i));
+                let n = min(10, select(eff_energy(cur, 0u, turn_i), eff_typed_energy(cur, 0u, aet, turn_i), aet < 8u));
                 for (var l = 0; l < n; l = l + 1) { if (flip_coin_g(&guar_heads)) { heads = heads + 1; } }
                 raw_d = ad + b1 * heads;
               } else if (b2 == 3) {
@@ -4760,10 +5608,10 @@ fn main(
               op1_heads = heads;
             }
             case 6: {
-              let cnt = eval_count_op6(b0, b2, aaux, cur, foe, turn_i);
+              let cnt = eval_count_op6(b0, b2, aaux, aet, cur, foe, turn_i);
               if (b0 == 26) {
-                let disc = g.board[cur][0].energy;
-                if (disc > 0) { g.board[cur][0].energy = 0; g.energy_discarded[cur] = 1; }
+                let disc = slot_rem_typed_e(cur, 0u, 1u, 99) + slot_rem_typed_e(cur, 0u, 3u, 99);
+                if (disc > 0) { g.energy_discarded[cur] = 1; }
                 raw_d = disc * b1;
               } else if (b0 == 27) {
                 var disc = 0; var k = 0u;
@@ -4810,7 +5658,7 @@ fn main(
                 }
                 raw_d = ad + select(0, b1, ok);
               } else {
-                let ok = eval_cond_op7(b0, b2, aaux, cur, foe, ac, supporter_used, turn_i);
+                let ok = eval_cond_op7(b0, b2, aaux, cur, foe, ac, aec, aet, supporter_used, turn_i);
                 if (b0 == 3) { raw_d = select(ad, max(0, ad - b1), ok); }
                 else { raw_d = ad + select(0, b1, ok); }
               }
@@ -4843,7 +5691,8 @@ fn main(
                 }
               } else if (b0 == 8) {
                 direct_active = false;
-                var times = select(max(1, b2), min(10, eff_energy(cur, 0u, turn_i)), b2 == 99);
+                let sc_e8 = select(eff_energy(cur, 0u, turn_i), eff_typed_energy(cur, 0u, aet, turn_i), aet < 8u);
+                var times = select(max(1, b2), min(10, sc_e8), b2 == 99);
                 if (c_has_draco(atk_c)) { times = times + drayden_bonus; }
                 var thit = 0;
                 for (var l = 0; l < times; l = l + 1) {
@@ -4907,8 +5756,8 @@ fn main(
                 if (heads == 0 && ((af & AF_FLIP_2_BOTH_TAILS_FAIL) != 0 || (af & AF_FLIP_3_ALL_TAILS_FAIL) != 0)) {
                   direct_active = false; miss = true;
                 } else if (heads > 0 && g.board[foe][0].energy > 0) {
-                  let d = min(heads, g.board[foe][0].energy);
-                  g.board[foe][0].energy = g.board[foe][0].energy - d; g.energy_discarded[foe] = 1;
+                  let d = slot_rem_any_e(foe, 0u, heads, 0u);
+                  if (d > 0) { g.energy_discarded[foe] = 1; }
                 }
               }
             }
@@ -5013,7 +5862,7 @@ fn main(
                 let amt = fc.r18 & 255; let mode = (fc.r18 >> 8u) & 255;
                 if (mode == 0) { g.board[cur][0].hp = g.board[cur][0].hp - amt; }
                 else if (mode == 1) { apply_status(cur, 0u, ST_POISON, turn_i, false); }
-                else if (mode == 2) { for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[foe][bs].occ == 1) { g.board[foe][bs].energy = g.board[foe][bs].energy + 1; break; } } }
+                else if (mode == 2) { for (var bs = 1u; bs < 4u; bs = bs + 1u) { if (g.board[foe][bs].occ == 1) { slot_add_e(foe, bs, 2u, 1); break; } } }
               }
             }
           }
@@ -5093,7 +5942,9 @@ fn main(
                     }
                   }
                 } else if (p0 == 7 || p0 == 13) {
-                  if (eff_energy(cur, 0u, turn_i) >= ac + p2) {
+                  let has_extra_ok = eff_energy(cur, 0u, turn_i) >= ac + p2
+                    && (aet >= 8u || eff_typed_energy(cur, 0u, aet, turn_i) >= e_cnt(aec, aet) + p2);
+                  if (has_extra_ok) {
                     let max_t = select(1, 2, p0 == 7); var cnt = 0;
                     for (var s = 1u; s < 4u; s = s + 1u) {
                       if (cnt >= max_t) { break; }
@@ -5142,39 +5993,53 @@ fn main(
               }
               case 10: {
                 if (p1 == 0) {
-                  let dc = select(min(p0, g.board[cur][0].energy), g.board[cur][0].energy, p0 >= 99);
-                  if (dc > 0) { g.board[cur][0].energy = g.board[cur][0].energy - dc; g.energy_discarded[cur] = 1; }
+                  var dc = 0;
+                  if (aet == 250u) {
+                    dc = slot_rem_typed_e(cur, 0u, 1u, 1) + slot_rem_typed_e(cur, 0u, 2u, 1) + slot_rem_typed_e(cur, 0u, 3u, 1);
+                  } else if (aet == 251u) {
+                    dc = slot_rem_typed_e(cur, 0u, 2u, 1) + slot_rem_typed_e(cur, 0u, 3u, 1);
+                  } else if (aet < 8u) {
+                    dc = slot_rem_typed_e(cur, 0u, aet, select(p0, 99, p0 >= 99));
+                  } else if (p0 >= 99) {
+                    dc = g.board[cur][0].energy;
+                    slot_clear_e(cur, 0u);
+                  } else {
+                    dc = slot_rem_any_e(cur, 0u, p0, 0u);
+                  }
+                  if (dc > 0) { g.energy_discarded[cur] = 1; }
                 } else if (p1 == 1) {
                   if (!flip_coin_g(&guar_heads)) {
-                    let dc = min(p0, g.board[cur][0].energy);
-                    if (dc > 0) { g.board[cur][0].energy = g.board[cur][0].energy - dc; g.energy_discarded[cur] = 1; }
+                    let dc = slot_rem_any_e(cur, 0u, p0, 0u);
+                    if (dc > 0) { g.energy_discarded[cur] = 1; }
                   }
                 } else if (p1 == 2 || p1 == 3) {
                   let times = select(1, 2, p1 == 3);
                   for (var l = 0; l < times; l = l + 1) {
-                    if ((rng_next() & 1u) == 0u && g.board[cur][0].energy > 0) { g.board[cur][0].energy = g.board[cur][0].energy - 1; g.energy_discarded[cur] = 1; }
-                    else if (g.board[foe][0].energy > 0) { g.board[foe][0].energy = g.board[foe][0].energy - 1; g.energy_discarded[foe] = 1; }
+                    if ((rng_next() & 1u) == 0u && g.board[cur][0].energy > 0) { slot_rem_any_e(cur, 0u, 1, 0u); g.energy_discarded[cur] = 1; }
+                    else if (g.board[foe][0].energy > 0) { slot_rem_any_e(foe, 0u, 1, 0u); g.energy_discarded[foe] = 1; }
                   }
                 } else if (p1 == 4) {
                   var rem = 2;
                   for (var s = 0u; s < 4u; s = s + 1u) {
-                    for (var l = 0; l < 2; l = l + 1) {
-                      if (rem <= 0 || g.board[cur][s].occ == 0 || g.board[cur][s].energy <= 0) { break; }
-                      g.board[cur][s].energy = g.board[cur][s].energy - 1; g.energy_discarded[cur] = 1; rem = rem - 1;
+                    if (rem > 0 && g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0) {
+                      let tk = slot_rem_any_e(cur, s, rem, 0u);
+                      if (tk > 0) { g.energy_discarded[cur] = 1; rem = rem - tk; }
                     }
                   }
                 } else if (p1 == 5) {
-                  if (g.board[cur][0].energy > 0) { g.board[cur][0].energy = g.board[cur][0].energy - 1; g.energy_discarded[cur] = 1; }
-                  if (g.board[foe][0].energy > 0) { g.board[foe][0].energy = g.board[foe][0].energy - 1; g.energy_discarded[foe] = 1; }
+                  if (g.board[cur][0].energy > 0) { slot_rem_any_e(cur, 0u, 1, 0u); g.energy_discarded[cur] = 1; }
+                  if (g.board[foe][0].energy > 0) { slot_rem_any_e(foe, 0u, 1, 0u); g.energy_discarded[foe] = 1; }
                 }
               }
               case 11: {
                 if (p0 != 4 && p0 != 5 && g.board[foe][0].occ == 1 && g.board[foe][0].energy > 0 && !has_status_immunity(foe, 0u, turn_i)) {
                   var dc = 0;
-                  if (p0 == 1) { g.board[foe][0].energy = g.board[foe][0].energy - 1; dc = 1; }
-                  else if (p0 == 2) { if (flip_coin_g(&guar_heads)) { g.board[foe][0].energy = g.board[foe][0].energy - 1; dc = 1; } }
-                  else if (p0 == 3) { for (var l = 0u; l < 6u; l = l + 1u) { if (g.board[foe][0].energy > 0 && flip_coin_g(&guar_heads)) { g.board[foe][0].energy = g.board[foe][0].energy - 1; dc = dc + 1; } else { break; } } }
-                  else if (p0 == 6) { dc = min(2, g.board[foe][0].energy); g.board[foe][0].energy = g.board[foe][0].energy - dc; }
+                  if (p0 == 1) {
+                    if (aet < 8u) { dc = slot_rem_typed_e(foe, 0u, aet, 1); }
+                    else { dc = slot_rem_any_e(foe, 0u, 1, 0u); }
+                  } else if (p0 == 2) { if (flip_coin_g(&guar_heads)) { dc = slot_rem_any_e(foe, 0u, 1, 0u); } }
+                  else if (p0 == 3) { for (var l = 0u; l < 6u; l = l + 1u) { if (g.board[foe][0].energy > 0 && flip_coin_g(&guar_heads)) { dc = dc + slot_rem_any_e(foe, 0u, 1, 0u); } else { break; } } }
+                  else if (p0 == 6) { dc = slot_rem_any_e(foe, 0u, 2, 0u); }
                   if (dc > 0) { g.energy_discarded[foe] = 1; }
                 }
               }
@@ -5191,24 +6056,79 @@ fn main(
                 }
               }
               case 13: {
-                if (p1 == 0) { g.board[cur][0].energy = g.board[cur][0].energy + p0; }
-                else if (p1 == 1) { let pr = best_bench_promote(cur); if (pr < 4u) { g.board[cur][pr].energy = g.board[cur][pr].energy + p0; } }
-                else if (p1 == 2) { var ad2 = 0; for (var s = 1u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && ad2 < 2) { g.board[cur][s].energy = g.board[cur][s].energy + 1; ad2 = ad2 + 1; } } }
-                else if (p1 == 3 || p1 == 4) {
+                if (p1 == 0) {
+                  if (aet == 251u) {
+                    slot_add_e(cur, 0u, 2u, 1);
+                    slot_add_e(cur, 0u, 3u, 1);
+                  } else {
+                    var add_et = aet;
+                    if (aet == 255u) { add_et = pick_needed_etype(cur, 0u, g.deck_emask[cur]); }
+                    slot_add_e(cur, 0u, add_et, p0);
+                  }
+                } else if (p1 == 1) {
+                  let pr = best_bench_promote(cur);
+                  if (pr < 4u) {
+                    var add_et = aet;
+                    if (aet == 252u) { add_et = rng_next() % 8u; }
+                    else if (aet == 255u) { add_et = pick_needed_etype(cur, pr, g.deck_emask[cur]); }
+                    slot_add_e(cur, pr, add_et, p0);
+                  }
+                } else if (p1 == 2) {
+                  var ad2 = 0;
+                  for (var s = 1u; s < 4u; s = s + 1u) {
+                    if (g.board[cur][s].occ == 1 && ad2 < 2) {
+                      var add_et = aet;
+                      if (aet == 255u) { add_et = pick_needed_etype(cur, s, g.deck_emask[cur]); }
+                      slot_add_e(cur, s, add_et, 1);
+                      ad2 = ad2 + 1;
+                    }
+                  }
+                } else if (p1 == 3 || p1 == 4) {
                   var h = 0; for (var l = 0u; l < 3u; l = l + 1u) { if (flip_coin_g(&guar_heads)) { h = h + 1; } }
                   if (h == 0 && has_victini) { has_victini = false; for (var l = 0u; l < 3u; l = l + 1u) { if (flip_coin_g(&guar_heads)) { h = h + 1; } } }
                   if (h > 0) {
-                    if (p1 == 3) { let pr = best_bench_promote(cur); if (pr < 4u) { g.board[cur][pr].energy = g.board[cur][pr].energy + h; } }
-                    else { g.board[cur][0].energy = g.board[cur][0].energy + h; }
+                    if (p1 == 3) {
+                      let pr = best_bench_promote(cur);
+                      if (pr < 4u) {
+                        var add_et = aet;
+                        if (aet == 255u) { add_et = pick_needed_etype(cur, pr, g.deck_emask[cur]); }
+                        slot_add_e(cur, pr, add_et, h);
+                      }
+                    } else {
+                      var add_et = aet;
+                      if (aet == 255u) { add_et = pick_needed_etype(cur, 0u, g.deck_emask[cur]); }
+                      slot_add_e(cur, 0u, add_et, h);
+                    }
                   }
-                } else if (p1 == 5) { if (flip_coin_g(&guar_heads)) { g.board[cur][0].energy = g.board[cur][0].energy + p0; } }
-                else if (p1 == 6) { let pr = best_bench_promote(cur); if (pr < 4u && flip_coin_g(&guar_heads)) { g.board[cur][pr].energy = g.board[cur][pr].energy + p0; } }
-                else if (p1 == 7) { let pr = best_bench_promote(cur); let tgt = select(0u, pr, pr < 4u); g.board[cur][tgt].energy = g.board[cur][tgt].energy + p0; }
-                else if (p1 == 8) {
+                } else if (p1 == 5) {
+                  if (flip_coin_g(&guar_heads)) {
+                    var add_et = aet;
+                    if (aet == 255u) { add_et = pick_needed_etype(cur, 0u, g.deck_emask[cur]); }
+                    slot_add_e(cur, 0u, add_et, p0);
+                  }
+                } else if (p1 == 6) {
+                  let pr = best_bench_promote(cur);
+                  if (pr < 4u && flip_coin_g(&guar_heads)) {
+                    var add_et = aet;
+                    if (aet == 255u) { add_et = pick_needed_etype(cur, pr, g.deck_emask[cur]); }
+                    slot_add_e(cur, pr, add_et, p0);
+                  }
+                } else if (p1 == 7) {
+                  let pr = best_bench_promote(cur);
+                  let tgt = select(0u, pr, pr < 4u);
+                  if (aet == 250u) {
+                    slot_add_e(cur, tgt, 1u, 1);
+                    slot_add_e(cur, tgt, 2u, 1);
+                    slot_add_e(cur, tgt, 3u, 1);
+                  } else {
+                    var add_et = aet;
+                    if (aet == 255u) { add_et = pick_needed_etype(cur, tgt, g.deck_emask[cur]); }
+                    slot_add_e(cur, tgt, add_et, p0);
+                  }
+                } else if (p1 == 8) {
                   let pr = best_bench_promote(cur);
                   if (pr < 4u && g.board[cur][0].energy > 0) {
-                    let mv = select(min(p0, g.board[cur][0].energy), g.board[cur][0].energy, p0 >= 99);
-                    g.board[cur][0].energy = g.board[cur][0].energy - mv; g.board[cur][pr].energy = g.board[cur][pr].energy + mv;
+                    slot_move_typed_e(cur, 0u, cur, pr, aet, p0);
                   }
                 }
               }
@@ -5242,6 +6162,16 @@ fn main(
                     g.board[foe][0].status = g.board[foe][0].status | pa;
                   } else if (p1 == 9) { g.board[foe][0].status = g.board[foe][0].status | ST_NO_ABILITY; }
                   else if (p1 == 10) { g.board[foe][0].status = g.board[foe][0].status | ST_NO_ENERGY_ATTACH; }
+                  else if (p1 == 11) {
+                    let fm = e_type_mask(g.board[foe][0].e_pack);
+                    if (fm != 0u) {
+                      let old_t = countTrailingZeros(fm);
+                      let new_t = (old_t + 1u + (rng_next() % 7u)) & 7u;
+                      if (slot_rem_typed_e(foe, 0u, old_t, 1) > 0) {
+                        slot_add_e(foe, 0u, new_t, 1);
+                      }
+                    }
+                  }
                 }
               }
               case 16: {
@@ -5442,7 +6372,7 @@ fn main(
       if (g.board[cur][0].shield < 0) { g.board[cur][0].shield = 0; }
     }
     if (g.stadium == 7 && !heal_blocked) {
-      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && g.board[cur][s].energy > 0 && g.board[cur][s].hp < g.board[cur][s].max_hp) { g.board[cur][s].hp = min(g.board[cur][s].max_hp, g.board[cur][s].hp + 20); } }
+      for (var s = 0u; s < 4u; s = s + 1u) { if (g.board[cur][s].occ == 1 && e_cnt(g.board[cur][s].e_pack, 2u) > 0 && g.board[cur][s].hp < g.board[cur][s].max_hp) { g.board[cur][s].hp = min(g.board[cur][s].max_hp, g.board[cur][s].hp + 20); } }
     } else if (g.stadium == 8) {
       for (var l = 0u; l < 3u; l = l + 1u) { if (g.hand_len[cur] >= 3u || g.lib_len[cur] == 0u) { break; } draw_one(cur); }
     }
@@ -5461,7 +6391,7 @@ fn main(
     }
     if (turn <= 2u) {
       for (var s = 0u; s < 4u; s = s + 1u) {
-        if (g.board[cur][s].occ == 1 && ab_active(cur, s, turn_i) && c_ab_op(wg_cards[g.board[cur][s].ci]) == 9 && wg_cards[g.board[cur][s].ci].r18 == 5) { g.board[cur][s].energy = g.board[cur][s].energy + 1; }
+        if (g.board[cur][s].occ == 1 && ab_active(cur, s, turn_i) && c_ab_op(wg_cards[g.board[cur][s].ci]) == 9 && wg_cards[g.board[cur][s].ci].r18 == 5) { slot_add_e(cur, s, 3u, 1); }
       }
     }
     g.item_lock[cur] = 0; g.supp_lock[cur] = 0; g.evo_lock[cur] = 0; g.ko_last_turn[cur] = 0;
@@ -5557,7 +6487,7 @@ struct Params {
 };
 
 struct Slot {
-  occ: i32, ci: u32, stage_ov: i32, hp: i32, max_hp: i32, energy: i32,
+  occ: i32, ci: u32, stage_ov: i32, hp: i32, max_hp: i32, energy: i32, e_pack: u32,
   tool: i32, tool2: i32, status: u32, shield: i32, shield_ex: i32,
   counter: i32, weaken: i32, cost_tax: i32, retreat_tax: i32,
   next_atk_mod: i32, stack_boost: i32, turn_placed: i32,
@@ -5593,6 +6523,7 @@ struct GameState {
   disc_volbeat: array<i32, 2>,
   delayed_slot: array<u32, 2>,
   delayed_dmg: array<i32, 2>,
+  deck_emask: array<u32, 2>,
   rng: u32,
   stadium: i32,
   cur: u32,
@@ -5621,6 +6552,8 @@ struct GameState {
   drayden_bonus: i32,
   ab_mask: u32,
   pad0: u32,
+  pad1: u32,
+  pad2: u32,
 };
 
 @group(0) @binding(0) var<uniform> params: Params;
@@ -5720,25 +6653,56 @@ fn main(
 let gpuEngineInstance = null;
 let gpuProbePromise = null;
 
-function packCardToI32(dst, o, c, slotId) {
+function inferDeckEnergyMask(compactCards = []) {
+  for (const c of compactCards) {
+    if (c && Number.isInteger(c.deckEnergyMask) && (c.deckEnergyMask & 0xff) !== 0) {
+      return c.deckEnergyMask & 0xff;
+    }
+  }
+  const counts = new Int32Array(8);
+  for (const c of compactCards) {
+    if (!c) continue;
+    const e1 = Array.isArray(c.v3Tpl) && c.v3Tpl.length >= 26 ? (c.v3Tpl[23] >>> 0) : (c.a1Ecost >>> 0);
+    const e2 = Array.isArray(c.v3Tpl) && c.v3Tpl.length >= 26 ? (c.v3Tpl[24] >>> 0) : (c.a2Ecost >>> 0);
+    for (let t = 0; t < 8; t++) {
+      counts[t] += ((e1 >>> (t * 4)) & 15) + ((e2 >>> (t * 4)) & 15);
+    }
+  }
+  let mask = 0;
+  const order = [0, 1, 2, 3, 4, 5, 6, 7].filter((t) => counts[t] > 0).sort((a, b) => counts[b] - counts[a]);
+  for (let i = 0; i < Math.min(3, order.length); i++) mask |= (1 << order[i]);
+  if (mask === 0) {
+    for (const c of compactCards) {
+      const tc = c?.v3Tpl ? c.v3Tpl[3] : c?.typeCode;
+      if (tc >= 0 && tc < 8) { mask |= (1 << tc); break; }
+    }
+  }
+  return mask || 0x02;
+}
+
+function packCardToI32(dst, o, c, slotId, deckMask = 0) {
+  const emask = (deckMask || c.deckEnergyMask || 0) & 0xff;
   if (Array.isArray(c.v3Tpl) && c.v3Tpl.length >= 23) {
     for (let i = 0; i < 23; i++) dst[o + i] = c.v3Tpl[i] | 0;
+    let a1Ecost = c.v3Tpl.length >= 26 ? (c.v3Tpl[23] | 0) : ((c.a1Ecost || 0) | 0);
+    let a2Ecost = c.v3Tpl.length >= 26 ? (c.v3Tpl[24] | 0) : ((c.a2Ecost || 0) | 0);
+    const effEtypes = c.v3Tpl.length >= 26 ? (c.v3Tpl[25] >>> 0) : ((c.effEtypes ?? 0xffffff) >>> 0);
     if (c.stage === 99) {
       dst[o + 1] = (dst[o + 1] & ~0xff) | 99;
-      dst[o + 7] = 255; dst[o + 8] = 0; dst[o + 9] = 0; dst[o + 10] = 0; dst[o + 11] = 0;
-      dst[o + 12] = 255; dst[o + 13] = 0; dst[o + 14] = 0; dst[o + 15] = 0; dst[o + 16] = 0;
+      dst[o + 7] = 255; dst[o + 8] = 0; dst[o + 9] = 0; dst[o + 10] = 0; dst[o + 11] = 0; a1Ecost = 0;
+      dst[o + 12] = 255; dst[o + 13] = 0; dst[o + 14] = 0; dst[o + 15] = 0; dst[o + 16] = 0; a2Ecost = 0;
       dst[o + 17] = 0; dst[o + 18] = 0;
     } else if (c.isPokemon === 0 && c.trainerKind === 0) {
       dst[o + 19] = 0; dst[o + 20] = 0;
     } else if (c.isPokemon === 1) {
-      if (c.a1Cost === 255) { dst[o + 7] = 255; dst[o + 8] = 0; dst[o + 9] = 0; dst[o + 10] = 0; dst[o + 11] = 0; }
-      if (c.a2Cost === 255) { dst[o + 12] = 255; dst[o + 13] = 0; dst[o + 14] = 0; dst[o + 15] = 0; dst[o + 16] = 0; }
+      if (c.a1Cost === 255) { dst[o + 7] = 255; dst[o + 8] = 0; dst[o + 9] = 0; dst[o + 10] = 0; dst[o + 11] = 0; a1Ecost = 0; }
+      if (c.a2Cost === 255) { dst[o + 12] = 255; dst[o + 13] = 0; dst[o + 14] = 0; dst[o + 15] = 0; dst[o + 16] = 0; a2Ecost = 0; }
     }
     dst[o + 23] = slotId | 0;
     dst[o + 24] = Math.round(Number(c.strategyBonus || 0) * 1024);
-    dst[o + 25] = 0;
-    dst[o + 26] = 0;
-    dst[o + 27] = 0;
+    dst[o + 25] = a1Ecost | 0;
+    dst[o + 26] = a2Ecost | 0;
+    dst[o + 27] = (emask | ((effEtypes & 0xffffff) << 8)) | 0;
     return;
   }
   const meta = (c.stage & 0xff)
@@ -5779,16 +6743,17 @@ function packCardToI32(dst, o, c, slotId) {
   dst[o + 22] = 0;
   dst[o + 23] = slotId | 0;
   dst[o + 24] = Math.round(Number(c.strategyBonus || 0) * 1024);
-  dst[o + 25] = 0;
-  dst[o + 26] = 0;
-  dst[o + 27] = 0;
+  dst[o + 25] = (c.a1Ecost || 0) | 0;
+  dst[o + 26] = (c.a2Ecost || 0) | 0;
+  dst[o + 27] = (emask | (((c.effEtypes ?? 0xffffff) & 0xffffff) << 8)) | 0;
 }
 
 function packDeckToI32(dst, slot, compactCards) {
   const baseCard = slot * 20;
+  const deckMask = inferDeckEnergyMask(compactCards);
   for (let i = 0; i < 20; i++) {
     const c = compactCards[i] || compactCards[0];
-    packCardToI32(dst, (baseCard + i) * CARD_STRIDE, c, i);
+    packCardToI32(dst, (baseCard + i) * CARD_STRIDE, c, i, deckMask);
   }
 }
 
@@ -5911,6 +6876,7 @@ export async function probeWebGPU() {
       const candCardsHost = new Int32Array(256 * CARD_STRIDE);
       const weightsHost = new Int32Array((MAX_ENEMIES + MAX_CANDS) * FEATURES);
       const uniformHost = new Uint32Array(12);
+      let optBaseDeckMask = 0x02;
 
       function dispatchWave(mode, nOpps, nCands, gamesPerOpp, startPair, pairCount, seedBase, totalPerOpp, waveStart, waveCount, wgY) {
         const wgX = Math.max(1, Math.ceil(waveCount / WG_SIZE));
@@ -5961,9 +6927,9 @@ export async function probeWebGPU() {
       const dummyCard = {
         isPokemon: 1, stage: 0, evoGroup: 1, isSupporter: 0, isItem: 0, isFossil: 0,
         typeCode: 1, weakCode: 2, hp: 60, retreat: 1, prize: 1,
-        a1Cost: 1, a1Dmg: 30, a1Op1: 0, a1Op2: 0, a1Val1: 0, a1Val2: 0,
-        a2Cost: 255, a2Dmg: 0, a2Op1: 0, a2Op2: 0, a2Val1: 0, a2Val2: 0,
-        abOp: 0, abVal: 0, trainerKind: 0, effectVal: 0, strategyBonus: 0
+        a1Cost: 1, a1Dmg: 30, a1Op1: 0, a1Op2: 0, a1Val1: 0, a1Val2: 0, a1Ecost: 1 << 4,
+        a2Cost: 255, a2Dmg: 0, a2Op1: 0, a2Op2: 0, a2Val1: 0, a2Val2: 0, a2Ecost: 0,
+        abOp: 0, abVal: 0, trainerKind: 0, effectVal: 0, strategyBonus: 0, effEtypes: 0xffffff, deckEnergyMask: 2
       };
       packDeckToI32(decksHost, 0, Array(20).fill(dummyCard));
       packDeckToI32(decksHost, 1, Array(20).fill(dummyCard));
@@ -6121,6 +7087,7 @@ export async function probeWebGPU() {
         },
 
         uploadOptimizeContext({ baseDeck, enemies, playerWeights, enemyWeightsList }) {
+          optBaseDeckMask = inferDeckEnergyMask(baseDeck);
           packDeckToI32(decksHost, 0, baseDeck);
           for (let o = 0; o < enemies.length; o++) packDeckToI32(decksHost, o + 1, enemies[o].cards);
           device.queue.writeBuffer(decksBuf, 0, decksHost);
@@ -6139,7 +7106,7 @@ export async function probeWebGPU() {
         async runOptimizeBatch({ candidateCards, nOpps, gamesPerOpp, seedBase }) {
           const nCands = Math.min(256, candidateCards.length);
           for (let i = 0; i < nCands; i++) {
-            packCardToI32(candCardsHost, i * CARD_STRIDE, candidateCards[i], 19);
+            packCardToI32(candCardsHost, i * CARD_STRIDE, candidateCards[i], 19, optBaseDeckMask);
           }
           device.queue.writeBuffer(candCardsBuf, 0, candCardsHost.subarray(0, nCands * CARD_STRIDE));
 

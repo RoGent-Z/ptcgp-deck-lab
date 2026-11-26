@@ -1,6 +1,113 @@
 export const energyNames = {Grass:'草', Fire:'火', Water:'水', Lightning:'雷', Psychic:'超', Fighting:'鬥', Darkness:'惡', Metal:'鋼'};
+export const ENERGY_TYPE_KEYS = ['Grass', 'Fire', 'Water', 'Lightning', 'Psychic', 'Fighting', 'Darkness', 'Metal'];
 export const typeNames = {...energyNames, Colorless:'無色', Dragon:'龍', Fairy:'妖精', Trainer:'訓練家'};
 export const titleCase = value => String(value || '').toLowerCase().replace(/^./, s => s.toUpperCase());
+
+export function packAttackEnergyCost(costArr = []) {
+  let packed = 0;
+  const cnts = [0, 0, 0, 0, 0, 0, 0, 0];
+  for (const sym of Array.isArray(costArr) ? costArr : []) {
+    const k = String(sym || '').toLowerCase();
+    const idx = ENERGY_TYPE_KEYS.findIndex((e) => e.toLowerCase() === k);
+    if (idx >= 0 && cnts[idx] < 15) cnts[idx]++;
+  }
+  for (let t = 0; t < 8; t++) packed |= (cnts[t] & 0xf) << (t * 4);
+  return packed | 0;
+}
+
+export function encodeDeckEnergyMask(energyList = [], fallbackCards = []) {
+  let mask = 0;
+  for (const e of Array.isArray(energyList) ? energyList : []) {
+    const k = titleCase(e);
+    const idx = ENERGY_TYPE_KEYS.indexOf(k);
+    if (idx >= 0) mask |= (1 << idx);
+  }
+  if (mask !== 0) return mask & 0xff;
+  // Auto-infer from deck's colored attack requirements (or Pokémon types) when deck.energy is omitted
+  const score = [0, 0, 0, 0, 0, 0, 0, 0];
+  for (const c of Array.isArray(fallbackCards) ? fallbackCards : []) {
+    if (!c) continue;
+    const e1 = (c.v3Tpl && c.v3Tpl.length >= 26) ? (c.v3Tpl[23] >>> 0) : ((c.a1Ecost || 0) >>> 0);
+    const e2 = (c.v3Tpl && c.v3Tpl.length >= 26) ? (c.v3Tpl[24] >>> 0) : ((c.a2Ecost || 0) >>> 0);
+    for (let t = 0; t < 8; t++) {
+      const n = ((e1 >>> (t * 4)) & 0xf) + ((e2 >>> (t * 4)) & 0xf);
+      if (n > 0) score[t] += n * 4;
+    }
+    const tc = c.typeCode;
+    if (c.isPokemon && tc >= 0 && tc < 8) score[tc] += 1;
+  }
+  const ranked = score
+    .map((s, t) => ({ t, s }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 3);
+  for (const r of ranked) mask |= (1 << r.t);
+  return (mask || 0x02) & 0xff; // Fallback Fire if pure Colorless
+}
+
+// 檢查牌組內是否有寶可夢的招式需要未加入能量區的屬性（排除可由牌組內自產特性／訓練家補足的屬性）
+export function findDeckEnergyMismatches(deck, cardsById) {
+  if (!deck || !Array.isArray(deck.cards) || !cardsById?.get) return [];
+  const zoneSet = new Set((deck.energy || []).map((e) => titleCase(e)).filter((k) => Object.hasOwn(energyNames, k)));
+  const selfProduced = new Set();
+  for (const entry of deck.cards) {
+    const card = cardsById.get(entry.id);
+    if (!card) continue;
+    const tpl = getCardV3Template(card.id);
+    if (tpl && tpl.length >= 26) {
+      const effEtypes = tpl[25] >>> 0;
+      const abOp = tpl[17] & 0xff;
+      const trnKind = tpl[19] & 0xff;
+      const trnSub = (tpl[19] >>> 8) & 0xff;
+      const abTrnEt = effEtypes & 0xff;
+      // Self/ally Energy Zone generators (e.g. Magneton [L], Giratina ex [P], Gardevoir [P], Zeraora [L], Charmeleon [R], Misty [W], Brock [F], Kiawe [R], Fantina [P], Rika [F], Electric Generator [L])
+      if ((abOp === 3 || abOp === 4 || (abOp === 5 && (tpl[18] | 0) === 1) || (abOp === 9 && (tpl[18] | 0) === 5) || (abOp === 13 && (((tpl[18] >>> 8) & 0xff) === 2))) && abTrnEt < 8) {
+        selfProduced.add(ENERGY_TYPE_KEYS[abTrnEt]);
+      }
+      if (trnKind === 6 && (trnSub === 5 || trnSub === 6 || trnSub === 12 || trnSub === 13) && abTrnEt < 8) {
+        selfProduced.add(ENERGY_TYPE_KEYS[abTrnEt]);
+      }
+      for (const shift of [8, 16]) {
+        const aOp1 = (shift === 8 ? tpl[9] : tpl[14]) & 0xff;
+        const aOp2 = ((shift === 8 ? tpl[9] : tpl[14]) >>> 8) & 0xff;
+        if (aOp1 === 13 || aOp2 === 13) {
+          const et = (effEtypes >>> shift) & 0xff;
+          if (et < 8) selfProduced.add(ENERGY_TYPE_KEYS[et]);
+          else if (et === 250) { selfProduced.add('Fire'); selfProduced.add('Water'); selfProduced.add('Lightning'); }
+          else if (et === 251) { selfProduced.add('Water'); selfProduced.add('Lightning'); }
+        }
+      }
+    }
+  }
+  const issues = [];
+  const seen = new Set();
+  for (const entry of deck.cards) {
+    if (!entry?.id || seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    const card = cardsById.get(entry.id);
+    if (!card || card.type !== 'pokemon' || !Array.isArray(card.attacks)) continue;
+    for (const atk of card.attacks) {
+      const missing = [];
+      for (const sym of Array.isArray(atk.cost) ? atk.cost : []) {
+        const k = titleCase(sym);
+        if (!Object.hasOwn(energyNames, k)) continue;
+        if (!zoneSet.has(k) && !missing.includes(k)) missing.push(k);
+      }
+      if (missing.length > 0) {
+        const uncovered = missing.filter((k) => !selfProduced.has(k));
+        if (uncovered.length > 0) {
+          issues.push({
+            cardId: card.id,
+            cardName: card.name,
+            attackName: atk.name || '招式',
+            missingTypes: uncovered
+          });
+        }
+      }
+    }
+  }
+  return issues;
+}
 export const normalizeFeaturedPokemon = (list) => {
   if (!Array.isArray(list)) return [];
   const seen = new Set();
@@ -1501,7 +1608,10 @@ export function encodeCardForFastSim(card, strategyBonus = 0, cardsById = null) 
       isSupporter, isItem, isFossil,
       typeCode, weakCode, hp, retreat, prize,
       a1Cost, a1Dmg, a1Op: a1Op1, a1Val: a1Val1, a1Op1, a1Op2, a1Val1, a1Val2,
+      a1Ecost: v3Tpl.length >= 26 ? (v3Tpl[23] | 0) : 0,
       a2Cost, a2Dmg, a2Op: a2Op1, a2Val: a2Val1, a2Op1, a2Op2, a2Val1, a2Val2,
+      a2Ecost: v3Tpl.length >= 26 ? (v3Tpl[24] | 0) : 0,
+      effEtypes: v3Tpl.length >= 26 ? (v3Tpl[25] | 0) : 0xffffff,
       abOp, abVal,
       atkCost: Math.max(1, bestCost === 255 ? 1 : bestCost),
       atkDmg: bestDmg,
@@ -1563,7 +1673,10 @@ export function encodeCardForFastSim(card, strategyBonus = 0, cardsById = null) 
     isSupporter: trn.isSupporter, isItem: trn.isItem, isFossil,
     typeCode, weakCode, hp, retreat, prize,
     a1Cost: a1.cost, a1Dmg: a1.dmg, a1Op: a1.op, a1Val: a1.val,
+    a1Ecost: isPokemon && !isFossil && atks[0] ? packAttackEnergyCost(atks[0].cost) : 0,
     a2Cost: a2.cost, a2Dmg: a2.dmg, a2Op: a2.op, a2Val: a2.val,
+    a2Ecost: isPokemon && !isFossil && atks[1] ? packAttackEnergyCost(atks[1].cost) : 0,
+    effEtypes: 0xffffff,
     abOp, abVal,
     atkCost: Math.max(1, bestAtk.cost === 255 ? 1 : bestAtk.cost),
     atkDmg: bestExp.dmgNum,
@@ -2650,6 +2763,8 @@ export function buildLegalReplacementCandidates({
   const origCard = cardsById.get(targetCardId);
   const origEnc = encodeCardForOptimizer(origCard, Number(cardBonusById[targetCardId] || 0), optCtx);
   const baseDeck20 = [...baseCards19, origEnc];
+  const deckEnergyMask = encodeDeckEnergyMask(deck?.energy, baseDeck20);
+  for (const c of baseDeck20) c.deckEnergyMask = deckEnergyMask;
 
   const groups = new Map();
   let totalLegalChecked = 0;
@@ -2685,6 +2800,7 @@ export function buildLegalReplacementCandidates({
 
     const bonus = Number(cardBonusById[card.id] || 0);
     const enc = encodeCardForOptimizer(card, bonus, optCtx);
+    enc.deckEnergyMask = deckEnergyMask;
 
     // Skip functionally identical reprints of the exact same card already being replaced
     if (limitKey === origLimitKey && enc.hp === origEnc.hp && enc.a1Cost === origEnc.a1Cost && enc.a1Dmg === origEnc.a1Dmg && enc.a1Op === origEnc.a1Op && enc.a1Val === origEnc.a1Val && enc.a2Cost === origEnc.a2Cost && enc.a2Dmg === origEnc.a2Dmg && enc.abOp === origEnc.abOp && enc.abVal === origEnc.abVal && enc.trainerKind === origEnc.trainerKind && enc.effectVal === origEnc.effectVal) {

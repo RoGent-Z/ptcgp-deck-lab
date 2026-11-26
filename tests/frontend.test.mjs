@@ -315,3 +315,113 @@ test('project UI rule: battle page & card detail never expose internal decision 
     }
   }
 });
+
+test('typed energy UI & full replay modal render exact energy tokens, 0-cost badge, and missing-energy warnings cleanly', async () => {
+  const { setCardMechanicsDb } = await import('../public/app/core.mjs');
+  const { state } = await import('../public/app/data.mjs');
+  const { buildCardDetailModal, renderBattle, renderDecks, uiState } = await import('../public/app/views.mjs');
+  const { buildFullGameFlowModal } = await import('../public/app/battle.mjs');
+  const { instantiateFastSim } = await import('../public/battle/fastsim-runtime.mjs');
+
+  const cards = JSON.parse(readFileSync(new URL('../public/data/cards.json', import.meta.url), 'utf8'));
+  const mech = JSON.parse(readFileSync(new URL('../public/data/card-mechanics.json', import.meta.url), 'utf8'));
+  const metaTop = JSON.parse(readFileSync(new URL('../public/data/meta.top.json', import.meta.url), 'utf8'));
+  const v3 = JSON.parse(readFileSync(new URL('../public/battle/models/v3.json', import.meta.url), 'utf8'));
+  setCardMechanicsDb(mech);
+
+  const prevCards = state.cards;
+  const prevById = state.cardsById;
+  const prevCardsMissing = state.cardsMissing;
+  const prevDecks = state.decks;
+  const prevSelectedDeckId = state.selectedDeckId;
+  const prevMeta = state.meta;
+  const prevFastSim = state.fastSimFn;
+  const prevEngineReady = state.engineReady;
+
+  try {
+    state.cards = cards;
+    state.cardsById = new Map(cards.map((c) => [c.id, c]));
+    state.cardsMissing = false;
+    state.meta = metaTop;
+    state.fastSimFn = await instantiateFastSim(readFileSync(new URL('../public/battle/fastsim.wasm', import.meta.url)));
+    state.engineReady = true;
+
+    // 1. Card detail modal renders 0能 badge for 0-cost attack (Magby A4-032) & typed tokens for Dragonite (A1-185)
+    const magbyHtml = buildCardDetailModal(state.cardsById.get('A4-032'));
+    assert.match(magbyHtml, /cost-zero-badge">0能<\/span>/, '0-cost attack must display 0能 badge');
+    const dragonDetailHtml = buildCardDetailModal(state.cardsById.get('A1-185'));
+    assert.match(dragonDetailHtml, /assets\/energy\/water\.png/);
+    assert.match(dragonDetailHtml, /assets\/energy\/lightning\.png/);
+    assert.match(dragonDetailHtml, /assets\/energy\/colorless\.png/);
+
+    // 2. Deck with missing energy renders warning banner without crashing (both #decks and #battle)
+    const mismatchDeck = {
+      id: 'ut-dragon-fire',
+      name: '快龍誤配火能',
+      energy: ['Fire'],
+      cards: [
+        { id: 'A1-183', count: 2 }, { id: 'A1-184', count: 2 }, { id: 'A1-185', count: 2 },
+        { id: 'P-A-005', count: 2 }, { id: 'P-A-007', count: 2 },
+        { id: 'A1-225', count: 2 }, { id: 'A1-211', count: 2 }, { id: 'P-A-001', count: 2 },
+        { id: 'A2-147', count: 2 }, { id: 'A2-150', count: 2 }
+      ]
+    };
+    const dualDeck = {
+      id: 'ut-dragon-wl',
+      name: '雙色水雷快龍',
+      energy: ['Water', 'Lightning'],
+      cards: mismatchDeck.cards
+    };
+    state.decks = [mismatchDeck, dualDeck];
+    state.selectedDeckId = mismatchDeck.id;
+    uiState.battle.deckId = mismatchDeck.id;
+    uiState.battle.tab = 'meta';
+
+    const decksHtml = renderDecks();
+    assert.match(decksHtml, /is-warn/, '#decks must show missing-energy warning banner');
+    assert.match(decksHtml, /快龍/, '#decks warning must name Dragonite');
+    assert.match(decksHtml, /assets\/energy\/water\.png/);
+    assert.match(decksHtml, /assets\/energy\/lightning\.png/);
+
+    const battleMetaHtml = renderBattle();
+    assert.match(battleMetaHtml, /battle-energy-bar/, '#battle must display Energy Zone bar');
+    assert.match(battleMetaHtml, /目前能量區/);
+    assert.match(battleMetaHtml, /is-warn/, '#battle must display missing-energy warning');
+
+    uiState.battle.tab = 'my-duel';
+    uiState.battle.duelDeckAId = mismatchDeck.id;
+    uiState.battle.duelDeckBId = dualDeck.id;
+    const battleDuelHtml = renderBattle();
+    assert.match(battleDuelHtml, /我方能量區/);
+    assert.match(battleDuelHtml, /對手能量區/);
+    assert.match(battleDuelHtml, /我方牌組能量區未包含/);
+
+    // 3. Full Game Flow Replay modal renders typed energy in header, attach steps, attack costs, and board snapshots
+    const opp = metaTop.entries[0]; // Fire deck
+    const replayHtml = buildFullGameFlowModal({
+      opp,
+      oppId: opp.id,
+      idx: 0,
+      run: { runId: 'ut-typed-replay', modelId: 'lite-1m5q', gamesPerOppActual: 500 },
+      deck: dualDeck,
+      weights: v3.weights,
+      customEnemyWeights: v3.weights
+    });
+    assert.match(replayHtml, /flow-match-info/, 'Replay header must render match energy info');
+    assert.match(replayHtml, /水系／雷系/, 'Replay header must show Chinese Water & Lightning energy zone');
+    assert.match(replayHtml, /從能量區為.*附著 1 顆.*(?:火|水|雷)能量/, 'Attach step must show exact energy type');
+    assert.match(replayHtml, /flow-energy-list/, 'Board snapshot must render typed energy icon list');
+    assert.match(replayHtml, /flow-atk-cost/, 'Attack step must render typed attack cost icons');
+    assert.doesNotMatch(replayHtml, /WebGPU|WASM|CEM|Worker|先驗|信賴區間/, 'Replay modal must stay jargon-free');
+  } finally {
+    state.cards = prevCards;
+    state.cardsById = prevById;
+    state.cardsMissing = prevCardsMissing;
+    state.decks = prevDecks;
+    state.selectedDeckId = prevSelectedDeckId;
+    state.meta = prevMeta;
+    state.fastSimFn = prevFastSim;
+    state.engineReady = prevEngineReady;
+    uiState.battle.tab = 'meta';
+  }
+});

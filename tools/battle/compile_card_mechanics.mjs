@@ -92,6 +92,28 @@ function parseEnergyTypeLetter(letter) {
   return TYPE_CODE[k] ?? 255;
 }
 
+// Pack colored energy requirements (types 0..7) into 8x4-bit nibbles (i32).
+// Colorless requirements are represented implicitly by `cost - sum_nibbles(ecost)`.
+export function packEnergyCost(energyRequired = []) {
+  const counts = [0, 0, 0, 0, 0, 0, 0, 0];
+  let total = 0;
+  for (const sym of Array.isArray(energyRequired) ? energyRequired : []) {
+    const k = String(sym || '').trim().toLowerCase();
+    if (!k || k === 'none' || k === 'free') continue;
+    const t = TYPE_CODE[k];
+    if (t === undefined) continue;
+    total++;
+    if (t >= 0 && t < 8) {
+      counts[t] = Math.min(15, counts[t] + 1);
+    }
+  }
+  let packed = 0;
+  for (let t = 0; t < 8; t++) {
+    packed |= (counts[t] & 0xf) << (t * 4);
+  }
+  return { total: Math.max(0, Math.min(6, total)), ecost: packed | 0 };
+}
+
 const ULTRA_BEAST_NAMES = new Set([
   'nihilego', 'buzzwole', 'pheromosa', 'xurkitree', 'celesteela',
   'kartana', 'guzzlord', 'poipole', 'naganadel', 'stakataka', 'blacephalon',
@@ -115,18 +137,29 @@ function baseStripEx(nameEn) {
 // =========================================================================
 // 1. ATTACK COMPILER (589 / 589 unique English effects -> op1/val1 + op2/val2 + flags)
 // =========================================================================
-function compileAttack(enRaw, fixedDamage, costLen, title = '') {
+function compileAttack(enRaw, fixedDamage, energyRequired, title = '') {
   const eff = String(enRaw || '').replace(/\u00a0/g, ' ').trim();
-  const cost = Math.max(0, Math.min(6, Number(costLen || 0)));
+  const { total: cost, ecost } = Array.isArray(energyRequired)
+    ? packEnergyCost(energyRequired)
+    : { total: Math.max(0, Math.min(6, Number(energyRequired || 0))), ecost: 0 };
   let dmg = Number(fixedDamage || 0);
   if (!eff) {
-    return { cost, flags: 0, dmg, op1: 0, val1: 0, op2: 0, val2: 0, aux: 0 };
+    return { cost, ecost, effEtype: 255, flags: 0, dmg, op1: 0, val1: 0, op2: 0, val2: 0, aux: 0 };
   }
 
   let flags = 0;
   let op1 = 0, val1 = 0;
   let op2 = 0, val2 = 0;
   let aux = 0;
+  let effEtype = 255;
+
+  const setEffEtype = (et) => {
+    if (et === undefined || et === null || et === 255) return;
+    if (effEtype !== 255 && effEtype !== et) {
+      throw Error(`Attack has conflicting effEtype: ${effEtype} vs ${et} for [${title}] "${eff}"`);
+    }
+    effEtype = et;
+  };
 
   const pushOp = (op, val) => {
     if (op === 0) return;
@@ -182,7 +215,7 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
     || /^If this Pokémon has damage on it, this attack can be used for 1/i.test(eff)
     || /^If you have no cards in your deck, this attack can be used for 1/i.test(eff)
     || /^Flip 2 coins\. If both of them are tails, this attack does nothing\.$/i.test(eff)) {
-    return { cost, flags, dmg, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg, op1, val1, op2, val2, aux };
   }
 
   // --- B. Special Direct / Copy / Double-Attack / Delayed / Mixed Coin Specials ---
@@ -190,74 +223,75 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
   if (/This attack is used twice in a row\. The second attack does (\d+) damage/i.test(eff)) {
     const d2 = Number(eff.match(/second attack does (\d+)/i)[1]);
     pushOp(19, 8 | (d2 << 8));
-    return { cost, flags, dmg, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg, op1, val1, op2, val2, aux };
   }
   if (/Choose 1 of your opponent's Active Pokémon's attacks and use it as this attack/i.test(eff)) {
     const flip = /Flip a coin\. If heads/i.test(eff) ? 1 : 0;
     pushOp(20, 6 | (flip << 8));
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Choose 1 of your opponent's Pokémon's attacks and use it as this attack/i.test(eff)) {
     pushOp(20, 6 | (2 << 8));
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Choose 1 of your Benched Pokémon's attacks, except any Pokémon ex, and use it as this attack/i.test(eff)) {
     pushOp(20, 6 | (3 << 8));
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/1 attack from among the Pokémon in your opponent's hand and deck is chosen at random/i.test(eff)) {
     pushOp(20, 6 | (4 << 8));
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Flip a coin\. If heads, this attack does 70 damage to your opponent's Active Pokémon\. If tails, heal 30 damage from your opponent's Active/i.test(eff)) {
     pushOp(3, 4);
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if ((m = eff.match(/Flip a coin\. If heads, this attack does (\d+) more damage\. If tails, this Pokémon also does (\d+) damage to itself/i))) {
     pushOp(3, 3 | (Number(m[1]) << 8) | (Number(m[2]) << 16));
-    return { cost, flags, dmg, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg, op1, val1, op2, val2, aux };
   }
   if (/Halve your opponent's Active Pokémon's remaining HP/i.test(eff)) {
     pushOp(20, 4);
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Flip a coin\. If heads, your opponent's Active Pokémon's remaining HP is now 10/i.test(eff)) {
     pushOp(20, 5);
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Flip 2 coins\. If both of them are heads, your opponent's Active Pokémon is Knocked Out/i.test(eff)) {
     pushOp(20, 3);
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Flip 2 coins\. If both of them are heads, discard your opponent's Active Pokémon/i.test(eff)) {
     pushOp(20, 2 | (2 << 8));
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Flip a coin\. If heads, discard your opponent's Active Pokémon/i.test(eff)) {
     pushOp(20, 2 | (1 << 8));
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/Knock Out your opponent's Active Pokémon\./i.test(eff)) {
     pushOp(20, 1);
     if (/Discard all Energy from this Pokémon/i.test(eff)) pushOp(10, 99);
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if (/At the end of your opponent's next turn, Knock Out the Pokémon in the spot you chose/i.test(eff)) {
     pushOp(8, 12 | (0 << 8) | (1 << 16)); // delayed KO
     if (/Discard all Energy from this Pokémon/i.test(eff)) pushOp(10, 99);
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
   if ((m = eff.match(/At the end of your opponent's next turn, do (\d+) damage to (?:the Pokémon in the spot you chose|the Defending Pokémon)/i))) {
     const anySpot = /spot you chose/i.test(eff) ? 2 : 0;
     pushOp(8, 12 | (Number(m[1]) << 8) | (anySpot << 16));
-    return { cost, flags, dmg: 0, op1, val1, op2, val2, aux };
+    return { cost, ecost, effEtype, flags, dmg: 0, op1, val1, op2, val2, aux };
   }
 
   // --- C. Primary Damage / Targeting / Scaling Clauses ---
 
   // C1. Random spread / Bench snipe / Multi-target attacks
-  if ((m = eff.match(/1 of your opponent's Pokémon is chosen at random for each \[M\] Energy attached to this Pokémon\. For each time a Pokémon was chosen, do (\d+) damage/i))) {
-    pushOp(8, 8 | (Number(m[1]) << 8) | (99 << 16));
+  if ((m = eff.match(/1 of your opponent's Pokémon is chosen at random for each \[([A-Z])\] Energy attached to this Pokémon\. For each time a Pokémon was chosen, do (\d+) damage/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[1]));
+    pushOp(8, 8 | (Number(m[2]) << 8) | (99 << 16));
     dmg = 0;
   } else if ((m = eff.match(/1 other Pokémon \(either yours or your opponent's\) is chosen at random (\d+) times?\. (?:For each time a Pokémon was chosen, )?[Dd]o (\d+) damage/i))) {
     pushOp(8, 10 | (Number(m[2]) << 8) | (Number(m[1]) << 16));
@@ -274,9 +308,10 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
     dmg = 0;
   } else if ((m = eff.match(/Flip 3 coins\. This attack also does (\d+) damage for each heads to each of your opponent's Benched Pokémon/i))) {
     pushOp(5, 3 | (Number(m[1]) << 8) | (3 << 16));
-  } else if ((m = eff.match(/If this Pokémon has at least (\d+) extra \[[A-Z]\] Energy attached, this attack also does (\d+) damage to (\d+) of your opponent's Benched/i))) {
-    const mode = Number(m[3]) >= 2 ? 7 : 13; // 7=2 bench conditional, 13=1 bench conditional
-    pushOp(8, mode | (Number(m[2]) << 8) | (Number(m[1]) << 16));
+  } else if ((m = eff.match(/If this Pokémon has at least (\d+) extra \[([A-Z])\] Energy attached, this attack also does (\d+) damage to (\d+) of your opponent's Benched/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[2]));
+    const mode = Number(m[4]) >= 2 ? 7 : 13; // 7=2 bench conditional, 13=1 bench conditional
+    pushOp(8, mode | (Number(m[3]) << 8) | (Number(m[1]) << 16));
   } else if ((m = eff.match(/this attack does (\d+) damage to 2 of your opponent's Pokémon/i))) {
     pushOp(8, 14 | (Number(m[1]) << 8));
     dmg = 0;
@@ -313,12 +348,15 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
   }
 
   // C2. Coin-flip multiply & coin-flip additive damage
-  if ((m = eff.match(/Flip 3 coins\. For each heads, discard a \[R\] Energy from this Pokémon\. This attack does (\d+) more damage for each \[R\] Energy you discarded/i))) {
-    pushOp(4, 3 | (Number(m[1]) << 8) | (32 << 16)); // mode bit 5 = Camerupt discard+add
-  } else if ((m = eff.match(/Flip a coin for each (?:\[[A-Z]\] )?Energy attached to this Pokémon\. This attack does (\d+) more damage for each heads/i))) {
-    pushOp(5, 0 | (Number(m[1]) << 8) | (2 << 16)); // Emboar: base + per * heads(own_energy)
-  } else if ((m = eff.match(/Flip a coin for each (?:\[[A-Z]\] )?Energy attached to this Pokémon\. This attack does (\d+) damage for each heads/i))) {
-    pushOp(4, 0 | (Number(m[1]) << 8) | (8 << 16)); // Celebi ex / Gholdengo / Mega Mewtwo Y ex
+  if ((m = eff.match(/Flip 3 coins\. For each heads, discard a \[([A-Z])\] Energy from this Pokémon\. This attack does (\d+) more damage for each \[[A-Z]\] Energy you discarded/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[1]));
+    pushOp(4, 3 | (Number(m[2]) << 8) | (32 << 16)); // mode bit 5 = Camerupt discard+add
+  } else if ((m = eff.match(/Flip a coin for each (?:\[([A-Z])\] )?Energy attached to this Pokémon\. This attack does (\d+) more damage for each heads/i))) {
+    if (m[1]) setEffEtype(parseEnergyTypeLetter(m[1]));
+    pushOp(5, 0 | (Number(m[2]) << 8) | (2 << 16)); // Emboar: base + per * heads(own_energy)
+  } else if ((m = eff.match(/Flip a coin for each (?:\[([A-Z])\] )?Energy attached to this Pokémon\. This attack does (\d+) damage for each heads/i))) {
+    if (m[1]) setEffEtype(parseEnergyTypeLetter(m[1]));
+    pushOp(4, 0 | (Number(m[2]) << 8) | (8 << 16)); // Celebi ex / Gholdengo / Mega Mewtwo Y ex
     dmg = 0;
   } else if ((m = eff.match(/Flip a coin for each Pokémon you have in play\. This attack does (\d+) damage for each heads/i))) {
     pushOp(4, 0 | (Number(m[1]) << 8) | (2 << 16));
@@ -349,6 +387,7 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
 
   // C3. Count-based scaling (op=6)
   if ((m = eff.match(/Discard all \[R\] and \[L\] Energy from this Pokémon, and this attack does (\d+) damage for each Energy you discarded/i))) {
+    setEffEtype(253); // [R] + [L] all
     pushOp(6, 26 | (Number(m[1]) << 8));
     dmg = 0;
   } else if ((m = eff.match(/Discard up to 2 Pokémon Tool cards from your hand\. This attack does (\d+) damage for each card you discarded/i))) {
@@ -398,8 +437,11 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
     pushOp(6, 0 | (Number(m[1]) << 8));
     if (!m[2]) dmg = 0;
   } else if ((m = eff.match(/This attack does (\d+) more damage for each \[([A-Z])\] Energy attached to all of your Pokémon/i))) {
-    pushOp(6, 6 | (Number(m[1]) << 8) | (parseEnergyTypeLetter(m[2]) << 16));
+    const et = parseEnergyTypeLetter(m[2]);
+    setEffEtype(et);
+    pushOp(6, 6 | (Number(m[1]) << 8) | (et << 16));
   } else if ((m = eff.match(/This attack does (\d+) (more )?damage for each (?:\[([A-Z])\] )?Energy attached to this Pokémon/i))) {
+    if (m[3]) setEffEtype(parseEnergyTypeLetter(m[3]));
     pushOp(6, 5 | (Number(m[1]) << 8));
     if (!m[2]) dmg = 0;
   } else if ((m = eff.match(/This attack does (\d+) (more )?damage for each Energy attached to all of your opponent's Pokémon/i))) {
@@ -442,8 +484,9 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
   }
 
   // C4. Conditional bonus/penalty damage (op=7)
-  if ((m = eff.match(/If this Pokémon has at least (\d+) extra \[[A-Z]\] Energy attached, this attack does (\d+) more damage/i))) {
-    pushOp(7, 0 | (Number(m[2]) << 8) | (Number(m[1]) << 16));
+  if ((m = eff.match(/If this Pokémon has at least (\d+) extra \[([A-Z])\] Energy attached, this attack does (\d+) more damage/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[2]));
+    pushOp(7, 0 | (Number(m[3]) << 8) | (Number(m[1]) << 16));
   } else if ((m = eff.match(/If your opponent's Active Pokémon has damage on it, this attack does (\d+) more damage/i))) {
     pushOp(7, 1 | (Number(m[1]) << 8));
   } else if ((m = eff.match(/If this Pokémon has damage on it, this attack does -(\d+) damage/i))) {
@@ -498,8 +541,9 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
     pushOp(7, 25 | (Number(m[1]) << 8));
   } else if ((m = eff.match(/If the amount of Energy attached to both Active Pokémon is (\d+) or more, this attack does (\d+) more damage/i))) {
     pushOp(7, 26 | (Number(m[2]) << 8) | (Number(m[1]) << 16));
-  } else if ((m = eff.match(/If you have (\d+) or more \[[A-Z]\] Energy in play, this attack does (\d+) more damage/i))) {
-    pushOp(7, 27 | (Number(m[2]) << 8) | (Number(m[1]) << 16));
+  } else if ((m = eff.match(/If you have (\d+) or more \[([A-Z])\] Energy in play, this attack does (\d+) more damage/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[2]));
+    pushOp(7, 27 | (Number(m[3]) << 8) | (Number(m[1]) << 16));
   } else if ((m = eff.match(/If this Pokémon has more Energy attached than your opponent's Active Pokémon, this attack does (\d+) more damage/i))) {
     pushOp(7, 28 | (Number(m[1]) << 8));
   } else if ((m = eff.match(/If this Pokémon and your opponent's Active Pokémon have the same amount of Energy attached, this attack does (\d+) more damage/i))) {
@@ -567,15 +611,19 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
   // E1. Discard Own Energy (op=10)
   if (!/for each Energy you discarded|for each \[R\] Energy you discarded/i.test(eff)) {
     if (/Discard a \[R\], \[W\], and \[L\] Energy from this Pokémon/i.test(eff)) {
+      setEffEtype(250);
       pushOp(10, 3);
     } else if (/Discard a \[W\] and a \[L\] Energy from this Pokémon/i.test(eff)) {
+      setEffEtype(251);
       pushOp(10, 2);
-    } else if (/Discard all (?:(?:\[[A-Z]\] )?Energy (?:from|attached to) this Pokémon)/i.test(eff)) {
+    } else if ((m = eff.match(/Discard all (?:(?:\[([A-Z])\] )?Energy (?:from|attached to) this Pokémon)/i))) {
+      if (m[1]) setEffEtype(parseEnergyTypeLetter(m[1]));
       pushOp(10, 99);
     } else if (/Flip a coin\. If tails, discard (\d+) random Energy from this Pokémon/i.test(eff)) {
       const n = Number(eff.match(/discard (\d+) random Energy from this/i)[1]);
       pushOp(10, n | (1 << 8));
-    } else if ((m = eff.match(/Discard (?:(?:Fire|Grass|Water)\s*)?(\d+|a|an)?\s*(?:random )?(?:\[[A-Z]\] )?Energy from this Pokémon/i))) {
+    } else if ((m = eff.match(/Discard (?:(?:Fire|Grass|Water)\s*)?(\d+|a|an)?\s*(?:random )?(?:\[([A-Z])\] )?Energy from this Pokémon/i))) {
+      if (m[2]) setEffEtype(parseEnergyTypeLetter(m[2]));
       const n = (!m[1] || m[1] === 'a' || m[1] === 'an') ? 1 : Number(m[1]);
       pushOp(10, Math.max(1, n));
     } else if (/Discard 2 random Energy from among the Energy attached to all Pokémon \(both/i.test(eff)) {
@@ -601,7 +649,8 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
     pushOp(11, 4);
   } else if (/Flip a coin\. If heads, discard a random Energy from your opponent's Active/i.test(eff)) {
     pushOp(11, 2);
-  } else if (/Discard (?:a random|a \[[A-Z]\]) Energy from your opponent's Active Pokémon/i.test(eff)) {
+  } else if ((m = eff.match(/Discard (?:a random|a \[([A-Z])\]) Energy from your opponent's Active Pokémon/i))) {
+    if (m[1]) setEffEtype(parseEnergyTypeLetter(m[1]));
     pushOp(11, 1);
   }
 
@@ -694,28 +743,43 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
   // E6. Energy Ramp / Move (op=13)
   if (/You may move any amount of Energy from your Pokémon in play to your other Pokémon/i.test(eff)) {
     pushOp(13, 0 | (9 << 8));
-  } else if ((m = eff.match(/Move (all|\d+)(?: random| \[[A-Z]\])? Energy from this Pokémon to (?:1 of )?your Benched Pokémon/i))) {
+  } else if ((m = eff.match(/Move (all|\d+)(?: random| \[([A-Z])\])? Energy from this Pokémon to (?:1 of )?your Benched Pokémon/i))) {
+    if (m[2]) setEffEtype(parseEnergyTypeLetter(m[2]));
     const cnt = /all/i.test(m[1]) ? 99 : Number(m[1]);
     pushOp(13, cnt | (8 << 8));
-  } else if (/Flip 3 coins\. Take an amount of \[[A-Z]\] Energy from your Energy Zone equal to the number of heads and attach it to your Benched/i.test(eff)) {
+  } else if ((m = eff.match(/Flip 3 coins\. Take an amount of \[([A-Z])\] Energy from your Energy Zone equal to the number of heads and attach it to your Benched/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[1]));
     pushOp(13, 3 | (3 << 8));
-  } else if (/Flip 3 coins\. For each heads, produce a \[[A-Z]\] Energy from your Energy Zone and attach it to this Pokémon/i.test(eff)) {
+  } else if ((m = eff.match(/Flip 3 coins\. For each heads, produce a \[([A-Z])\] Energy from your Energy Zone and attach it to this Pokémon/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[1]));
     pushOp(13, 3 | (4 << 8));
-  } else if ((m = eff.match(/Flip a coin\. If heads, take (\d+) \[[A-Z]\] Energy from your Energy Zone and attach it to 1 of your Benched/i))) {
+  } else if ((m = eff.match(/Flip a coin\. If heads, take (\d+) \[([A-Z])\] Energy from your Energy Zone and attach it to 1 of your Benched/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[2]));
     pushOp(13, Number(m[1]) | (6 << 8));
-  } else if ((m = eff.match(/Flip a coin\. If heads, take (\d+) \[[A-Z]\] Energy from your Energy Zone and attach it to this Pokémon/i))) {
+  } else if ((m = eff.match(/Flip a coin\. If heads, take (\d+) \[([A-Z])\] Energy from your Energy Zone and attach it to this Pokémon/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[2]));
     pushOp(13, Number(m[1]) | (5 << 8));
-  } else if (/Choose 2 of your Benched Pokémon\. For each of those Pokémon, take a \[[A-Z]\] Energy/i.test(eff)) {
+  } else if ((m = eff.match(/Choose 2 of your Benched Pokémon\. For each of those Pokémon, take a \[([A-Z])\] Energy/i))) {
+    setEffEtype(parseEnergyTypeLetter(m[1]));
     pushOp(13, 2 | (2 << 8));
   } else if (/Take a \[R\], \[W\], and \[L\] Energy from your Energy Zone and attach them to your Benched Basic/i.test(eff)) {
+    setEffEtype(250);
     pushOp(13, 3 | (7 << 8));
   } else if (/Take 3 \[P\] Energy from your Energy Zone and attach it to your \[P\] Pokémon in any way you like/i.test(eff)) {
+    setEffEtype(TYPE_CODE.p);
     pushOp(13, 3 | (7 << 8));
   } else if (/Take a \[W\] and a \[L\] Energy from your Energy Zone and attach them to this Pokémon/i.test(eff)) {
+    setEffEtype(251);
     pushOp(13, 2 | (0 << 8));
-  } else if ((m = eff.match(/Take (a|an|\d+|a random) .*?Energy.*?from your Energy Zone and attach it to (this Pokémon|1 of your Benched|Mesprit or Azelf)/i))) {
+  } else if ((m = eff.match(/Take (a|an|\d+|a random) (.*?)Energy.*?from your Energy Zone and attach it to (this Pokémon|1 of your Benched|Mesprit or Azelf)/i))) {
+    if (/random/i.test(m[1])) {
+      setEffEtype(252); // random 0..7 (Sableye)
+    } else {
+      const em = m[2].match(/\[([A-Z])\]/i);
+      if (em) setEffEtype(parseEnergyTypeLetter(em[1]));
+    }
     const cnt = (m[1] === 'a' || m[1] === 'an' || /random/i.test(m[1])) ? 1 : Number(m[1]);
-    const mode = /this Pokémon/i.test(m[2]) ? 0 : 1;
+    const mode = /this Pokémon/i.test(m[3]) ? 0 : 1;
     pushOp(13, cnt | (mode << 8));
   }
 
@@ -880,15 +944,73 @@ function compileAttack(enRaw, fixedDamage, costLen, title = '') {
   if (op1 === 0 && op2 === 0 && flags === 0) {
     throw Error(`UNCOMPILED ATTACK EFFECT [${title}]: "${eff}"`);
   }
-  return { cost, flags, dmg, op1, val1, op2, val2, aux };
+  return { cost, ecost, effEtype, flags, dmg, op1, val1, op2, val2, aux };
 }
 
 // =========================================================================
-// 2. ABILITY COMPILER (164 / 164 unique English abilities -> abOp, abCond, abVal, abAux)
+// 2. ABILITY COMPILER (164 / 164 unique English abilities -> abOp, abCond, abVal, abAux, abEtype)
 // =========================================================================
+function resolveAbilityEtype(res, eff) {
+  const op = res.abOp;
+  const val = res.abVal;
+  const sub = (val >> 8) & 0xff;
+  if (op === 3) {
+    const m = eff.match(/\[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : 255;
+  }
+  if (op === 4) {
+    if (val === 2) return 254; // Dragonair: attach from discard (deck-needed)
+    const m = eff.match(/\[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : 255;
+  }
+  if (op === 5 && val === 1) {
+    const m = eff.match(/\[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : TYPE_CODE.r;
+  }
+  if (op === 7) {
+    const m = eff.match(/attach a \[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : 255; // Darkrai [D], Charizard [R], Cresselia [P]; Komala/Slaking/Porygon2 = 255
+  }
+  if (op === 9 && val === 5) {
+    const m = eff.match(/\[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : TYPE_CODE.l;
+  }
+  if (op === 12 && sub === 2) {
+    const m = eff.match(/\[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : TYPE_CODE.r;
+  }
+  if (op === 13 && (sub === 2 || sub === 5)) {
+    const m = eff.match(/\[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : 255;
+  }
+  if (op === 15 && (val & 0xff) === 4) {
+    const m = eff.match(/cost 1 less \[([A-Z])\]/i);
+    return m ? parseEnergyTypeLetter(m[1]) : TYPE_CODE.c;
+  }
+  if (op === 16 && (val === 2 || val === 3 || val === 4)) {
+    const m = eff.match(/\[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : 255;
+  }
+  if (op === 17 && val === 2) {
+    const m = eff.match(/has any \[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : 255;
+  }
+  if (op === 18 && val === 99) {
+    const m = eff.match(/each \[([A-Z])\] Energy/i);
+    return m ? parseEnergyTypeLetter(m[1]) : 255;
+  }
+  return 255;
+}
+
 function compileAbility(enRaw, title = '') {
   const eff = String(enRaw || '').replace(/\u00a0/g, ' ').trim();
-  if (!eff) return { abOp: 0, abCond: 0, abVal: 0, abAux: 0 };
+  if (!eff) return { abOp: 0, abCond: 0, abVal: 0, abAux: 0, abEtype: 255 };
+  const res = compileAbilityCore(eff, title);
+  res.abEtype = resolveAbilityEtype(res, eff);
+  return res;
+}
+
+function compileAbilityCore(eff, title = '') {
 
   let abCond = 0;
   let abAux = 0;
@@ -1184,9 +1306,40 @@ function compileAbility(enRaw, title = '') {
 // =========================================================================
 // 3. TRAINER / TOOL / STADIUM / FOSSIL COMPILER (177 / 177 exact!)
 // =========================================================================
+function resolveTrainerEtype(nameEn, res) {
+  switch (nameEn) {
+    case 'electrical cord': return TYPE_CODE.l;
+    case 'soothing shore': return TYPE_CODE.w;
+    case 'irida': return TYPE_CODE.w;
+    case 'diantha': return TYPE_CODE.p;
+    case 'squirt bottle': return TYPE_CODE.r;
+    case 'misty': return TYPE_CODE.w;
+    case 'electric generator': return TYPE_CODE.l;
+    case 'wally': return TYPE_CODE.c;
+    case 'flame patch': return TYPE_CODE.r;
+    case 'lusamine': return 254; // deck-needed from discard
+    case 'volkner': return TYPE_CODE.l;
+    case 'professor sada': return 254; // 3 different types from discard
+    case 'brock': return TYPE_CODE.f;
+    case 'kiawe': return TYPE_CODE.r;
+    case 'fantina': return TYPE_CODE.p;
+    case 'rika': return TYPE_CODE.f;
+    case 'elemental switch': return 250; // [R]/[W]/[L]
+    case 'lt. surge': return TYPE_CODE.l;
+    case 'genome converter y': return TYPE_CODE.p;
+    default: return 255;
+  }
+}
+
 function compileTrainer(nameEnRaw, subtype, enRaw) {
   const nameEn = normKey(nameEnRaw);
   const eff = String(enRaw || '').replace(/\u00a0/g, ' ').trim();
+  const res = compileTrainerCore(nameEnRaw, nameEn, subtype, eff);
+  res.trnEtype = resolveTrainerEtype(nameEn, res);
+  return res;
+}
+
+function compileTrainerCore(nameEnRaw, nameEn, subtype, eff) {
   const isFossil = subtype === 'fossil' || /Play this card as if it were a 40-HP Basic \[C\] Pokémon/i.test(eff);
   if (isFossil) {
     return { isFossil: 1, kind: 0, sub: 0, cond: 0, val: 0, h1: 0, h2: 0 };
@@ -1470,10 +1623,10 @@ for (const c of cards) {
   let stage = 0, evoGroup = 0, typeCode = 9, type2Code = 255, weakCode = 255, hp = 0, retreat = 0, prize = 1;
   let isMega = 0, isEx = 0, isUb = 0, isAnc = 0, isFut = 0, isTr = 0;
   let hasSweets = 0, hasPuppy = 0, hasPsychic = 0, hasDraco = 0, isEeveeEvo = 0;
-  let a1 = { cost: 255, flags: 0, dmg: 0, op1: 0, val1: 0, op2: 0, val2: 0, aux: 0 };
-  let a2 = { cost: 255, flags: 0, dmg: 0, op1: 0, val1: 0, op2: 0, val2: 0, aux: 0 };
-  let ab = { abOp: 0, abCond: 0, abVal: 0, abAux: 0 };
-  let trn = { isFossil: 0, kind: 0, sub: 0, cond: 0, val: 0, h1: 0, h2: 0 };
+  let a1 = { cost: 255, ecost: 0, effEtype: 255, flags: 0, dmg: 0, op1: 0, val1: 0, op2: 0, val2: 0, aux: 0 };
+  let a2 = { cost: 255, ecost: 0, effEtype: 255, flags: 0, dmg: 0, op1: 0, val1: 0, op2: 0, val2: 0, aux: 0 };
+  let ab = { abOp: 0, abCond: 0, abVal: 0, abAux: 0, abEtype: 255 };
+  let trn = { isFossil: 0, kind: 0, sub: 0, cond: 0, val: 0, h1: 0, h2: 0, trnEtype: 255 };
 
   if (c.type === 'pokemon') {
     stage = c.stage === 'stage2' ? 2 : c.stage === 'stage1' ? 1 : 0;
@@ -1519,7 +1672,8 @@ for (const c of cards) {
       if (tLow === 'puppy pile') hasPuppy = 1;
       if (tLow === 'psychic') hasPsychic = 1;
       if (tLow === 'draco meteor') hasDraco = 1;
-      const compiled = compileAttack(da.effect, da.fixed_damage, da.energy_required?.length || 0, da.title);
+      const reqEnergy = Array.isArray(da.energy_required) ? da.energy_required : (c.attacks?.[i]?.cost || []);
+      const compiled = compileAttack(da.effect, da.fixed_damage, reqEnergy, da.title);
       if (da.effect?.trim()) seenAtks.add(da.effect.trim());
       if (i === 0) a1 = compiled;
       else if (i === 1) a2 = compiled;
@@ -1584,13 +1738,26 @@ for (const c of cards) {
   const abPacked = ((ab.abOp & 0xff) | ((ab.abCond & 0xff) << 8) | ((ab.abAux & 0xffff) << 16)) | 0;
   const trnPacked = ((trn.kind & 0xff) | ((trn.sub & 0xff) << 8) | ((trn.cond & 0xffff) << 16)) | 0;
 
-  // 23-int canonical template (slot_id=[23], bonus_q=[24] added per deck instance at runtime!)
+  const abTrnEtype = (isPokemon && !isFossil) ? (ab.abEtype ?? 255) : (trn.trnEtype ?? 255);
+  const effEtypes = (
+    (abTrnEtype & 0xff)
+    | ((a1.effEtype & 0xff) << 8)
+    | ((a2.effEtype & 0xff) << 16)
+  ) | 0;
+
+  // 26-int canonical template:
+  //   [0..22] core card mechanics
+  //   [23] = a1_ecost (8x4-bit nibbles for colored energy costs 0..7)
+  //   [24] = a2_ecost (8x4-bit nibbles for colored energy costs 0..7)
+  //   [25] = eff_etypes (bits 0..7 = ab/trn etype, 8..15 = a1 eff etype, 16..23 = a2 eff etype)
+  // Runtime maps [23]->buf[25], [24]->buf[26], (deck_emask | ([25]<<8))->buf[27] while buf[23]=slot_id, buf[24]=bonus_q.
   const tpl = [
     isPokemon, meta, tagsExtra, typeCode, weakCode, hp, retPrize,
     a1CostFlags, a1.dmg | 0, a1Ops, a1.val1 | 0, a1.val2 | 0,
     a2CostFlags, a2.dmg | 0, a2Ops, a2.val1 | 0, a2.val2 | 0,
     abPacked, ab.abVal | 0,
-    trnPacked, trn.val | 0, trn.h1 | 0, trn.h2 | 0
+    trnPacked, trn.val | 0, trn.h1 | 0, trn.h2 | 0,
+    a1.ecost | 0, a2.ecost | 0, effEtypes
   ];
   const key = tpl.join(',');
   let idx = tplKeyToIdx.get(key);
@@ -1603,7 +1770,7 @@ for (const c of cards) {
 }
 
 const outDoc = {
-  version: 3,
+  version: 4,
   stride: 28,
   totalCards: cards.length,
   uniqueTemplates: templates.length,
