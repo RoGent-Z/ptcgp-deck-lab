@@ -1,38 +1,75 @@
-// Fast zero-allocation fixed-point i32 WASM runtime wrapper for Pocket Lab (Exact-Mechanics v2).
+// Fast zero-allocation fixed-point i32 WASM runtime wrapper for Pocket Lab (Exact-Mechanics v3).
 // Uses exact Q10 (* 1024) i32 weights/bonuses and Rng32 matching WebGPU WGSL bit-for-bit.
 const FEATURES = 22;
-const CARD_STRIDE = 20;
+const CARD_STRIDE = 28;
 const MAX_ENEMIES = 10;
 const MAX_CANDS = 40;
 const moduleCache = new WeakMap();
 
 function packCardFields(buf, off, c, slotId) {
+  if (Array.isArray(c.v3Tpl) && c.v3Tpl.length >= 23) {
+    for (let i = 0; i < 23; i++) buf[off + i] = c.v3Tpl[i] | 0;
+    // Apply optimizer override if card was marked incompatible (stage===99 or disabled attack/trainer)
+    if (c.stage === 99) {
+      buf[off + 1] = (buf[off + 1] & ~0xff) | 99;
+      buf[off + 7] = 255; buf[off + 8] = 0; buf[off + 9] = 0; buf[off + 10] = 0; buf[off + 11] = 0;
+      buf[off + 12] = 255; buf[off + 13] = 0; buf[off + 14] = 0; buf[off + 15] = 0; buf[off + 16] = 0;
+      buf[off + 17] = 0; buf[off + 18] = 0;
+    } else if (c.isPokemon === 0 && c.trainerKind === 0) {
+      buf[off + 19] = 0; buf[off + 20] = 0;
+    } else if (c.isPokemon === 1) {
+      if (c.a1Cost === 255) { buf[off + 7] = 255; buf[off + 8] = 0; buf[off + 9] = 0; buf[off + 10] = 0; buf[off + 11] = 0; }
+      if (c.a2Cost === 255) { buf[off + 12] = 255; buf[off + 13] = 0; buf[off + 14] = 0; buf[off + 15] = 0; buf[off + 16] = 0; }
+    }
+    buf[off + 23] = slotId | 0;
+    buf[off + 24] = 0;
+    buf[off + 25] = 0;
+    buf[off + 26] = 0;
+    buf[off + 27] = 0;
+    return;
+  }
+  // Fallback packing for synthetic unit-test cards without a v3 template
   const meta = (c.stage & 0xff)
     | (((c.evoGroup || 0) & 0xffff) << 8)
     | ((c.isSupporter ? 1 : 0) << 24)
     | ((c.isItem ? 1 : 0) << 25)
-    | ((c.isFossil ? 1 : 0) << 26);
-  const hasV2 = c.a1Cost !== undefined;
+    | ((c.isFossil ? 1 : 0) << 26)
+    | ((c.trainerKind === 5 ? 1 : 0) << 27)
+    | ((c.trainerKind === 7 ? 1 : 0) << 28)
+    | (((c.prize || 1) >= 3 ? 1 : 0) << 29)
+    | (((c.prize || 1) >= 2 ? 1 : 0) << 30);
+  const a1Cost = c.a1Cost !== undefined ? c.a1Cost : (c.atkCost ?? 1);
+  const a1Dmg = c.a1Cost !== undefined ? c.a1Dmg : (c.atkDmg ?? 0);
+  const a2Cost = c.a2Cost !== undefined ? c.a2Cost : 255;
+  const a2Dmg = c.a2Cost !== undefined ? c.a2Dmg : 0;
   buf[off] = c.isPokemon | 0;
   buf[off + 1] = meta | 0;
-  buf[off + 2] = c.typeCode | 0;
-  buf[off + 3] = c.weakCode | 0;
-  buf[off + 4] = c.hp | 0;
-  buf[off + 5] = c.retreat | 0;
-  buf[off + 6] = c.prize | 0;
-  buf[off + 7] = (hasV2 ? c.a1Cost : (c.atkCost ?? 1)) | 0;
-  buf[off + 8] = (hasV2 ? c.a1Dmg : (c.atkDmg ?? 0)) | 0;
-  buf[off + 9] = (hasV2 ? c.a1Op : 0) | 0;
-  buf[off + 10] = (hasV2 ? c.a1Val : 0) | 0;
-  buf[off + 11] = (hasV2 ? c.a2Cost : 255) | 0;
-  buf[off + 12] = (hasV2 ? c.a2Dmg : 0) | 0;
-  buf[off + 13] = (hasV2 ? c.a2Op : 0) | 0;
-  buf[off + 14] = (hasV2 ? c.a2Val : 0) | 0;
-  buf[off + 15] = (hasV2 ? c.abOp : 0) | 0;
-  buf[off + 16] = (hasV2 ? c.abVal : 0) | 0;
-  buf[off + 17] = c.trainerKind | 0;
-  buf[off + 18] = c.effectVal | 0;
-  buf[off + 19] = slotId | 0;
+  buf[off + 2] = (255 << 24) | 0;
+  buf[off + 3] = (c.typeCode ?? 9) | 0;
+  buf[off + 4] = (c.weakCode ?? 255) | 0;
+  buf[off + 5] = (c.hp ?? 60) | 0;
+  buf[off + 6] = ((c.retreat ?? 1) & 0xff) | (((c.prize ?? 1) & 0xff) << 8);
+  buf[off + 7] = a1Cost | 0;
+  buf[off + 8] = a1Dmg | 0;
+  buf[off + 9] = (c.a1Op1 || 0) | ((c.a1Op2 || 0) << 8);
+  buf[off + 10] = (c.a1Val1 || 0) | 0;
+  buf[off + 11] = (c.a1Val2 || 0) | 0;
+  buf[off + 12] = a2Cost | 0;
+  buf[off + 13] = a2Dmg | 0;
+  buf[off + 14] = (c.a2Op1 || 0) | ((c.a2Op2 || 0) << 8);
+  buf[off + 15] = (c.a2Val1 || 0) | 0;
+  buf[off + 16] = (c.a2Val2 || 0) | 0;
+  buf[off + 17] = (c.abOp || 0) | 0;
+  buf[off + 18] = (c.abVal || 0) | 0;
+  buf[off + 19] = (c.trainerKind || 0) | ((c.trainerSub || 1) << 8);
+  buf[off + 20] = (c.effectVal || 0) | 0;
+  buf[off + 21] = 0;
+  buf[off + 22] = 0;
+  buf[off + 23] = slotId | 0;
+  buf[off + 24] = 0;
+  buf[off + 25] = 0;
+  buf[off + 26] = 0;
+  buf[off + 27] = 0;
 }
 
 async function compileFastModule(wasmSource) {

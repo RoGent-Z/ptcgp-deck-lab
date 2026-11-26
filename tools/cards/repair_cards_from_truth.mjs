@@ -21,7 +21,7 @@ for (const entry of dbArr) {
   dbById.set(cid, { kind, ...o });
 }
 
-const GARBLE_RE = /「」|隨機個|隨機將張|擲次|抽張|恢復HP|造成點|替補席|活躍寶可夢|活躍位置|活動位置|雷點能量|火點能量|水點能量|草點能量|超點能量|鬥點能量|惡點能量|鋼點能量|翻轉\d|對每個頭|後備寶可夢|除了任何前寶可夢|體育場卡|治療\s*\d+\s*點來自/;
+const GARBLE_RE = /「」|隨機個|隨機將張|擲次|抽張|抽出張卡|恢復HP|造成點|造\d+點傷害|基礎\|基礎|替補席|活躍寶可夢|現役寶可夢|活躍位置|活動位置|雷點能量|火點能量|水點能量|草點能量|超點能量|鬥點能量|惡點能量|鋼點能量|翻轉\d|對每個頭|後備寶可夢|除了任何前寶可夢|前寶可夢|體育場卡|治療\s*\d+\s*點來自|此攻擊|在你的回合中|治療該寶可夢|治療\s*\d+\s*點傷害|寶可夢工具|從你的.*那裡|你所有的寶可夢|擊倒時|如果出現正面|你的手牌|你以這種方式|每有一個|的攻擊傷害為|拋一枚硬幣|如果這隻寶可夢|如果你場上|對於這隻寶可夢|從你的牌組|丟棄該寶可夢的|在對手的下一個回合|在每個玩家的回合/;
 
 const ENERGY_TOKEN_ZH = {
   G: '[草]', R: '[火]', W: '[水]', L: '[雷]',
@@ -208,11 +208,19 @@ const EXACT_EFFECT_ZH = {
   "As long as this Pokémon is in the Active Spot, your opponent can't play any Stadium cards from their hand.": '只要這隻寶可夢在戰鬥場上，對手無法從手牌使出競技場卡。',
   "Once during your turn, if this Pokémon is in the Active Spot, you may switch out your opponent's Active Pokémon to the Bench. (Your opponent chooses the new Active Pokémon.)": '在自己的回合，若這隻寶可夢在戰鬥場上，可使用1次。將對手的戰鬥寶可夢與備戰寶可夢互換。（由對手選擇放置於戰鬥場的寶可夢。）',
   'Once during your turn, you may heal 20 damage from your Active Pokémon.': '在自己的回合時，可使用1次。將自己的戰鬥寶可夢恢復20HP。',
+  'During Pokémon Checkup, heal 10 damage from each of your Pokémon.': '在寶可夢檢查時，將自己的所有寶可夢各恢復10HP。',
+  "When this Pokémon is Knocked Out, flip a coin. If heads, your opponent can't get any points for it.": '當這隻寶可夢昏厥時，擲1次硬幣。若為正面，對手無法獲得分數。',
+  'Once during your turn, if this Pokémon has a Pokémon Tool attached, you may heal 30 damage from 1 of your Pokémon.': '在自己的回合時，若這隻寶可夢身上附有「寶可夢道具」，可使用1次。將自己的1隻寶可夢恢復30HP。',
+  'This Pokémon takes -20 damage from attacks.': '這隻寶可夢受到招式的傷害-20點。',
+  'If any damage is done to this Pokémon by attacks, flip a coin. If heads, this Pokémon takes -80 damage from that attack.': '當這隻寶可夢受到招式的傷害時，擲1次硬幣。若為正面，則這隻寶可夢受到該招式的傷害-80點。',
 
   // Trainers & Quotes
   'Move all [P] Energy from 1 of your Benched [P] Pokémon to your Mega Mewtwo Y ex in the Active Spot.': '將自己備戰區1隻[超]寶可夢身上附有的所有[超]能量，改附於戰鬥場的「超級超夢Y ex」身上。',
   "Put 2 random cards from among Magneton, Heliolisk, and Clemont's Backpack from your deck into your hand.": '從自己的牌庫隨機將2張「三合一磁怪」「光電傘蜥」「希特隆的背包」加入手牌。',
   "Attacks used by the Future Pokémon this card is attached to do +20 damage to your opponent's Active Pokémon.": '附有這張卡的「未來」寶可夢使用的招式，對對手的戰鬥寶可夢造成的傷害+20點。',
+  "Choose 1 of your Basic Pokémon in play. If you have a Stage 2 card in your hand that evolves from that Pokémon, put that card onto the Basic Pokémon to evolve it, skipping the Stage 1. You can't use this card during your first turn or on a Basic Pokémon that was put into play this turn.": '從自己的手牌選擇1張2階進化寶可夢卡，放置於自己場上可進化成那隻寶可夢的基礎寶可夢身上，跳過1階進化完成進化。（無法對自己的最初回合或剛使出的寶可夢使用。）',
+  'Put a random Stage 2 Pokémon from your deck into your hand.': '從自己的牌庫隨機將1張2階進化寶可夢卡加入手牌。',
+  "Once during each player's turn, that player may choose a card in their hand and switch it with a random Pokémon Tool card in their deck.": '雙方玩家在自己的回合時，各可使用1次。選擇自己的1張手牌，與自己牌庫中隨機1張「寶可夢道具」卡交換。',
 
   // Attacks (missing / broken / MT garbled)
   'Flip 2 coins. This attack does 30 damage for each heads. If this Pokémon has Lucky Mittens attached, flip 4 coins instead.': '擲2次硬幣，造成正面出現的次數×30點傷害。若這隻寶可夢身上附有「幸運手套」，則這個招式擲硬幣的次數改為4次。',
@@ -285,7 +293,25 @@ const EXACT_EFFECT_ZH = {
   'You may move any amount of Energy from your Pokémon in play to your other Pokémon in any way you like.': '可將自己場上寶可夢身上附有的任意數量能量，隨意改附於自己的其他寶可夢身上。',
   "Flip a coin. If heads, this attack does 70 damage to your opponent's Active Pokémon. If tails, heal 30 damage from your opponent's Active Pokémon.": '擲1次硬幣。若為正面，對對手的戰鬥寶可夢造成70點傷害；若為反面，將對手的戰鬥寶可夢恢復30HP。',
   'This attack also does 20 damage to 1 of your Pokémon.': '自己的1隻寶可夢也受到20點傷害。',
-  'If your opponent has exactly 2, 4, or 6 cards in their hand, this attack does 40 more damage.': '若對手的手牌為2張、4張或6張，則增加40點傷害。'
+  'If your opponent has exactly 2, 4, or 6 cards in their hand, this attack does 40 more damage.': '若對手的手牌為2張、4張或6張，則增加40點傷害。',
+  'Draw a card.': '從自己的牌庫抽出1張卡。',
+  "This attack is used twice in a row. The second attack does 40 damage.(If the first attack Knocks Out your opponent's Active Pokémon, the second attack is used after your opponent chooses a new Active Pokémon.)": '這個招式會連續使用2次。第2次造成40點傷害。（若對手的戰鬥寶可夢因第1次招式而昏厥，則在對手放置新的戰鬥寶可夢後，使用第2次。）',
+  "If your opponent's Active Pokémon is a Pokémon ex, this attack does 40 more damage.": '若對手的戰鬥寶可夢為「寶可夢ex」，則增加40點傷害。',
+  'If this Pokémon has a Pokémon Tool attached, this attack does 40 more damage.': '若這隻寶可夢身上附有「寶可夢道具」，則增加40點傷害。',
+  'If this Pokémon has a Pokémon Tool attached, this attack does 20 more damage.': '若這隻寶可夢身上附有「寶可夢道具」，則增加20點傷害。',
+  'If this Pokémon evolved from Sneasel during this turn, this attack does 20 more damage.': '若這隻寶可夢在此回合從「狃拉」進化而來，則增加20點傷害。',
+  'This attack does 40 more damage for each time your Pokémon have been Knocked Out during this game.': '這場對戰中自己的寶可夢每昏厥1次，則增加40點傷害。',
+  "Discard 2 Energy from this Pokémon. During your opponent's next turn, this Pokémon takes -30 damage from attacks.": '將這隻寶可夢身上的2個能量丟棄。在下個對手的回合，這隻寶可夢受到招式的傷害-30點。',
+  'This attack does 20 more damage for each type of Energy attached to this Pokémon.': '這隻寶可夢身上每附有1種屬性的能量，則增加20點傷害。',
+  'If you have 4 or more [L] Energy in play, this attack does 70 more damage.': '若自己場上的[雷]能量有4個以上，則增加70點傷害。',
+  'Flip a coin. If heads, this attack does 50 more damage. If tails, this Pokémon also does 50 damage to itself.': '擲1次硬幣。若為正面，則增加50點傷害；若為反面，這隻寶可夢也受到50點傷害。',
+  'This attack does 40 damage for each Pokémon Tool attached to all of your Pokémon.': '造成自己所有寶可夢身上附有的「寶可夢道具」數量×40點傷害。',
+  'This attack does 20 more damage for each [P] Energy attached to all of your Pokémon.': '自己所有寶可夢身上每附有1個[超]能量，則增加20點傷害。',
+  'This attack does 20 more damage for each Pokémon in your discard pile.': '自己的棄牌區每有1張寶可夢卡，則增加20點傷害。',
+  'Discard Water2 [W] Energy from this Pokémon. Your opponent\'s Active Pokémon is now Paralyzed.': '將這隻寶可夢身上的2個[水]能量丟棄。將對手的戰鬥寶可夢麻痺。',
+  "If this Pokémon evolved from Dunsparce during this turn, discard 2 random Energy from your opponent's Active Pokémon.": '若這隻寶可夢在此回合從「土龍弟弟」進化而來，則將對手的戰鬥寶可夢身上的隨機2個能量丟棄。',
+  "Flip a coin. If heads, the Defending Pokémon can't attack during your opponent's next turn.": '擲1次硬幣若為正面，則在下個對手的回合，受到這個招式的寶可夢無法使用招式。',
+  'Put a random Item card from your discard pile into your hand.': '從自己的棄牌區隨機將1張物品卡加入手牌。'
 };
 
 function translateEnglishEffectFallback(en) {

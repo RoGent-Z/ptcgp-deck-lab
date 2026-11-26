@@ -15,6 +15,7 @@ import {
   EXPLORE_TOTAL_GAMES,
   FIRST_SEAT_GAMES,
   GAMES_PER_OPPONENT,
+  getCardV3Template,
   interval,
   isAndroidOrMobileEnv,
   isCardCompatibleWithDeck,
@@ -1425,89 +1426,139 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
         1: '，觸發進化特性（為戰鬥場額外附著 1 顆能量）',
         2: '，觸發進化特性（從牌庫抽出 2 張卡）',
         3: '，觸發進化特性（從牌庫召喚同類分身至備戰區）',
-        4: '，觸發進化特性（對對手戰鬥場造成 20 點傷害）',
-        5: '，觸發進化特性（重洗對手手牌）'
+        4: '，觸發進化特性（對對手戰鬥場造成傷害）',
+        5: '，觸發進化特性（重洗對手手牌）',
+        6: '，觸發進化特性（對對手場上寶可夢造成傷害）',
+        7: '，觸發進化特性（恢復己方寶可夢體力）',
+        8: '，觸發進化特性（對對手戰鬥場施加異常狀態）',
+        9: '，觸發進化特性（破壞對手能量）',
+        10: '，觸發進化特性（將對手戰鬥寶可夢強制替換）'
       };
       return `將${slotLabelZh(step.aux1)}的寶可夢進化為「${cName}」${trigMap[trig] || ''}`;
     }
     case 6: {
       const tk = step.aux1;
       const val = step.aux2;
+      const tpl = getCardV3Template(card?.id);
+      const sub = tpl ? ((tpl[19] >>> 8) & 0xff) : 0;
       if (tk === 1) {
-        if (val === 10) return `施放物品卡「${cName}」（從牌庫檢索 1 張基礎寶可夢加入手牌）`;
-        if (val === 11) return `施放支援者卡「${cName}」（重洗手牌並抽出與對手相同張數）`;
-        if (val === 12) return `施放訓練家卡「${cName}」（與牌庫交換寶可夢卡）`;
-        if (val === 13) return `施放支援者卡「${cName}」（檢索最多 2 張體力 50 以下的基礎寶可夢）`;
-        if (val === 14) return `施放支援者卡「${cName}」（雙方重洗手牌並抽回原張數）`;
-        if (val === 15) return `施放支援者卡「${cName}」（檢視牌庫上方並選擇 1 張加入手牌）`;
-        if (val === 16) return `施放支援者卡「${cName}」（從牌庫檢索 1 張 2 階進化寶可夢）`;
-        if (val === 17) return `施放支援者卡「${cName}」（從牌庫檢索最多 2 張指定進化卡加入手牌）`;
-        return `施放訓練家卡「${cName}」（從牌庫抽出 ${Math.max(1, Math.min(2, val))} 張卡牌）`;
+        if (sub === 2) return `施放物品卡「${cName}」（從牌庫檢索 1 張基礎寶可夢加入手牌）`;
+        if (sub === 3) return `施放支援者卡「${cName}」（重洗手牌並抽出與對手相同張數）`;
+        if (sub === 4) return `施放支援者卡「${cName}」（雙方重洗手牌並抽回原張數）`;
+        if (sub === 5) return `施放訓練家卡「${cName}」（與牌庫交換寶可夢卡）`;
+        if (sub === 6) return `施放支援者卡「${cName}」（檢索最多 2 張體力 50 以下的基礎寶可夢）`;
+        if (sub === 7) return `施放支援者卡「${cName}」（從牌庫檢索 1 張 2 階進化寶可夢）`;
+        if (sub === 8) return `施放支援者卡「${cName}」（從牌庫檢索 1 張超級進化寶可夢ex）`;
+        if (sub === 9) return `施放支援者卡「${cName}」（檢視牌庫上方並選擇 1 張加入手牌）`;
+        if (sub === 10 || sub === 11) return `施放訓練家卡「${cName}」（擲硬幣檢索物品／道具卡）`;
+        if (sub === 12) return `施放支援者卡「${cName}」（依場上超級進化數量抽卡）`;
+        if (sub === 13) return `施放訓練家卡「${cName}」（從牌庫檢索競技場卡加入手牌）`;
+        if (sub >= 14 && sub <= 19) return `施放訓練家卡「${cName}」（檢索指定卡牌加入手牌）`;
+        if (sub === 20) return `施放訓練家卡「${cName}」（從棄牌區回收寶可夢加入手牌）`;
+        if (sub === 21) return `施放物品卡「${cName}」（複製對手牌庫 1 張物品卡）`;
+        if (sub === 22) return `施放物品卡「${cName}」（將 2 張手牌洗回牌庫並抽 1 張卡）`;
+        return `施放訓練家卡「${cName}」（從牌庫抽出 ${Math.max(1, Math.min(3, val || 1))} 張卡牌）`;
       }
       if (tk === 2) {
-        const h = val & 0xff;
-        const cures = (val & 256) !== 0;
-        const full = (val & 4096) !== 0;
-        if (full) return `施放恢復卡「${cName}」（完全恢復戰鬥場體力並棄置全部能量）`;
-        if (h === 0 && cures) return `施放恢復卡「${cName}」（解除戰鬥場全部異常狀態）`;
-        return `施放恢復卡「${cName}」（恢復戰鬥場 ${h} 點體力${cures ? '並解除異常狀態' : ''}）`;
+        if (sub === 3) return `施放恢復卡「${cName}」（為所有附有水能量的寶可夢各恢復 40 點體力）`;
+        if (sub === 6) return `施放物品卡「${cName}」（解除戰鬥場全部異常狀態）`;
+        if (sub === 7) return `施放物品卡「${cName}」（恢復戰鬥場 10 點體力並解除異常狀態）`;
+        if (sub === 8) return `施放物品卡「${cName}」（恢復戰鬥場 20 點體力，正面時放回手牌）`;
+        if (sub === 9) return `施放物品卡「${cName}」（擲硬幣恢復戰鬥場 ${Math.max(0, val)} 點體力）`;
+        if (sub === 12) return `施放支援者卡「${cName}」（完全恢復體力並棄置全部能量）`;
+        if (sub === 15) return `施放物品卡「${cName}」（為伊布進化型恢復體力或強化招式傷害 +10）`;
+        if (sub === 16) return `施放支援者卡「${cName}」（將己方受傷點數最多 40 點轉移至對手戰鬥場）`;
+        const h = Math.max(10, val & 0xff);
+        return `施放恢復卡「${cName}」（恢復 ${h} 點體力${sub === 5 || sub === 13 ? '並解除異常狀態' : ''}）`;
       }
       if (tk === 3) {
-        if (val === 1) return `施放干擾卡「${cName}」（對手將戰鬥寶可夢與備戰互換）`;
-        if (val === 2) return `施放干擾卡「${cName}」（拉出對手受傷的備戰寶可夢至戰鬥場）`;
-        if (val === 3 || val === 15) return `施放干擾卡「${cName}」（指定對手備戰寶可夢換上戰鬥場）`;
-        if (val === 4) return `施放干擾卡「${cName}」（對手重洗手牌並改抽 3 張）`;
-        if (val === 5) return `施放干擾卡「${cName}」（對手重洗手牌並依剩餘所需分數抽牌）`;
-        if (val === 6) return `施放干擾卡「${cName}」（丟棄對手場上全部寶可夢道具）`;
-        if (val === 7) return `施放物品卡「${cName}」（移除場上道具或競技場）`;
-        if (val === 8 || val === 14) return `施放干擾卡「${cName}」（破壞對手戰鬥寶可夢身上的能量）`;
-        if (val === 9) return `施放支援者卡「${cName}」（將己方戰鬥寶可夢收回手牌並替補上場）`;
-        if (val === 10) return `施放物品卡「${cName}」（驅離對手戰鬥場的基礎寶可夢）`;
-        if (val === 11) return `施放物品卡「${cName}」（壓縮對手手牌至 4 張）`;
-        if (val === 12) return `施放支援者卡「${cName}」（將對手 1 張支援者放回牌庫）`;
+        if (sub === 1) return `施放干擾卡「${cName}」（對手將戰鬥寶可夢與備戰互換）`;
+        if (sub === 2) return `施放干擾卡「${cName}」（拉出對手受傷的備戰寶可夢至戰鬥場）`;
+        if (sub === 3) return `施放干擾卡「${cName}」（指定對手備戰寶可夢換上戰鬥場）`;
+        if (sub === 4) return `施放物品卡「${cName}」（驅離對手戰鬥場的基礎寶可夢）`;
+        if (sub === 5) return `施放干擾卡「${cName}」（對手重洗手牌並改抽 3 張）`;
+        if (sub === 6) return `施放干擾卡「${cName}」（對手重洗手牌並依剩餘所需分數抽牌）`;
+        if (sub === 7) return `施放物品卡「${cName}」（壓縮對手手牌至 4 張）`;
+        if (sub === 8) return `施放支援者卡「${cName}」（將對手手牌 1 張支援者放回牌庫）`;
+        if (sub === 9) return `施放干擾卡「${cName}」（將對手隨機 1 張手牌放回牌庫）`;
+        if (sub === 10) return `施放干擾卡「${cName}」（丟棄場上寶可夢道具）`;
+        if (sub === 11) return `施放物品卡「${cName}」（移除場上道具或競技場）`;
+        if (sub === 12 || sub === 13 || sub === 14) return `施放干擾卡「${cName}」（破壞對手寶可夢能量）`;
+        if (sub === 15) return `施放干擾卡「${cName}」（令戰鬥寶可夢混亂）`;
+        if (sub === 16) return `施放物品卡「${cName}」（增加對手撤退費用）`;
+        if (sub === 17 || sub === 18) return `施放干擾卡「${cName}」（強制將對手基礎寶可夢放上備戰區）`;
+        if (sub === 19) return `施放干擾卡「${cName}」（移動對手能量至戰鬥場）`;
+        if (sub === 20) return `施放支援者卡「${cName}」（將己方戰鬥寶可夢收回並替補上場）`;
         return `施放干擾卡「${cName}」`;
       }
       if (tk === 4) {
-        if ((val & 1024) !== 0) return `施放支援者卡「${cName}」（本回合下一次擲硬幣必定正面）`;
-        if ((val & 512) !== 0) return `施放防禦卡「${cName}」（下回合己方受到招式傷害 -${val & 0xff}）`;
-        const vsEx = (val & 256) !== 0;
-        return `施放增傷卡「${cName}」（本回合${vsEx ? '對寶可夢ex' : ''}招式傷害 +${val & 0xff}）`;
+        if (sub === 10) return `施放支援者卡「${cName}」（本回合下一次擲硬幣必定正面）`;
+        if (sub === 11) return `施放支援者卡「${cName}」（本回合擊倒對手戰鬥寶可夢額外多拿 1 分）`;
+        if (sub === 12) return `施放支援者卡「${cName}」（下回合若被擊倒以剩餘 10 體力存活）`;
+        if (sub === 13) return `施放支援者卡「${cName}」（龍星群額外增加命中次數）`;
+        if (sub >= 6 && sub <= 9) return `施放防禦卡「${cName}」（下回合受到招式傷害 -${val || 20}）`;
+        if (sub === 2 || sub === 3) return `施放增傷卡「${cName}」（本回合對寶可夢ex 招式傷害 +${val || 20}）`;
+        return `施放增傷卡「${cName}」（本回合招式傷害 +${val || 10}）`;
       }
       if (tk === 5) {
         const toolDesc = {
           1: '最大體力 +20',
-          2: '最大體力 +30',
-          3: '受擊反彈 20 點傷害',
-          4: '受擊令攻擊者中毒',
-          5: '基礎寶可夢撤退費用 -1',
-          6: '基礎寶可夢受招式傷害 -20',
-          7: '昏厥時補牌至 5 張',
-          8: '回合結束對對手造成 10 點傷害',
-          9: '招式傷害 +20',
-          10: '受招式傷害 -10 並防禦異常狀態',
-          11: '撤退費用 -1'
+          2: '草屬性最大體力 +30',
+          3: '1 階進化最大體力 +30',
+          4: '古代寶可夢最大體力 +40',
+          5: '受擊反彈 20 點傷害',
+          6: '受擊令攻擊者中毒',
+          7: '基礎寶可夢撤退費用 -1',
+          8: '水屬性撤退費用 -1',
+          9: '2 階進化撤退費用 -2',
+          10: '基礎寶可夢受招式傷害 -20',
+          11: '高撤退費用寶可夢受傷害 -20',
+          12: '鋼屬性受傷害 -10 並防禦異常狀態',
+          13: '鋼屬性下回合受傷害 -50',
+          14: '備戰區免疫對手招式與特性傷害',
+          15: '防禦對手招式附加效果',
+          16: '未來寶可夢招式傷害 +20',
+          17: '皮卡丘ex 招式傷害 +30',
+          18: '究極異獸依已得分數提升傷害',
+          19: '惡屬性回合結束對對手造成 10 點傷害',
+          20: '回合結束恢復 10 點體力',
+          21: '體力低於一半時恢復 30 點體力',
+          22: '自動解除異常狀態',
+          23: '昏厥時補牌至 5 張',
+          24: '擊倒對手時抽 1 張卡',
+          25: '昏厥時轉移最多 2 顆雷能量至備戰區',
+          26: '受擊時令對手隨機洗回 1 張手牌',
+          27: '昏厥時將寶可夢收回手牌'
         };
         return `裝備寶可夢道具「${cName}」（${toolDesc[val] || '裝備生效'}）`;
       }
       if (tk === 6) {
-        if (val === 99) return `施放「${cName}」（基礎寶可夢跳過 1 階直接進化為 2 階）`;
-        if (val === 1) return `施放「${cName}」（本回合撤退費用 -1）`;
-        if (val === 12) return `施放支援者卡「${cName}」（本回合撤退費用 -2）`;
-        if (val === 13) return `施放支援者卡「${cName}」（免費將戰鬥寶可夢與備戰互換）`;
-        if (val === 6) return `施放支援者卡「${cName}」（將備戰區能量集中至戰鬥場）`;
-        if (val === 7) return `施放物品卡「${cName}」（直接從牌庫進化寶可夢）`;
-        if (val >= 500) return `施放支援者卡「${cName}」（擲硬幣獲得 ${val - 500} 顆能量）`;
-        return `施放充能卡「${cName}」（額外補充 1 顆能量）`;
+        if (sub === 1) return `施放「${cName}」（基礎寶可夢跳過 1 階直接進化為 2 階）`;
+        if (sub === 2) return `施放「${cName}」（直接從牌庫進化寶可夢）`;
+        if (sub === 3) return `施放「${cName}」（本回合撤退費用 -${val || 1}）`;
+        if (sub === 4) return `施放支援者卡「${cName}」（免費將戰鬥寶可夢與備戰互換）`;
+        if (sub === 5) return `施放支援者卡「${cName}」（擲硬幣獲得 ${Math.max(0, val)} 顆水能量）`;
+        if (sub === 13) return `施放支援者卡「${cName}」（附著 2 顆火能量並結束回合）`;
+        if (sub === 14 || sub === 15) return `施放「${cName}」（將備戰區能量轉移至戰鬥場）`;
+        if (sub === 16) return `施放支援者卡「${cName}」（本回合指定寶可夢招式能耗 -2）`;
+        return `施放充能卡「${cName}」（額外補充能量）`;
       }
       if (tk === 7) {
         const stadDesc = {
           1: '可重抽能量區能量',
           2: '雙方 1 階進化招式傷害 +10',
           3: '雙方基礎寶可夢最大體力 +20',
-          4: '雙方撤退費用 -2',
-          5: '雙方每回合額外檢索 1 張卡',
-          6: '雙方對寶可夢ex 招式傷害 +20',
-          7: '雙方回合結束恢復 20 點體力'
+          4: '雙方無色寶可夢撤退費用 -2',
+          5: '雙方鬥屬性對寶可夢ex 傷害 +20',
+          6: '非超級進化弱點傷害改為 2 倍',
+          7: '雙方回合結束為附有能量的寶可夢恢復 20 點體力',
+          8: '雙方回合結束手牌補至 3 張',
+          9: '雙方每回合額外檢索 1 張寶可夢',
+          10: '雙方每回合額外檢索 1 張基礎草寶可夢',
+          11: '超能量附著時強化效果',
+          12: '雙方手牌與檢索場地生效',
+          13: '場地效果生效',
+          14: '場地效果生效'
         };
         return `展開競技場卡「${cName}」（${stadDesc[val] || '場地生效'}）`;
       }
@@ -1519,22 +1570,29 @@ function formatFastSimStepZh(step, myCards20, oppCards20) {
       const abVal = (step.aux2 >> 8) & 0xff;
       let det = '';
       if (abOp === 2) det = '（檢索 1 張寶可夢加入手牌）';
-      else if (abOp === 3) det = abVal === 3 ? '（自身充能 2 顆並承受 30 點傷害）' : '（為自身額外充能 1 顆）';
-      else if (abOp === 4) det = '（為戰鬥場額外充能 1 顆）';
+      else if (abOp === 3) {
+        if (abVal === 4) det = '（為自身額外充能 1 顆並結束回合）';
+        else if (abVal === 3) det = '（自身充能 2 顆並承受 30 點傷害）';
+        else if (abVal === 2) det = '（自身充能 1 顆並承受 20 點傷害）';
+        else det = '（為自身額外充能 1 顆）';
+      } else if (abOp === 4) det = '（為戰鬥場額外充能 1 顆）';
       else if (abOp === 6) det = `（換上戰鬥場並吸收場上 ${abVal} 顆能量）`;
       else if (abOp === 7) det = '（強制對手更換戰鬥寶可夢）';
       else if (abOp === 8) det = `（狙擊對手寶可夢造成 ${abVal} 點傷害）`;
       else if (abOp === 9) det = `（附能觸發，對對手戰鬥場造成 ${abVal} 點傷害）`;
-      else if (abOp === 15) det = `（為戰鬥場恢復 ${abVal} 點體力）`;
-      else if (abOp === 17) det = '（免費與備戰寶可夢互換）';
-      else if (abOp === 20) {
-        if (abVal === 1 || abVal === 2 || abVal === 3) det = '（強制替換對手戰鬥寶可夢）';
-        else if (abVal === 4) det = '（從牌庫檢索 1 張寶可夢）';
-        else if (abVal === 5 || abVal === 8) det = '（令對手戰鬥寶可夢中毒）';
-        else if (abVal === 6) det = '（令對手戰鬥寶可夢灼傷）';
-        else if (abVal === 7) det = '（令對手戰鬥寶可夢睡眠）';
-        else if (abVal === 9) det = '（令對手戰鬥寶可夢混亂）';
-        else if (abVal === 10) det = '（棄置對手牌庫頂 1 張卡）';
+      else if (abOp === 12) det = '（棄置 1 顆能量，本回合招式傷害 +50）';
+      else if (abOp === 14 || abOp === 15) det = `（恢復 ${abVal || 20} 點體力）`;
+      else if (abOp === 16) det = (abVal >= 2 && abVal <= 4) ? '（轉移場上能量）' : '（免費與備戰寶可夢互換）';
+      else if (abOp === 19) {
+        if (abVal >= 1 && abVal <= 5) det = '（強制替換對手戰鬥寶可夢）';
+        else if (abVal >= 6 && abVal <= 10 || abVal === 19) det = '（補充手牌／檢索卡牌）';
+        else if (abVal === 11 || abVal === 14) det = '（令對手戰鬥寶可夢中毒）';
+        else if (abVal === 12) det = '（令對手戰鬥寶可夢灼傷）';
+        else if (abVal === 13) det = '（令對手戰鬥寶可夢睡眠）';
+        else if (abVal === 15) det = '（令對手戰鬥寶可夢混亂）';
+        else if (abVal === 16) det = '（令對手戰鬥寶可夢陷入異常狀態）';
+        else if (abVal === 17) det = '（棄置對手牌庫頂 1 張卡）';
+        else if (abVal === 18) det = '（破壞對手戰鬥場寶可夢道具）';
       } else if (abOp === 22) det = `（電磁牆觸發，對附能目標造成 ${abVal} 點傷害）`;
       return `發動${slotLabelZh(step.aux1)}「${cName}」的特性${abName}${det}`;
     }
@@ -1624,18 +1682,23 @@ function formatFastBoardSide(side, deckCards20) {
   const card = deckCards20[side.cardIdx];
   const name = card?.name || '寶可夢';
   const toolId = side.tool & 0xff;
-  const stMask = (side.tool >> 8) & 0x3f;
+  const stMask = (side.tool >> 8) & 0xff;
   const toolNames = {
-    1: '大斗篷', 2: '葉子斗篷', 3: '凹凸頭盔', 4: '毒針', 5: '小氣球',
-    6: '進化奇石', 7: '幸運蛋', 8: '耍詐針', 9: '驅勁未來', 10: '鋼鐵圍裙', 11: '水上小艇'
+    1: '大斗篷', 2: '葉子斗篷', 3: '優雅斗篷', 4: '驅勁古代',
+    5: '凹凸頭盔', 6: '毒針', 7: '小氣球', 8: '水上小艇', 9: '充氣浮圈',
+    10: '進化奇石', 11: '重磅頭盔', 12: '鋼鐵圍裙', 13: '金屬核心護盾',
+    14: '防護斗篷', 15: '淨化面紗', 16: '驅勁未來', 17: '電氣球',
+    18: '異獸結晶', 19: '耍詐針', 20: '吃剩的東西', 21: '文柚果',
+    22: '木子果', 23: '幸運蛋', 24: '幸運連指手套', 25: '導電線',
+    26: '暗黑吊墜', 27: '救援圍巾'
   };
   const toolTag = toolNames[toolId] ? `·${toolNames[toolId]}` : '';
   const stList = [];
-  if (stMask & 3) stList.push('中毒');
-  if (stMask & 4) stList.push('灼傷');
-  if (stMask & 8) stList.push('睡眠');
-  if (stMask & 16) stList.push('麻痺');
-  if (stMask & 32) stList.push('混亂');
+  if (stMask & 0x43) stList.push('中毒');
+  if (stMask & 0x04) stList.push('灼傷');
+  if (stMask & 0x88) stList.push('睡眠');
+  if (stMask & 0x10) stList.push('麻痺');
+  if (stMask & 0x20) stList.push('混亂');
   const stTag = stList.length ? `·${stList.join('/')}` : '';
   return `<b>${esc(name)}</b>（體力 ${side.hp}/${side.maxHp} · ${side.energy}能${toolTag}${stTag} · 備戰 ${side.bench} 隻 · 手牌 ${side.hand} 張 · 牌庫 ${side.deck} 張）`;
 }

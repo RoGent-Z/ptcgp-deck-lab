@@ -7,7 +7,7 @@ import {
   mergeVaultSnapshots,
   pushRemoteVault
 } from './cloud.mjs';
-import { getPokemonCategories, getPokemonCategorySearchTerms, normalizeFeaturedPokemon, normalizeSearch, parsePairwiseBinary, readDeckFile } from './core.mjs';
+import { getPokemonCategories, getPokemonCategorySearchTerms, normalizeFeaturedPokemon, normalizeSearch, parsePairwiseBinary, readDeckFile, setCardMechanicsDb } from './core.mjs';
 import { all, get, put, remove } from './storage.mjs';
 
 export const isFixtureMode = () => (typeof location !== 'undefined' ? new URLSearchParams(location.search).get('fixture') === '1' : false);
@@ -46,6 +46,7 @@ export const state = {
   modelManifest: null,
   modelsById: new Map(),
   cardPriors: null,
+  cardMechanics: null,
   strategyIndex: null,
   strategyLexicon: null,
   pairwiseStrategies: null,
@@ -162,7 +163,7 @@ function indexMetaEntries(meta, foldMap) {
 export async function loadInitialData(forceRefresh = false) {
   const prevHash = state.meta?.hash;
 
-  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, cardPriorsData, strategyIndexData, top10EliteData, spritesData] = await Promise.all([
+  const [fold, metaTop, cardsData, catalogData, modelManifestData, fallbackModelData, cardPriorsData, strategyIndexData, top10EliteData, spritesData, cardMechanicsData] = await Promise.all([
     Object.keys(state.foldMap).length
       ? Promise.resolve(state.foldMap)
       : fetchJsonOptional('assets/han-fold.json').catch(() => ({})),
@@ -176,12 +177,15 @@ export async function loadInitialData(forceRefresh = false) {
     fetchJsonOptional('battle/models/card-priors.json', forceRefresh).catch(() => null),
     fetchJsonOptional('battle/strategies/index.json', forceRefresh).catch(() => null),
     fetchJsonOptional('battle/models/top10-elite.json', forceRefresh).catch(() => null),
-    fetchJsonOptional('data/sprites.json', forceRefresh).catch(() => null)
+    fetchJsonOptional('data/sprites.json', forceRefresh).catch(() => null),
+    fetchJsonOptional('data/card-mechanics.json', forceRefresh).catch(() => null)
   ]);
 
   state.foldMap = fold || {};
   state.spriteMap = spritesData?.byNameEn || {};
   state.cardPriors = cardPriorsData || null;
+  state.cardMechanics = cardMechanicsData || null;
+  setCardMechanicsDb(state.cardMechanics);
   state.strategyIndex = strategyIndexData || null;
   state.top10Elite = top10EliteData || null;
   state.lastCheckedAt = new Date().toISOString();

@@ -633,6 +633,65 @@ const FASTSIM_TYPE_CODES = {
   fighting: 5, darkness: 6, metal: 7, dragon: 8, colorless: 9
 };
 
+let CARD_MECHANICS_DB = null;
+
+export function setCardMechanicsDb(db) {
+  CARD_MECHANICS_DB = db && db.cards && Array.isArray(db.templates) ? db : null;
+}
+
+export function getCardMechanicsDb() {
+  return CARD_MECHANICS_DB;
+}
+
+export function getCardV3Template(cardId) {
+  if (!CARD_MECHANICS_DB || !cardId) return null;
+  const idx = CARD_MECHANICS_DB.cards[cardId];
+  return idx != null ? CARD_MECHANICS_DB.templates[idx] : null;
+}
+
+function estAtkPowerV3(dmg, op1, val1) {
+  let d = dmg | 0;
+  const b0 = val1 & 0xff;
+  const b1 = (val1 >> 8) & 0xff;
+  const b2 = (val1 >> 16) & 0xff;
+  if (op1 === 3) {
+    d = b0 === 3 ? d + Math.floor(b1 / 2) : b0 === 4 ? 35 : Math.floor(d / 2);
+  } else if (op1 === 4) {
+    if (b2 & 32) d += Math.floor((b1 * 3) / 2);
+    else if (b2 & 8) d = b1 * 2;
+    else if (b2 & 6) d = Math.floor((b1 * 3) / 2);
+    else d = b0 === 99 ? b1 : Math.floor((b1 * b0) / 2);
+  } else if (op1 === 5) {
+    if (b0 === 97) d += 45;
+    else if (b0 === 98) d += Math.floor(b1 / 4);
+    else if (b0 === 99) d += b1;
+    else if (b2 === 2 || b2 === 3) d += b1 * 2;
+    else d += Math.floor((b1 * b0) / 2);
+  } else if (op1 === 6) {
+    if (b0 === 26) d = b1 * 3;
+    else if (b0 === 31 || b0 === 32) d += 50;
+    else if (b0 === 33) d = Math.max(20, d - 30);
+    else if (b0 === 2 || b0 === 5) d += b1 * 4;
+    else d += b1 * 2;
+  } else if (op1 === 7) {
+    if (b0 === 3) d = Math.max(20, d - Math.floor(b1 / 3));
+    else d += Math.floor(b1 / 2);
+  } else if (op1 === 8) {
+    if (b0 === 2 || b0 === 3 || b0 === 4) d = b1;
+    else if (b0 === 6) d = b1 * 3;
+    else if (b0 === 8) d = b1 * (b2 === 99 ? 3 : Math.max(1, b2));
+    else if (b0 === 10) d = Math.floor((b1 * Math.max(1, b2)) / 2);
+    else if (b0 === 11 || b0 === 14) d = b1 * 2;
+    else if (b0 === 12) d = b2 === 1 ? 140 : b1;
+    else d += Math.floor(b1 / 2);
+  } else if (op1 === 19) {
+    if (b0 === 8) d += b1;
+  } else if (op1 === 20) {
+    d = b0 === 1 ? 150 : b0 === 6 ? 80 : 60;
+  }
+  return d;
+}
+
 const EVO_FAMILY_MAP_CACHE = new WeakMap();
 
 function normEvoKey(name) {
@@ -1373,6 +1432,83 @@ export function encodeCardForFastSim(card, strategyBonus = 0, cardsById = null) 
       abOp: 0, abVal: 0,
       atkCost: 1, atkDmg: 20, atkFlags: 0, abFlags: 0,
       trainerKind: 0, effectVal: 0, strategyBonus: Number(strategyBonus || 0)
+    };
+  }
+  const v3Tpl = getCardV3Template(card.id);
+  if (v3Tpl) {
+    const isPokemon = v3Tpl[0] | 0;
+    const m = v3Tpl[1] | 0;
+    const stage = m & 0xff;
+    const evoGroup = (m >>> 8) & 0xffff;
+    const metaHi = (m >>> 24) & 0xff;
+    const isSupporter = (metaHi & 1) ? 1 : 0;
+    const isItem = (metaHi & 2) ? 1 : 0;
+    const isFossil = (metaHi & 4) ? 1 : 0;
+    const typeCode = v3Tpl[3] & 0xff;
+    const weakCode = v3Tpl[4] & 0xff;
+    const hp = v3Tpl[5] | 0;
+    const retreat = v3Tpl[6] & 0xff;
+    const prize = Math.max(1, (v3Tpl[6] >>> 8) & 0xff);
+    const a1Cost = v3Tpl[7] & 0xff;
+    const a1Dmg = v3Tpl[8] | 0;
+    const a1Op1 = v3Tpl[9] & 0xff;
+    const a1Op2 = (v3Tpl[9] >>> 8) & 0xff;
+    const a1Val1 = v3Tpl[10] | 0;
+    const a1Val2 = v3Tpl[11] | 0;
+    const a2Cost = v3Tpl[12] & 0xff;
+    const a2Dmg = v3Tpl[13] | 0;
+    const a2Op1 = v3Tpl[14] & 0xff;
+    const a2Op2 = (v3Tpl[14] >>> 8) & 0xff;
+    const a2Val1 = v3Tpl[15] | 0;
+    const a2Val2 = v3Tpl[16] | 0;
+    const abOp = v3Tpl[17] & 0xff;
+    const abVal = v3Tpl[18] | 0;
+    const trainerKind = v3Tpl[19] & 0xff;
+    const trainerSub = (v3Tpl[19] >>> 8) & 0xff;
+    const effectVal = v3Tpl[20] | 0;
+
+    const p1 = a1Cost !== 255 ? estAtkPowerV3(a1Dmg, a1Op1, a1Val1) : 0;
+    const p2 = a2Cost !== 255 ? estAtkPowerV3(a2Dmg, a2Op1, a2Val1) : 0;
+    const pick2 = a2Cost !== 255 && (p2 > p1 || (p2 === p1 && a2Cost < a1Cost));
+    const bestCost = pick2 ? a2Cost : a1Cost;
+    const bestDmg = pick2 ? p2 : p1;
+    const bestOp1 = pick2 ? a2Op1 : a1Op1;
+    const bestOp2 = pick2 ? a2Op2 : a1Op2;
+    const bestVal1 = pick2 ? a2Val1 : a1Val1;
+    const bestVal2 = pick2 ? a2Val2 : a1Val2;
+
+    let atkFlags = 0;
+    if (bestOp1 !== 0 || bestOp2 !== 0) atkFlags |= 1;
+    if (bestOp1 === 8 || bestOp2 === 8) atkFlags |= 2;
+    if (bestOp1 === 1 || bestOp2 === 1) atkFlags |= 4;
+    if (bestOp1 === 12 || bestOp2 === 12) atkFlags |= 8;
+    if (bestOp1 === 13 || bestOp2 === 13) atkFlags |= 16;
+    if ((bestOp1 === 9 && (bestVal1 & 0xff) >= 40) || (bestOp2 === 9 && (bestVal2 & 0xff) >= 40)) atkFlags |= 32;
+    if ((bestOp1 === 10 && (bestVal1 & 0xff) >= 2) || (bestOp2 === 10 && (bestVal2 & 0xff) >= 2)) atkFlags |= 128;
+    else if (bestOp1 === 10 || bestOp2 === 10) atkFlags |= 64;
+
+    let abFlags = 0;
+    if (abOp !== 0) abFlags |= 1;
+    if (abOp === 1 || abOp === 2) abFlags |= 2;
+    if (abOp === 3 || abOp === 4 || abOp === 6) abFlags |= 4;
+    if (abOp === 14) abFlags |= 8;
+    if (abOp === 7 || abOp === 8 || abOp === 9) abFlags |= 16;
+    if (abOp === 5) abFlags |= 32;
+    if (abOp === 10) abFlags |= 64;
+
+    return {
+      isPokemon, stage, evoGroup,
+      isSupporter, isItem, isFossil,
+      typeCode, weakCode, hp, retreat, prize,
+      a1Cost, a1Dmg, a1Op: a1Op1, a1Val: a1Val1, a1Op1, a1Op2, a1Val1, a1Val2,
+      a2Cost, a2Dmg, a2Op: a2Op1, a2Val: a2Val1, a2Op1, a2Op2, a2Val1, a2Val2,
+      abOp, abVal,
+      atkCost: Math.max(1, bestCost === 255 ? 1 : bestCost),
+      atkDmg: bestDmg,
+      atkFlags, abFlags,
+      trainerKind, trainerSub, effectVal,
+      v3Tpl,
+      strategyBonus: Number(strategyBonus || 0)
     };
   }
   const name = `${card.name || ''} ${card.nameEn || ''}`;
